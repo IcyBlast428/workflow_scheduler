@@ -1,0 +1,26 @@
+[Unit]
+Description=Workflow Scheduler
+Requires=wfs-scheduler.service
+After=network-online.target wfs-scheduler.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sysadmin
+Group=sysadmin
+Environment="FLASK_ENV=production"
+Environment="WFS_ENABLE_SCHEDULER=false"
+Environment="WFS_SCHEDULER_CONTROL_URL=http://127.0.0.1:8009"
+Environment="PYTHONPATH=/data/wfs"
+Environment="LD_LIBRARY_PATH=/opt/oraclient"
+Environment="JAVA_HOME=/usr/openjdk/jdk8u322-b06"
+WorkingDirectory=/data/wfs
+ExecStart=/home/sysadmin/anaconda3/envs/wfs/bin/gunicorn --workers 2 --bind 0.0.0.0:8008 --access-logfile - --error-logfile - run:app
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=workflow-scheduler
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
