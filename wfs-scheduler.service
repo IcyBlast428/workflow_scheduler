@@ -5,15 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=sysadmin
-Group=sysadmin
-Environment="FLASK_ENV=production"
+User=root
+Group=root
+Environment="WFS_ENV=production"
 Environment="WFS_ENABLE_SCHEDULER=true"
 Environment="PYTHONPATH=/data/wfs"
-Environment="LD_LIBRARY_PATH=/opt/oraclient"
-Environment="JAVA_HOME=/usr/openjdk/jdk8u322-b06"
+Environment="ODBCSYSINI=/data/wfs/app/config/driver/dws_odbc/etc"
+Environment="ODBCINI=/data/wfs/app/config/driver/dws_odbc/etc/odbc.ini"
 WorkingDirectory=/data/wfs
-ExecStart=/home/sysadmin/anaconda3/envs/wfs/bin/gunicorn --workers 1 --bind 127.0.0.1:8009 --access-logfile - --error-logfile - run:app
+ExecStart=/data/wfs/.venv/bin/gunicorn --workers 1 --bind 127.0.0.1:8009 --access-logfile - --error-logfile - run:app
 Restart=on-failure
 RestartSec=5
 SyslogIdentifier=workflow-scheduler-control

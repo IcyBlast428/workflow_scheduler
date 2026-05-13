@@ -324,7 +324,7 @@ def _proxy_scheduler_events():
 
     def generate():
         try:
-            with requests.get(url, headers=headers, params=params, stream=True, timeout=(5, 60)) as response:
+            with requests.get(url, headers=headers, params=params, stream=True, timeout=(5, 300)) as response:
                 response.raise_for_status()
                 for chunk in response.iter_content(chunk_size=1024, decode_unicode=True):
                     if chunk:
