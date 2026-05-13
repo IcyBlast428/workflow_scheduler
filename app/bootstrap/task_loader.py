@@ -2,8 +2,6 @@ import json
 import re
 from pathlib import Path
 
-from configobj import ConfigObj
-
 from app.bootstrap.global_vars import TASK_DIR
 
 
@@ -91,17 +89,6 @@ def iter_task_directories(task_root=TASK_DIR):
             yield group_dir.name, task_dir.name, task_dir
 
 
-def _legacy_config(task_dir):
-    config_path = Path(task_dir) / 'config.ini'
-    if not config_path.is_file():
-        return {}, None
-    try:
-        config_base = ConfigObj(str(config_path), encoding='utf-8')
-        return dict(config_base.get('base') or {}), config_base
-    except Exception:
-        return {}, None
-
-
 def _load_task_config_records():
     try:
         from app.bootstrap.database import GaussDB
@@ -166,29 +153,21 @@ def _apply_record(spec, record):
 
 def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, records_by_folder=None):
     task_dir = Path(task_dir)
-    legacy, config_base = _legacy_config(task_dir)
     inferred_main_file = infer_main_file(task_dir)
-    legacy_pid = (legacy.get('PID') or '').strip()
-    pid = legacy_pid or folder_name
-    error = None
-    try:
-        max_instances = _as_int(legacy.get('MAX_INSTANCES'), default=1, minimum=1)
-        timeout_seconds = _as_int(legacy.get('TIMEOUT_SECONDS'), default=0, minimum=0)
-    except Exception as exc:
-        max_instances = 1
-        timeout_seconds = 0
-        error = str(exc)
+    pid = folder_name
+    max_instances = 1
+    timeout_seconds = 0
 
     spec = {
         'group_name': group_name,
         'folder_name': folder_name,
         'task_dir': task_dir,
         'dir_name': '/{}/{}'.format(group_name, folder_name),
-        'config_path': task_dir / 'config.ini',
-        'config_base': config_base,
-        'config': legacy,
+        'config_path': None,
+        'config_base': None,
+        'config': {},
         'pid': pid,
-        'task_name': (legacy.get('NAME') or folder_name).strip() or folder_name,
+        'task_name': folder_name,
         'raw_start': 'false',
         'start_enabled': False,
         'trigger': '',
@@ -200,10 +179,10 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
         'schedule_enabled': False,
         'max_instances': max_instances,
         'timeout_seconds': timeout_seconds,
-        'main_file': (legacy.get('MAIN_FILE') or inferred_main_file or '').strip(),
+        'main_file': (inferred_main_file or '').strip(),
         'main_file_path': None,
         'main_file_options': list_python_entry_files(task_dir),
-        'error': error,
+        'error': None,
         'main_file_error': '',
         'config_record': None,
     }

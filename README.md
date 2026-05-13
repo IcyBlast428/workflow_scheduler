@@ -1,6 +1,6 @@
 # Workflow Scheduler
 
-Workflow Scheduler 是一个基于 `Flask + APScheduler + Vue 3` 的内网定时任务调度平台。后端负责扫描 `app/jobs/<group>/<task>/config.ini` 并注册任务，前端负责登录、总览看板、任务控制、日志查询和代码更新。
+Workflow Scheduler 是一个基于 `Flask + APScheduler + Vue 3` 的内网定时任务调度平台。后端负责扫描 `app/jobs/<group>/<task>/` 下的任务代码，前端负责登录、总览看板、任务配置、调度策略、任务控制、日志查询和代码更新。
 
 生产环境推荐拆成两个进程：
 
@@ -72,7 +72,7 @@ Linux 本地也可以使用：
 
 ## Linux 部署
 
-默认部署路径按 systemd 文件配置为 `/data/wfs`，运行用户为 `sysadmin`，Python 环境为 `/home/sysadmin/anaconda3/envs/wfs/bin/gunicorn`。如果服务器路径、用户或 Python 环境不同，请先修改 `wfs.service` 和 `wfs-scheduler.service` 中的 `User`、`Group`、`WorkingDirectory`、`PYTHONPATH`、`LD_LIBRARY_PATH`、`JAVA_HOME` 和 `ExecStart`。
+默认部署路径按 systemd 文件配置为 `/data/wfs`，Python 环境为 `/data/wfs/.venv/bin/gunicorn`。如果服务器路径、运行用户或 Python 环境不同，请先修改 `wfs.service` 和 `wfs-scheduler.service` 中的 `User`、`Group`、`WorkingDirectory`、`PYTHONPATH`、ODBC 环境变量和 `ExecStart`。
 
 部署步骤：
 
@@ -116,17 +116,19 @@ sudo systemctl restart wfs
 ```text
 Environment="WFS_ENABLE_SCHEDULER=false"
 Environment="WFS_SCHEDULER_CONTROL_URL=http://127.0.0.1:8009"
-ExecStart=... gunicorn --workers 2 --bind 0.0.0.0:8008 ... run:app
+ExecStart=... gunicorn --workers 2 --worker-class gthread --threads 8 --timeout 120 --keep-alive 75 --bind 0.0.0.0:8008 ... run:app
 ```
 
 `wfs-scheduler.service` 是 Scheduler 控制进程：
 
 ```text
 Environment="WFS_ENABLE_SCHEDULER=true"
-ExecStart=... gunicorn --workers 1 --bind 127.0.0.1:8009 ... run:app
+ExecStart=... gunicorn --workers 1 --worker-class gthread --threads 8 --timeout 120 --keep-alive 75 --bind 127.0.0.1:8009 ... run:app
 ```
 
 Scheduler 必须保持单 worker，否则同一批任务可能被重复注册和重复执行。Web 进程可以多 worker，并通过 `WFS_SCHEDULER_CONTROL_URL` 将任务启停、手动触发、全量重载等控制操作转发给 Scheduler。
+
+实时状态接口 `/api/taskinfo/events` 使用 SSE 长连接。systemd 服务里使用 `gthread` worker 是为了让 Gunicorn 可以长期保持事件流连接，同时继续处理普通 API 请求；如果前面还套了 Nginx，需要对该路径关闭代理缓冲，例如 `proxy_buffering off`。
 
 ## 配置
 
@@ -167,7 +169,6 @@ WFS_SCHEDULER_CONTROL_URL=http://127.0.0.1:8009
 
 ```text
 app/jobs/<group>/<task>/
-├── config.ini
 ├── main.py
 ├── README.md              # 推荐：任务说明、负责人、运行手册
 └── requirements.txt       # 可选：该任务或任务组的额外依赖
@@ -176,52 +177,35 @@ app/jobs/<group>/<task>/
 目录命名规范：
 
 - `<group>` 表示业务域或系统域，例如 `billing`、`databaseSync`、`opsReport`。
-- `<task>` 表示 Task 名，也是前端任务列表中的 “Task 名”。建议与 `PID` 保持一致。
-- `PID` 是调度器和数据库统计表里的全局唯一任务 ID，只允许字母、数字、下划线和中划线。
+- `<task>` 表示 Task 名，也是默认 `PID`，例如目录 `app/jobs/billing/monthly_report/` 的默认 PID 就是 `monthly_report`。
+- `PID` 是调度器和数据库统计表里的全局唯一任务 ID，只允许字母、数字、下划线和中划线。第三阶段开始不再从 `config.ini` 读取 PID，推荐直接用 `<task>` 目录名作为稳定 ID。
 - `PID` 不能重复。平台扫描时会校验所有任务；只要发现重复，冲突任务都会显示为配置错误，调度器不会注册。
-- `NAME` 是展示名称，可以使用中文；`PID` 和 `<task>` 建议使用稳定英文标识，避免后续改名影响检索。
-- 新增任务后先执行“重扫新增”，确认组名、Task 名、PID 和配置状态都正确，再启用生产调度。
+- `task_name`、入口文件、最大并发、超时秒数、是否启用自动调度和调度策略都在前端“配置”弹窗维护，并保存到 `wfs_task_config`。
+- 新增任务后先执行“重扫新增”，确认组名、Task 名、PID 和入口文件都正确，再在前端保存调度策略。未保存调度策略的任务会保持停止状态，但仍然允许手动触发一次。
 
-最小配置示例：
+任务目录不再需要 `config.ini`。如果目录中还保留旧版 `config.ini`，平台不会再把它作为调度来源；后续请以 `wfs_task_config` 和前端配置为准。
 
-```ini
-[base]
-START = true
-MAIN_FILE = main.py
-PID = demo_task
-NAME = 示例任务
-MAX_INSTANCES = 1
-TIMEOUT_SECONDS = 300
-TRIGGER = interval
+任务发现和入口文件规则：
 
-[interval]
-SECONDS = 60
-```
+- 平台扫描 `app/jobs/<group>/<task>/`，默认使用 `<task>` 作为 PID。
+- 如果目录里有 `main.py`，默认作为入口文件；如果只有一个 `.py` 文件，会自动作为入口候选。
+- 如果入口文件缺失或不明确，任务会显示为配置异常，需要在前端配置里选择或填写入口文件。
+- 未配置调度策略的任务不会被 APScheduler 自动注册，但“触发”按钮仍可立即执行一次，用于调试和上线前验证。
 
-字段说明：
-
-- `START`：是否随调度器加载自动启用。
-- `MAIN_FILE`：任务入口文件，必须位于任务目录内。
-- `PID`：任务唯一 ID。
-- `NAME`：前端展示名称；建议保持清晰中文名，`PID` 和目录 `<task>` 用稳定英文标识。
-- `MAX_INSTANCES`：同一任务最大并发实例数。
-- `TIMEOUT_SECONDS`：单次执行超时时间，`0` 或不配置表示不启用超时。
-- `TRIGGER`：支持 `interval`、`date`、`cron`。
-
-任务配置由 `app/bootstrap/task_loader.py` 校验，调度注册入口是 `app/bootstrap/core.py` 的 `aps_start()`。任务元数据会拆分记录为 `group_name`、`folder_name`、`pid` 和 `task_name`，其中 `wfs_job_stats.pid` 是主键。
+任务配置由 `app/bootstrap/task_loader.py` 发现和校验，调度注册入口是 `app/bootstrap/core.py` 的 `aps_start()`。任务元数据会拆分记录为 `group_name`、`folder_name`、`pid` 和 `task_name`，其中 `wfs_job_stats.pid` 是主键，`wfs_task_config.pid` 是前端运行配置主键。
 
 推荐的新建任务流程：
 
 1. 在 `app/jobs/<group>/<task>/` 下创建任务目录，`<task>` 建议等于 `PID`。
 2. 编写 `main.py`，入口脚本应尽量幂等，失败后可重复执行或具备补偿能力。
-3. 编写 `config.ini`，必须配置 `START`、`MAIN_FILE`、`PID`、`NAME`、`MAX_INSTANCES`、`TIMEOUT_SECONDS`、`TRIGGER`。
-4. 本地单独运行 `python main.py` 验证依赖和业务逻辑。
-5. 启动平台后点击“重扫新增”，确认任务出现在任务列表且无配置错误。
-6. 生产启用前确认负责人、报警接收人、运行手册和超时时间。
+3. 本地单独运行 `python main.py` 验证依赖和业务逻辑。
+4. 启动平台后点击“重扫新增”，确认任务出现在任务列表。
+5. 在任务列表点击“配置”，维护展示名称、入口文件、最大并发、超时秒数和调度策略。
+6. 保存配置后，如果“启用自动调度”已打开，Scheduler 会刷新该任务并立即按策略注册；如果关闭，则任务保持停止状态。
 
 ### 前端调整调度策略
 
-任务列表的“调度”按钮会读取当前任务策略，保存后刷新单个任务调度并立即生效。第二阶段开始以 `wfs_task_config` 数据库表为主存储；如果生产库暂未创建该表，简单的 `interval`、`date`、`cron` 策略仍会回退写入 `config.ini`，但“时间窗口”这类复杂策略需要先执行新版 `ddl.sql`。
+任务列表的“配置”按钮会读取当前任务运行配置和调度策略，保存后刷新单个任务调度并立即生效。第三阶段开始，`wfs_task_config` 是唯一调度配置来源；生产环境必须先执行新版 `ddl.sql` 创建该表。
 
 当前支持：
 
@@ -230,7 +214,7 @@ SECONDS = 60
 - 时间窗口：例如 `09:30` 到 `18:15` 之间每 N 分钟执行，支持非整点边界。
 - 高级规则：自定义 Cron 字段，用于覆盖更复杂的表达式。
 
-调度弹窗会展示未来一段时间的执行点，便于保存前确认策略是否符合预期。长期目标是逐步弱化 `config.ini`，让开发人员只上传核心代码，调度、超时、启停、报警和依赖环境都由平台维护。
+调度弹窗会展示未来一段时间的执行点，便于保存前确认策略是否符合预期。现在开发人员只需要上传核心代码，调度、超时、启停状态和入口文件由平台维护。
 
 ## 子程序依赖管理建议
 

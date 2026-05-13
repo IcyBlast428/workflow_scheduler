@@ -295,8 +295,9 @@ def _event_snapshot():
 
 def _sse_headers():
     return {
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
+        'Content-Encoding': 'identity',
         'X-Accel-Buffering': 'no',
     }
 
@@ -324,11 +325,10 @@ def _proxy_scheduler_events():
 
     def generate():
         try:
-            with requests.get(url, headers=headers, params=params, stream=True, timeout=(5, 300)) as response:
+            with requests.get(url, headers=headers, params=params, stream=True, timeout=(5, None)) as response:
                 response.raise_for_status()
-                for chunk in response.iter_content(chunk_size=1024, decode_unicode=True):
-                    if chunk:
-                        yield chunk
+                for line in response.iter_lines(decode_unicode=True):
+                    yield '{}\n'.format(line or '')
         except requests.RequestException as exc:
             yield _sse_event('stream_error', {'message': 'scheduler event stream unavailable: {}'.format(exc)})
 

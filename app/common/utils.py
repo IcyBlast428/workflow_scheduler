@@ -10,8 +10,6 @@ from datetime import datetime
 from logging import Formatter
 from logging.handlers import RotatingFileHandler
 
-from configobj import ConfigObj
-
 from app.bootstrap.global_vars import ROOT_LOG_DIR, DATA_DIR
 from app.common.nacos import Nacos
 
@@ -66,13 +64,10 @@ def init_logger(job_entry_file, level=logging.INFO):
 # 获取项目所有在的分组目录和项目目录
 def get_basic_dir(job_entry_file):
     job_dir = os.path.split(job_entry_file)[0]
-    ini = os.path.join(job_dir, 'config.ini')
-    config_base = ConfigObj(ini, encoding='utf8')
-    config = config_base.get('base')
-    pid = config.get('PID')
     job_dir_name = os.path.basename(job_dir)
     group_dir = os.path.split(job_dir)[0]
     group_dir_name = os.path.basename(group_dir)
+    pid = job_dir_name
     return group_dir_name, job_dir_name, pid
 
 
