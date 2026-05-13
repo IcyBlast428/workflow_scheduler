@@ -22,7 +22,7 @@ from app.settings import FLASK_ENV
 if FLASK_ENV == 'development':
     dev_ini = os.path.join(CONFIG_DIR, 'development.ini')
     config_base = ConfigObj(dev_ini, encoding='utf-8')
-    dev_run_job = config_base.get('dev_run_job')
+    dev_run_job = config_base.get('dev_run_job') or {}
     dev_run_job_pid = dev_run_job.get('pid')
     dev_run_all = dev_run_job.get('run_all')
 
@@ -271,7 +271,7 @@ def my_listener(event):
     warning_log = ""
     # 获取队列中的任务
     job = scheduler.get_job(job_id)
-    job_name = job.name
+    job_name = job.name if job else job_id
     # 进程阻塞
     if warning_code == EVENT_JOB_MAX_INSTANCES:
         next_run_time = event.scheduled_run_times
@@ -460,6 +460,8 @@ def call_task_once(pid):
             continue
         if spec.get('error'):
             raise ValueError('invalid task config for {}: {}'.format(pid, spec.get('error')))
+        if spec.get('main_file_error'):
+            raise ValueError('task entry file is invalid for {}: {}'.format(pid, spec.get('main_file_error')))
         if runnings.is_running(pid):
             raise ValueError('task is already running')
         scheduler.add_job(
@@ -531,6 +533,19 @@ def aps_start(task_pid=None, action='refresh'):
             _remove_scheduler_job(pid)
             continue
 
+        if spec.get('main_file_error'):
+            logging.getLogger(__name__).warning('invalid task entry for %s: %s', pid, spec.get('main_file_error'))
+            _remove_scheduler_job(pid)
+            if task_pid == pid:
+                raise ValueError('task entry file is invalid for {}: {}'.format(pid, spec.get('main_file_error')))
+            continue
+
+        if not spec.get('schedule_configured'):
+            _remove_scheduler_job(pid)
+            if task_pid == pid and action == 'start':
+                raise ValueError('task {} has no schedule strategy yet'.format(pid))
+            continue
+
         should_start = spec.get('start_enabled') or action == 'start'
         if not should_start:
             _remove_scheduler_job(pid)
@@ -541,7 +556,7 @@ def aps_start(task_pid=None, action='refresh'):
         try:
             raw_rules = spec.get('schedule_rules')
             if raw_rules is None:
-                raw_rules = spec.get('config_base').get(spec.get('trigger')) or {}
+                raw_rules = {}
             trigger = build_scheduler_trigger(spec.get('trigger'), raw_rules)
             scheduler.add_job(
                 func=execute_py,

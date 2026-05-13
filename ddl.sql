@@ -56,8 +56,12 @@ CREATE TABLE wfs_task_config (
     group_name     varchar(100),
     folder_name    varchar(100),
     task_name      varchar(200),
-    trigger_type   varchar(20)  NOT NULL,
-    schedule_type  varchar(50)  NOT NULL,
+    main_file      varchar(500),
+    enabled        varchar(10) DEFAULT 'false',
+    max_instances  integer DEFAULT 1,
+    timeout_seconds integer DEFAULT 0,
+    trigger_type   varchar(20),
+    schedule_type  varchar(50),
     schedule_json  text,
     trigger_json   text,
     version        integer DEFAULT 1,
@@ -74,6 +78,9 @@ CREATE INDEX idx_wfs_task_config_group_folder
 
 CREATE INDEX idx_wfs_task_config_updated_at
     ON wfs_task_config (updated_at);
+
+CREATE INDEX idx_wfs_task_config_enabled
+    ON wfs_task_config (enabled);
 
 CREATE TABLE wfs_job_stats (
     pid             varchar(200) NOT NULL,

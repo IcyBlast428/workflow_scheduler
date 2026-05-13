@@ -1,20 +1,16 @@
 import datetime
 import json
-import os
-from pathlib import Path
 
 from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from configobj import ConfigObj
 from pytz import timezone as pytz_timezone
 
 from app.bootstrap.global_vars import TASK_DIR
-from app.bootstrap.task_loader import discover_task_specs, load_task_spec
+from app.bootstrap.task_loader import discover_task_specs, resolve_main_file
 
 
-TRIGGER_SECTIONS = ('interval', 'cron', 'date')
 WEEKDAY_OPTIONS = {'*', 'mon-fri', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'}
 SCHEDULER_TZ = pytz_timezone('Asia/Shanghai')
 PREVIEW_LIMIT = 16
@@ -31,6 +27,12 @@ def _as_text(value, default=''):
     if value is None:
         return default
     return str(value)
+
+
+def _as_bool(value, default=False):
+    if value in (None, ''):
+        return default
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
 def _as_int(value, field_name, minimum=1, maximum=None):
@@ -248,8 +250,13 @@ def preview_schedule(form=None, trigger=None, rules=None, limit=PREVIEW_LIMIT):
     return upcoming
 
 
-def _default_form():
+def _default_form(enabled=True):
     return {
+        'enabled': enabled,
+        'task_name': '',
+        'main_file': '',
+        'max_instances': 1,
+        'timeout_seconds': 0,
         'schedule_family': 'interval',
         'schedule_type': 'every_minute',
         'interval_minutes': 1,
@@ -280,14 +287,22 @@ def _family_for_type(schedule_type):
     return 'advanced'
 
 
-def schedule_to_form(trigger, rules, schedule_type=None, saved_form=None):
-    form = _default_form()
+def schedule_to_form(trigger, rules, schedule_type=None, saved_form=None, spec=None, enabled=True):
+    form = _default_form(enabled=enabled)
+    if spec:
+        form.update({
+            'task_name': spec.get('task_name') or spec.get('folder_name') or '',
+            'main_file': spec.get('main_file') or '',
+            'max_instances': spec.get('max_instances') or 1,
+            'timeout_seconds': spec.get('timeout_seconds') or 0,
+        })
     if saved_form:
         form.update(saved_form)
     rules = {str(key).upper(): _as_text(value) for key, value in (rules or {}).items()}
     if schedule_type:
         form['schedule_type'] = schedule_type
         form['schedule_family'] = _family_for_type(schedule_type)
+        form['enabled'] = enabled
         return form
 
     if trigger == 'interval':
@@ -343,6 +358,7 @@ def schedule_to_form(trigger, rules, schedule_type=None, saved_form=None):
         else:
             form['schedule_type'] = 'custom_cron'
     form['schedule_family'] = _family_for_type(form['schedule_type'])
+    form['enabled'] = enabled
     return form
 
 
@@ -352,7 +368,8 @@ def _load_schedule_record(pid):
         with GaussDB() as db:
             rows = db.execute_query_sql(
                 """
-                SELECT pid, group_name, folder_name, task_name, trigger_type, schedule_type,
+                SELECT pid, group_name, folder_name, task_name, main_file, enabled,
+                       max_instances, timeout_seconds, trigger_type, schedule_type,
                        schedule_json, trigger_json, updated_at
                 FROM wfs_task_config
                 WHERE pid = ?
@@ -365,82 +382,124 @@ def _load_schedule_record(pid):
         return None
 
 
+def _normalize_task_config(spec, form):
+    task_name = str(form.get('task_name') or spec.get('task_name') or spec.get('folder_name') or '').strip()
+    main_file = str(form.get('main_file') or spec.get('main_file') or '').strip()
+    max_instances = _as_int(form.get('max_instances') or 1, 'max_instances', 1)
+    timeout_seconds = _as_int(form.get('timeout_seconds') or 0, 'timeout_seconds', 0)
+    resolve_main_file(spec.get('task_dir'), main_file)
+    return task_name, main_file, max_instances, timeout_seconds
+
+
 def _save_schedule_record(spec, trigger, rules, schedule_type, form):
     from app.bootstrap.database import GaussDB
+
+    task_name, main_file, max_instances, timeout_seconds = _normalize_task_config(spec, form)
+    enabled = 'true' if _as_bool(form.get('enabled'), default=True) else 'false'
+    saved_form = dict(form or {})
+    saved_form.update({
+        'enabled': enabled == 'true',
+        'task_name': task_name,
+        'main_file': main_file,
+        'max_instances': max_instances,
+        'timeout_seconds': timeout_seconds,
+    })
     payload = (
         spec.get('pid'),
         spec.get('group_name') or '',
         spec.get('folder_name') or '',
-        spec.get('task_name') or '',
+        task_name,
+        main_file,
+        enabled,
+        max_instances,
+        timeout_seconds,
         trigger,
         schedule_type,
-        _json_dumps(form),
+        _json_dumps(saved_form),
         _json_dumps(rules),
         datetime.datetime.now(),
     )
     with GaussDB() as db:
-        rows = db.execute_query_sql(
-            "SELECT pid FROM wfs_task_config WHERE pid = ?",
-            params=(spec.get('pid'),),
-            return_json=False,
-        )
-        if rows:
-            db.execute_sql(
-                """
-                UPDATE wfs_task_config
-                SET group_name = ?, folder_name = ?, task_name = ?, trigger_type = ?,
-                    schedule_type = ?, schedule_json = ?, trigger_json = ?, updated_at = ?
-                WHERE pid = ?
-                """,
-                params=payload[1:] + (payload[0],),
+        try:
+            rows = db.execute_query_sql(
+                "SELECT pid FROM wfs_task_config WHERE pid = ?",
+                params=(spec.get('pid'),),
+                return_json=False,
             )
-        else:
-            db.execute_sql(
-                """
-                INSERT INTO wfs_task_config (
-                    pid, group_name, folder_name, task_name, trigger_type, schedule_type,
-                    schedule_json, trigger_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                params=payload,
-            )
-
-
-def _config_schedule(spec):
-    config_path = Path(spec.get('config_path'))
-    if not config_path.is_file():
-        raise ValueError('config.ini is missing')
-    config_base = ConfigObj(str(config_path), encoding='utf-8')
-    base = config_base.get('base') or {}
-    trigger = str(base.get('TRIGGER') or '').strip().lower()
-    rules = dict(config_base.get(trigger) or {}) if trigger else {}
-    form = schedule_to_form(trigger, rules)
-    return {
-        'pid': spec.get('pid'),
-        'group_name': spec.get('group_name') or '',
-        'folder_name': spec.get('folder_name') or '',
-        'task_name': spec.get('task_name') or '',
-        'trigger': trigger,
-        'rules': rules,
-        'source': 'config',
-        'form': form,
-    }
+            if rows:
+                db.execute_sql(
+                    """
+                    UPDATE wfs_task_config
+                    SET group_name = ?, folder_name = ?, task_name = ?, main_file = ?, enabled = ?,
+                        max_instances = ?, timeout_seconds = ?, trigger_type = ?, schedule_type = ?,
+                        schedule_json = ?, trigger_json = ?, updated_at = ?
+                    WHERE pid = ?
+                    """,
+                    params=payload[1:] + (payload[0],),
+                )
+            else:
+                db.execute_sql(
+                    """
+                    INSERT INTO wfs_task_config (
+                        pid, group_name, folder_name, task_name, main_file, enabled,
+                        max_instances, timeout_seconds, trigger_type, schedule_type,
+                        schedule_json, trigger_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    params=payload,
+                )
+        except Exception as exc:
+            raise RuntimeError('wfs_task_config schema is outdated, please run the latest ddl.sql: {}'.format(exc))
 
 
 def _record_schedule(spec, record):
-    trigger = record.get('trigger_type') or 'interval'
+    trigger = record.get('trigger_type') or ''
     rules = _json_loads(record.get('trigger_json'), {})
     saved_form = _json_loads(record.get('schedule_json'), {})
     schedule_type = record.get('schedule_type') or saved_form.get('schedule_type')
-    form = schedule_to_form(trigger, rules, schedule_type=schedule_type, saved_form=saved_form)
+    enabled = _as_bool(record.get('enabled'), default=False)
+    spec_for_form = dict(spec or {})
+    spec_for_form.update({
+        'task_name': record.get('task_name') or spec.get('task_name'),
+        'main_file': record.get('main_file') or spec.get('main_file'),
+        'max_instances': record.get('max_instances') or spec.get('max_instances'),
+        'timeout_seconds': record.get('timeout_seconds') or spec.get('timeout_seconds'),
+    })
+    form = schedule_to_form(trigger, rules, schedule_type=schedule_type, saved_form=saved_form, spec=spec_for_form, enabled=enabled)
     return {
         'pid': spec.get('pid'),
         'group_name': record.get('group_name') or spec.get('group_name') or '',
         'folder_name': record.get('folder_name') or spec.get('folder_name') or '',
         'task_name': record.get('task_name') or spec.get('task_name') or '',
+        'main_file': record.get('main_file') or spec.get('main_file') or '',
+        'main_file_options': spec.get('main_file_options') or [],
+        'max_instances': record.get('max_instances') or spec.get('max_instances') or 1,
+        'timeout_seconds': record.get('timeout_seconds') or spec.get('timeout_seconds') or 0,
+        'enabled': enabled,
+        'configured': bool(trigger and rules),
         'trigger': trigger,
         'rules': rules,
         'source': 'database',
+        'form': form,
+    }
+
+
+def _unconfigured_schedule(spec):
+    form = schedule_to_form('', {}, spec=spec, enabled=True)
+    return {
+        'pid': spec.get('pid'),
+        'group_name': spec.get('group_name') or '',
+        'folder_name': spec.get('folder_name') or '',
+        'task_name': spec.get('task_name') or '',
+        'main_file': spec.get('main_file') or '',
+        'main_file_options': spec.get('main_file_options') or [],
+        'max_instances': spec.get('max_instances') or 1,
+        'timeout_seconds': spec.get('timeout_seconds') or 0,
+        'enabled': False,
+        'configured': False,
+        'trigger': '',
+        'rules': {},
+        'source': 'unconfigured',
         'form': form,
     }
 
@@ -449,10 +508,15 @@ def load_schedule(pid):
     spec = find_task_spec(pid)
     if not spec:
         raise ValueError('task not found: {}'.format(pid))
+    if spec.get('error'):
+        raise ValueError('task config is invalid: {}'.format(spec.get('error')))
     record = _load_schedule_record(pid)
-    data = _record_schedule(spec, record) if record else _config_schedule(spec)
+    data = _record_schedule(spec, record) if record else _unconfigured_schedule(spec)
     try:
-        data['preview'] = preview_schedule(trigger=data['trigger'], rules=data['rules'])
+        if data['configured']:
+            data['preview'] = preview_schedule(trigger=data['trigger'], rules=data['rules'])
+        else:
+            data['preview'] = preview_schedule(form=data['form'])
     except Exception as exc:
         data['preview'] = []
         data['preview_error'] = str(exc)
@@ -460,56 +524,7 @@ def load_schedule(pid):
 
 
 def apply_persisted_schedule(spec):
-    pid = spec.get('pid')
-    if not pid:
-        return spec
-    record = _load_schedule_record(pid)
-    if not record:
-        return spec
-    data = _record_schedule(spec, record)
-    spec['trigger'] = data['trigger']
-    spec['schedule_rules'] = data['rules']
-    spec['schedule_type'] = data['form'].get('schedule_type')
-    spec['schedule_source'] = 'database'
     return spec
-
-
-def _write_config(config_base, config_path):
-    config_path = Path(config_path)
-    temp_path = config_path.with_suffix(config_path.suffix + '.tmp')
-    original_filename = config_base.filename
-    config_base.filename = str(temp_path)
-    try:
-        config_base.write()
-        os.replace(str(temp_path), str(config_path))
-    finally:
-        config_base.filename = original_filename
-        if temp_path.exists():
-            temp_path.unlink()
-
-
-def _save_config_fallback(spec, trigger, rules):
-    config_path = Path(spec.get('config_path'))
-    original_text = config_path.read_text(encoding='utf-8')
-    config_base = ConfigObj(str(config_path), encoding='utf-8')
-    base = config_base.get('base')
-    if not base:
-        raise ValueError('base section is missing')
-    if trigger not in TRIGGER_SECTIONS:
-        raise ValueError('database table wfs_task_config is required for {}'.format(trigger))
-    base['TRIGGER'] = trigger
-    for section in TRIGGER_SECTIONS:
-        if section in config_base:
-            del config_base[section]
-    config_base[trigger] = rules
-    try:
-        _write_config(config_base, config_path)
-        next_spec = load_task_spec(spec.get('group_name'), spec.get('folder_name'), spec.get('task_dir'))
-        if next_spec.get('error'):
-            raise ValueError(next_spec.get('error'))
-    except Exception:
-        config_path.write_text(original_text, encoding='utf-8')
-        raise
 
 
 def save_schedule(pid, form):
@@ -521,8 +536,5 @@ def save_schedule(pid, form):
 
     trigger, rules, schedule_type = build_schedule_payload(form or {})
     build_scheduler_trigger(trigger, rules)
-    try:
-        _save_schedule_record(spec, trigger, rules, schedule_type, form or {})
-    except Exception:
-        _save_config_fallback(spec, trigger, rules)
+    _save_schedule_record(spec, trigger, rules, schedule_type, form or {})
     return load_schedule(pid)

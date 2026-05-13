@@ -263,6 +263,8 @@ def _event_snapshot():
         next_run_time = ''
         if spec.get('error'):
             state = 'invalid'
+        elif spec.get('main_file_error'):
+            state = 'invalid'
         elif pid in ignores:
             state = 'pause'
         else:
@@ -277,6 +279,8 @@ def _event_snapshot():
             'state': state,
             'pending': runnings.is_running(pid),
             'next_run_time': next_run_time,
+            'schedule_configured': spec.get('schedule_configured'),
+            'schedule_enabled': spec.get('schedule_enabled'),
         })
     return {
         'server_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -379,7 +383,7 @@ class Dashboard(Resource):
 
         for spec in specs:
             pid = spec.get('pid') or spec.get('folder_name')
-            if spec.get('error'):
+            if spec.get('error') or spec.get('main_file_error'):
                 counters['invalid'] += 1
                 continue
             if pid in ignores:
@@ -439,6 +443,9 @@ class State(Resource):
                 'dirname': spec.get('dir_name'),
                 'group_name': spec.get('group_name') or stats.get('group_name') or '',
                 'folder_name': spec.get('folder_name') or stats.get('folder_name') or '',
+                'main_file': spec.get('main_file') or '',
+                'schedule_configured': bool(spec.get('schedule_configured')),
+                'schedule_enabled': bool(spec.get('schedule_enabled')),
                 'pending': False,
                 'state': spec.get('raw_start', 'false'),
                 'last_status': stats.get('last_status'),
@@ -446,23 +453,22 @@ class State(Resource):
                 'last_sms_alarm': str(stats.get('last_sms_alarm') or ''),
             }
 
-            if spec.get('error'):
+            if spec.get('error') or spec.get('main_file_error'):
                 task_state['state'] = 'invalid'
-                task_state['config_error'] = spec.get('error')
+                task_state['config_error'] = spec.get('error') or spec.get('main_file_error')
                 task_state['group_name'] = spec.get('group_name') or ''
                 task_state['folder_name'] = spec.get('folder_name') or ''
             else:
                 pid = spec.get('pid')
-                if spec.get('start_enabled') or scheduler.get_job(pid):
-                    job = scheduler.get_job(pid)
-                    if job:
-                        task_state['state'] = 'true'
-                        task_state['next_run_time'] = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S')
-                    else:
-                        task_state['state'] = 'false'
-                    task_state['pending'] = runnings.is_running(pid)
-                    if pid in ignores:
-                        task_state['state'] = 'pause'
+                job = scheduler.get_job(pid)
+                if job:
+                    task_state['state'] = 'true'
+                    task_state['next_run_time'] = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    task_state['state'] = 'false'
+                task_state['pending'] = runnings.is_running(pid)
+                if pid in ignores:
+                    task_state['state'] = 'pause'
             state_list.append(task_state)
 
         start = (current_page - 1) * pagesize

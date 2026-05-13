@@ -262,7 +262,7 @@
             <div class="panel-head">
               <div>
                 <h2>任务列表</h2>
-                <p>从 app/jobs 目录下的任务配置扫描生成，支持按任务 ID、名称和分组过滤。</p>
+                <p>从 app/jobs 目录扫描任务代码，运行配置和调度策略由前端维护。</p>
               </div>
               <div class="filter-actions">
                 <button class="btn" type="button" :disabled="tasks.loading" @click="reloadTasks(false)">
@@ -1068,7 +1068,7 @@ async function saveSchedule(form) {
     scheduleDialog.preview = data.preview || [];
     scheduleDialog.previewError = data.preview_error || '';
     scheduleDialog.open = false;
-    pushToast('success', '调度策略已生效', `${scheduleDialog.task.id} 已刷新调度配置。`);
+    pushToast('success', '任务配置已保存', `${scheduleDialog.task.id} 已刷新运行配置。`);
     await Promise.all([loadTasks(), loadDashboard({ silent: true })]);
   } catch (error) {
     scheduleDialog.error = error.message;

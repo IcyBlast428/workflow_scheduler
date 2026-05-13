@@ -33,11 +33,12 @@
           <td>
             <div class="cell-strong clip" :title="row.name">{{ row.name }}</div>
             <div v-if="row.config_error" class="muted clip" :title="row.config_error">{{ row.config_error }}</div>
+            <div v-else-if="!row.schedule_configured" class="muted clip">尚未配置调度策略</div>
           </td>
           <td class="mono clip" :title="row.group_name || '-'">{{ row.group_name || '-' }}</td>
           <td class="mono clip" :title="row.folder_name || '-'">{{ row.folder_name || '-' }}</td>
           <td>
-            <span class="tag" :class="stateClass(row.state)">{{ stateText(row.state) }}</span>
+            <span class="tag" :class="stateClass(row)">{{ stateText(row) }}</span>
           </td>
           <td>
             <span class="tag" :class="row.pending ? 'brand' : 'info'">{{ row.pending ? '是' : '否' }}</span>
@@ -63,7 +64,7 @@
               <button v-if="canCallTask(row)" class="btn primary" type="button" :disabled="busy" :title="callTaskTitle(row)" @click="$emit('call', row)">触发</button>
               <button v-else class="btn placeholder" type="button" disabled aria-hidden="true">触发</button>
 
-              <button class="btn" type="button" :disabled="busy" @click="$emit('schedule', row)">调度</button>
+              <button class="btn" type="button" :disabled="busy" @click="$emit('schedule', row)">配置</button>
               <button v-if="row.state !== 'invalid'" class="btn" type="button" :disabled="busy" @click="$emit('action', row, 'refresh')">刷新</button>
               <button v-else class="btn placeholder" type="button" disabled aria-hidden="true">刷新</button>
               <button class="btn" type="button" :disabled="busy" @click="$emit('log', row)">日志</button>
@@ -83,28 +84,38 @@ defineProps({
 
 defineEmits(['action', 'pause', 'call', 'schedule', 'log']);
 
-function stateText(state) {
+function stateText(row) {
+  if (row.state === 'invalid') {
+    return '配置错误';
+  }
+  if (!row.schedule_configured) {
+    return '未配置';
+  }
   const map = {
     true: '运行中',
-    false: '已停止',
+    false: row.schedule_enabled ? '已停止' : '未启用',
     pause: '已暂停',
     kill: '已停止',
     error: '异常',
-    invalid: '配置错误',
   };
-  return map[state] || state || '未知';
+  return map[row.state] || row.state || '未知';
 }
 
-function stateClass(state) {
+function stateClass(row) {
+  if (row.state === 'invalid') {
+    return 'danger';
+  }
+  if (!row.schedule_configured) {
+    return 'warning';
+  }
   const map = {
     true: 'success',
-    false: 'info',
+    false: row.schedule_enabled ? 'info' : 'warning',
     pause: 'warning',
     kill: 'info',
     error: 'danger',
-    invalid: 'danger',
   };
-  return map[state] || 'info';
+  return map[row.state] || 'info';
 }
 
 function lastStatusText(status) {
@@ -122,7 +133,7 @@ function lastStatusClass(status) {
 }
 
 function canStart(row) {
-  return row.state !== 'true' && row.state !== 'invalid';
+  return row.schedule_configured && row.state !== 'true' && row.state !== 'invalid';
 }
 
 function canCallTask(row) {
@@ -131,16 +142,16 @@ function canCallTask(row) {
 
 function callTaskTitle(row) {
   if (row.state === 'invalid') {
-    return '配置错误的任务不能手动触发';
+    return '入口文件或任务配置错误，不能手动触发';
   }
   if (row.pending) {
     return '任务正在运行，不能重复触发';
   }
+  if (!row.schedule_configured) {
+    return '尚未配置调度，也可以手动执行一次';
+  }
   if (row.state === 'pause') {
     return '暂停任务也可以手动执行一次';
-  }
-  if (row.state !== 'true') {
-    return '任务未进入调度，也可以手动执行一次';
   }
   return '立即执行一次任务';
 }

@@ -3,7 +3,7 @@
     <section class="modal schedule-modal">
       <header class="modal-head">
         <div>
-          <h3>调度策略：{{ task?.id || '-' }}</h3>
+          <h3>任务配置：{{ task?.id || '-' }}</h3>
           <p class="modal-subtitle">{{ task?.group_name || '-' }} / {{ task?.folder_name || '-' }}</p>
         </div>
         <button class="btn icon-only" type="button" title="关闭" @click="$emit('close')">×</button>
@@ -12,7 +12,7 @@
       <div class="modal-body schedule-body">
         <div v-if="loading" class="loading-bar"></div>
         <div v-if="error" class="inline-alert danger">
-          <strong>调度配置加载失败</strong>
+          <strong>配置加载失败</strong>
           <span>{{ error }}</span>
         </div>
 
@@ -34,6 +34,37 @@
             </aside>
 
             <section class="schedule-editor">
+              <div class="runtime-card">
+                <label class="toggle-row">
+                  <input v-model="form.enabled" type="checkbox">
+                  <span>
+                    <strong>启用自动调度</strong>
+                    <small>关闭后任务保持停止状态，但仍可在列表中手动触发。</small>
+                  </span>
+                </label>
+                <div class="schedule-grid">
+                  <div class="form-row">
+                    <label for="task-name">任务名称</label>
+                    <input id="task-name" v-model.trim="form.task_name" class="input" placeholder="展示名称">
+                  </div>
+                  <div class="form-row">
+                    <label for="main-file">入口文件</label>
+                    <input id="main-file" v-model.trim="form.main_file" class="input" list="main-file-options" placeholder="main.py">
+                    <datalist id="main-file-options">
+                      <option v-for="item in mainFileOptions" :key="item" :value="item"></option>
+                    </datalist>
+                  </div>
+                  <div class="form-row">
+                    <label for="max-instances">最大并发</label>
+                    <input id="max-instances" v-model.number="form.max_instances" class="input" type="number" min="1">
+                  </div>
+                  <div class="form-row">
+                    <label for="timeout-seconds">超时秒数</label>
+                    <input id="timeout-seconds" v-model.number="form.timeout_seconds" class="input" type="number" min="0">
+                  </div>
+                </div>
+              </div>
+
               <div class="form-row">
                 <label for="schedule-type">策略类型</label>
                 <select id="schedule-type" v-model="form.schedule_type" class="select">
@@ -169,7 +200,7 @@
           <footer class="confirm-footer schedule-footer">
             <button class="btn" type="button" @click="$emit('close')">取消</button>
             <button class="btn primary" type="submit" :disabled="saving || loading">
-              {{ saving ? '保存中...' : '保存并生效' }}
+              {{ saving ? '保存中...' : '保存配置' }}
             </button>
           </footer>
         </form>
@@ -196,9 +227,9 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save', 'preview']);
 
 const familyOptions = [
-  { id: 'interval', icon: '↻', label: '周期间隔', description: '按分钟或小时循环' },
-  { id: 'fixed', icon: '◆', label: '固定时间', description: '按日、周、月指定时间' },
-  { id: 'window', icon: '▥', label: '时间窗口', description: '在区间内循环执行' },
+  { id: 'interval', icon: 'I', label: '周期间隔', description: '按分钟或小时循环' },
+  { id: 'fixed', icon: 'F', label: '固定时间', description: '按日、周、月指定时间' },
+  { id: 'window', icon: 'W', label: '时间窗口', description: '在区间内循环执行' },
   { id: 'advanced', icon: '#', label: '高级规则', description: '自定义 Cron 表达式' },
 ];
 
@@ -239,6 +270,7 @@ const form = reactive(defaultForm());
 let previewTimer = null;
 
 const activeTypeOptions = computed(() => typeOptions[form.schedule_family] || typeOptions.interval);
+const mainFileOptions = computed(() => props.schedule?.main_file_options || []);
 
 const usesFixedTime = computed(() => [
   'daily_fixed',
@@ -247,14 +279,15 @@ const usesFixedTime = computed(() => [
   'monthly_last_day',
 ].includes(form.schedule_type));
 
-const previewItems = computed(() => {
-  return props.preview || [];
-});
-
+const previewItems = computed(() => props.preview || []);
 const displayPreviewError = computed(() => props.previewError || '');
 
 const previewSourceText = computed(() => {
-  const source = props.schedule?.source === 'database' ? '数据库策略' : '配置文件策略';
+  const sourceMap = {
+    database: '数据库配置',
+    unconfigured: '尚未保存',
+  };
+  const source = sourceMap[props.schedule?.source] || '当前表单';
   return `${source} · ${previewItems.value.length} 个后续时间点`;
 });
 
@@ -309,6 +342,11 @@ onUnmounted(() => {
 
 function defaultForm() {
   return {
+    enabled: true,
+    task_name: '',
+    main_file: 'main.py',
+    max_instances: 1,
+    timeout_seconds: 0,
     schedule_family: 'interval',
     schedule_type: 'every_minute',
     interval_minutes: 1,
