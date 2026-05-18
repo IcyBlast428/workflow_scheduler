@@ -56,6 +56,7 @@ def resolve_main_file(task_dir, main_file):
     task_dir = Path(task_dir).resolve()
     main_path = (task_dir / main_file).resolve()
     try:
+        # 防止通过 ../ 跳出任务目录，只允许任务执行自己的目录内文件。
         main_path.relative_to(task_dir)
     except ValueError:
         raise ValueError('MAIN_FILE must stay inside the task directory')
@@ -78,6 +79,7 @@ def _venv_python_path(venv_dir):
 
 
 def resolve_python_executable(group_dir, task_dir):
+    # 任务依赖隔离优先级：单任务 .venv > 任务组 .venv > 平台主环境。
     task_python = _venv_python_path(Path(task_dir) / '.venv')
     if task_python:
         return task_python, 'task'
@@ -102,6 +104,7 @@ def iter_task_directories(task_root=TASK_DIR):
     if not task_root.exists():
         return
 
+    # 任务目录固定为 app/jobs/<group>/<task>，隐藏目录和非目录均跳过。
     for group_dir in sorted(task_root.iterdir(), key=lambda path: path.name):
         if _is_hidden_name(group_dir.name) or not group_dir.is_dir():
             continue
@@ -116,6 +119,7 @@ def _load_task_config_records():
         from app.bootstrap.database import GaussDB
         with GaussDB() as db:
             try:
+                # 新版表结构包含 main_file、enabled、max_instances、timeout_seconds。
                 rows = db.execute_query_sql(
                     """
                     SELECT pid, group_name, folder_name, task_name, main_file, enabled,
@@ -126,6 +130,7 @@ def _load_task_config_records():
                     return_json=True,
                 )
             except Exception:
+                # 兼容尚未执行最新 DDL 的环境，避免任务扫描阶段直接失败。
                 rows = db.execute_query_sql(
                     """
                     SELECT pid, group_name, folder_name, task_name, trigger_type, schedule_type,
@@ -143,6 +148,7 @@ def _record_maps():
     by_pid = {}
     by_folder = {}
     for row in _load_task_config_records():
+        # 既支持按 PID 匹配，也支持旧任务首次保存前按 group/folder 匹配。
         pid = row.get('pid')
         if pid:
             by_pid[pid] = row
@@ -157,6 +163,7 @@ def _apply_record(spec, record):
     if not record:
         return
 
+    # 数据库中的前端配置覆盖目录推断值；目录只负责发现任务代码。
     spec['config_record'] = record
     spec['task_name'] = record.get('task_name') or spec['task_name']
     spec['main_file'] = record.get('main_file') or spec['main_file']
@@ -182,6 +189,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
     max_instances = 1
     timeout_seconds = 0
 
+    # spec 是调度器、API 和前端共用的任务描述结构，新增字段时优先在这里集中补齐默认值。
     spec = {
         'group_name': group_name,
         'folder_name': folder_name,
@@ -219,6 +227,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
     if not record and records_by_folder is not None:
         record = records_by_folder.get((group_name, folder_name))
         if record and record.get('pid'):
+            # 前端允许用户把 PID 从默认目录名改成稳定业务 ID。
             spec['pid'] = record.get('pid')
     try:
         _apply_record(spec, record)
@@ -249,6 +258,7 @@ def discover_task_specs(task_root=TASK_DIR):
         if pid:
             pid_locations.setdefault(pid, []).append(spec.get('dir_name'))
 
+    # PID 是调度器 job_id，也是运行日志和统计表的主键，必须全局唯一。
     for spec in specs:
         pid = spec.get('pid')
         if pid and len(pid_locations.get(pid, [])) > 1:

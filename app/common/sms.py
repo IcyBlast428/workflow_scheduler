@@ -80,7 +80,7 @@ injob_part：同一任务内分别发送不同联系人或群组，part1可自�
             即使任务中只发送同一联系人或群组，也许定义名称
 receivers_list = get_sms_list(job_name = "ping_monitor", job_group = "healthCheck", injob_part = "part1")
 
-依据mysql_immpdb.immp_cfg_user_mail_sms表
+依据 mysql_immpdb.immp_cfg_user_mail_sms 表
 单独联系人写进sms_receivers_individual键值内{id:姓名}
 整组联系人写进sms_receivers_group键值内{部门:组名}
 其中部门以表内department字段为基础
@@ -135,60 +135,59 @@ receivers_list = get_sms_list(job_name = "ping_monitor", job_group = "healthChec
 所有组配置："all"，"sa"，"db"，"cics"，"os"，"jg"，"ld"，"kjzf"，"jhzf"，"manager3"
 '''
 def get_sms_list(job_group = "default", job_name = "default", injob_part = "default"):
-    # init database connection
-    immpdb_obj = NewDB("mysql_immpdb")
-    immpdb_obj.get_engine()
-    immpdb_connection = immpdb_obj.get_connection()
-    
-    # return all phone number of people in 系统一部
-    if job_name == "default" and job_group == "default":
-        sms_receivers_query_sql = "select telephone from immp_cfg_user_mail_sms where department = '系统一部'"
-        sms_receivers_phone_df = pd.read_sql(sms_receivers_query_sql, con = immpdb_connection)
-        return sms_receivers_phone_df["telephone"].tolist()
-    
-    # get raw data from nacos
-    receivers_dic = Nacos().get_nacos_configs(tenant= 'wfs', data_id= job_name + '.json', group= job_group)
-    # split partion
-    receivers_dic = receivers_dic[injob_part]
-    # split sms and mail receivers
-    sms_receivers_dic = {}
-    for receivers_dic_key in receivers_dic.keys():
-        if re.search(r"^sms.*", receivers_dic_key) != None:
-            sms_receivers_dic[receivers_dic_key] = receivers_dic[receivers_dic_key]
-    # split individual and group receivers
-    sms_receivers_individual_list = []
-    sms_receivers_group_list = []
-    for sms_receivers_dic_key in sms_receivers_dic.keys():
-        if re.search(r".*?individual$", sms_receivers_dic_key) != None:
-            sms_receivers_individual_list = sms_receivers_dic[sms_receivers_dic_key]
-        if re.search(r".*?group$", sms_receivers_dic_key) != None:
-            sms_receivers_group_list = sms_receivers_dic[sms_receivers_dic_key]
-    
-    # for individual
-    sms_receivers_individual_phone_list = []
-    if len(sms_receivers_individual_list) != 0:
-        sms_receivers_individual_aamid_list = [aamid for person_dic in sms_receivers_individual_list for aamid in person_dic.keys()]
-        sms_receivers_individual_aamid_query_clause_str = '\'' + "','".join(sms_receivers_individual_aamid_list) + '\''
-        sms_receivers_individual_aamid_query_sql = f"select telephone from immp_cfg_user_mail_sms where aamid in ({sms_receivers_individual_aamid_query_clause_str})"
-        sms_receivers_individual_phone_df = pd.read_sql(sms_receivers_individual_aamid_query_sql, con = immpdb_connection)
-        sms_receivers_individual_phone_list = sms_receivers_individual_phone_df["telephone"].tolist()
+    # 联系人属于业务库数据，通过 common.db.NewDB 走非高斯数据库连接。
+    with NewDB("mysql_immpdb") as immpdb_obj:
+        immpdb_connection = immpdb_obj.get_connection()
 
-    # for group
-    sms_receivers_group_phone_list = []
-    if len(sms_receivers_group_list) != 0:
-        for group_dic in sms_receivers_group_list:
-            for depart, group in group_dic.items(): # one time
-                if group == "all":
-                    sms_receivers_group_query_sql = f"select telephone from immp_cfg_user_mail_sms where department = '{depart}'"
-                if group in ("sa", "os", "db", "cics", "jg", "ld"):
-                    sms_receivers_group_query_sql = f"select telephone from immp_cfg_user_mail_sms where mygroup in ('{group}')"
-                if group in ("kjzf", "jhzf", "manager3"):
-                    sms_receivers_group_query_sql = f"select telephone from immp_cfg_user_mail_sms where is_{group} = 1"
-                sms_receivers_group_phone_df = pd.read_sql(sms_receivers_group_query_sql, con = immpdb_connection)
-                sms_receivers_group_phone_list.extend(sms_receivers_group_phone_df["telephone"].tolist())
-    
-    # combine individual and group receivers
-    sms_receivers_phone_list = sms_receivers_individual_phone_list + sms_receivers_group_phone_list
-    # remove duplicates
-    sms_receivers_phone_list = list(set(sms_receivers_phone_list))
-    return sms_receivers_phone_list
+        # return all phone number of people in 系统一部
+        if job_name == "default" and job_group == "default":
+            sms_receivers_query_sql = "select telephone from immp_cfg_user_mail_sms where department = '系统一部'"
+            sms_receivers_phone_df = pd.read_sql(sms_receivers_query_sql, con = immpdb_connection)
+            return sms_receivers_phone_df["telephone"].tolist()
+
+        # get raw data from nacos
+        receivers_dic = Nacos().get_nacos_configs(tenant= 'wfs', data_id= job_name + '.json', group= job_group)
+        # split partion
+        receivers_dic = receivers_dic[injob_part]
+        # split sms and mail receivers
+        sms_receivers_dic = {}
+        for receivers_dic_key in receivers_dic.keys():
+            if re.search(r"^sms.*", receivers_dic_key) != None:
+                sms_receivers_dic[receivers_dic_key] = receivers_dic[receivers_dic_key]
+        # split individual and group receivers
+        sms_receivers_individual_list = []
+        sms_receivers_group_list = []
+        for sms_receivers_dic_key in sms_receivers_dic.keys():
+            if re.search(r".*?individual$", sms_receivers_dic_key) != None:
+                sms_receivers_individual_list = sms_receivers_dic[sms_receivers_dic_key]
+            if re.search(r".*?group$", sms_receivers_dic_key) != None:
+                sms_receivers_group_list = sms_receivers_dic[sms_receivers_dic_key]
+
+        # for individual
+        sms_receivers_individual_phone_list = []
+        if len(sms_receivers_individual_list) != 0:
+            sms_receivers_individual_aamid_list = [aamid for person_dic in sms_receivers_individual_list for aamid in person_dic.keys()]
+            sms_receivers_individual_aamid_query_clause_str = '\'' + "','".join(sms_receivers_individual_aamid_list) + '\''
+            sms_receivers_individual_aamid_query_sql = f"select telephone from immp_cfg_user_mail_sms where aamid in ({sms_receivers_individual_aamid_query_clause_str})"
+            sms_receivers_individual_phone_df = pd.read_sql(sms_receivers_individual_aamid_query_sql, con = immpdb_connection)
+            sms_receivers_individual_phone_list = sms_receivers_individual_phone_df["telephone"].tolist()
+
+        # for group
+        sms_receivers_group_phone_list = []
+        if len(sms_receivers_group_list) != 0:
+            for group_dic in sms_receivers_group_list:
+                for depart, group in group_dic.items(): # one time
+                    if group == "all":
+                        sms_receivers_group_query_sql = f"select telephone from immp_cfg_user_mail_sms where department = '{depart}'"
+                    if group in ("sa", "os", "db", "cics", "jg", "ld"):
+                        sms_receivers_group_query_sql = f"select telephone from immp_cfg_user_mail_sms where mygroup in ('{group}')"
+                    if group in ("kjzf", "jhzf", "manager3"):
+                        sms_receivers_group_query_sql = f"select telephone from immp_cfg_user_mail_sms where is_{group} = 1"
+                    sms_receivers_group_phone_df = pd.read_sql(sms_receivers_group_query_sql, con = immpdb_connection)
+                    sms_receivers_group_phone_list.extend(sms_receivers_group_phone_df["telephone"].tolist())
+
+        # combine individual and group receivers
+        sms_receivers_phone_list = sms_receivers_individual_phone_list + sms_receivers_group_phone_list
+        # remove duplicates
+        sms_receivers_phone_list = list(set(sms_receivers_phone_list))
+        return sms_receivers_phone_list

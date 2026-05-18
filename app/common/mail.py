@@ -70,53 +70,52 @@ def send_mail(to_receivers, subject, body, attachments_files=[], cc_receivers=[]
     mail_server.quit()
 
 def get_mail_list(job_group = "default", job_name = "default", injob_part = "default"):
-    # init database connection
-    immpdb_obj = NewDB("mysql_immpdb")
-    immpdb_obj.get_engine()
-    immpdb_connection = immpdb_obj.get_connection()
-    
-    # return all email of people in 系统一部
-    if job_name == "default" and job_group == "default":
-        mail_receivers_query_sql = "select email from immp_cfg_user_mail_sms where department = '系统一部'"
-        mail_receivers_df = pd.read_sql(mail_receivers_query_sql, con = immpdb_connection)
-        return mail_receivers_df["email"].tolist()
-    
-    # get raw data from nacos
-    receivers_dic = Nacos().get_nacos_configs(tenant= "wfs", data_id= job_name + ".json", group= job_group)
-    # split partion
-    receivers_dic = receivers_dic[injob_part]
-    # split sms and mail receivers
-    mail_receivers_dic = {}
-    for receivers_dic_key in receivers_dic.keys():
-        if re.search(r"^mail.*", receivers_dic_key) != None:
-            mail_receivers_dic[receivers_dic_key] = receivers_dic[receivers_dic_key]
-    # split individual and group receivers
-    mail_receivers_individual_list = []
-    mail_receivers_group_list = []
-    for mail_receivers_dic_key in mail_receivers_dic.keys():
-        if re.search(r".*?individual$", mail_receivers_dic_key) != None:
-            mail_receivers_individual_list = mail_receivers_dic[mail_receivers_dic_key]
-        if re.search(r".*?group$", mail_receivers_dic_key) != None:
-            mail_receivers_group_list = mail_receivers_dic[mail_receivers_dic_key]
-    
-    # for individual
-    mail_receivers_individual_mail_list = []
-    if len(mail_receivers_individual_list) != 0:
-        mail_receivers_individual_aamid_list = [aamid for person_dic in mail_receivers_individual_list for aamid in person_dic.keys()]
-        mail_receivers_individual_aamid_query_clause_str = '\'' + "','".join(mail_receivers_individual_aamid_list) + '\''
-        mail_receivers_individual_aamid_query_sql = f"select email from immp_cfg_user_mail_sms where aamid in ({mail_receivers_individual_aamid_query_clause_str})"
-        mail_receivers_individual_df = pd.read_sql(mail_receivers_individual_aamid_query_sql, con = immpdb_connection)
-        mail_receivers_individual_mail_list = mail_receivers_individual_df["email"].tolist()
-    # for group
-    mail_receivers_group_mail_list = []
-    if len(mail_receivers_group_list) != 0:
-        mail_receivers_group_query_clause_str = '\'' + "','".join(mail_receivers_group_list) + '\''
-        mail_receivers_group_query_sql = f"select email from immp_cfg_group_mail where cnname in ({mail_receivers_group_query_clause_str})"
-        mail_receivers_group_df = pd.read_sql(mail_receivers_group_query_sql, con = immpdb_connection)
-        mail_receivers_group_mail_list = mail_receivers_group_df["email"].tolist()
-    
-    # combine individual and group receivers
-    mail_receivers_list = mail_receivers_individual_mail_list + mail_receivers_group_mail_list
-    # remove duplicates
-    mail_receivers_list = list(set(mail_receivers_list))
-    return mail_receivers_list
+    # 联系人属于业务库数据，通过 common.db.NewDB 走非高斯数据库连接。
+    with NewDB("mysql_immpdb") as immpdb_obj:
+        immpdb_connection = immpdb_obj.get_connection()
+
+        # return all email of people in 系统一部
+        if job_name == "default" and job_group == "default":
+            mail_receivers_query_sql = "select email from immp_cfg_user_mail_sms where department = '系统一部'"
+            mail_receivers_df = pd.read_sql(mail_receivers_query_sql, con = immpdb_connection)
+            return mail_receivers_df["email"].tolist()
+
+        # get raw data from nacos
+        receivers_dic = Nacos().get_nacos_configs(tenant= "wfs", data_id= job_name + ".json", group= job_group)
+        # split partion
+        receivers_dic = receivers_dic[injob_part]
+        # split sms and mail receivers
+        mail_receivers_dic = {}
+        for receivers_dic_key in receivers_dic.keys():
+            if re.search(r"^mail.*", receivers_dic_key) != None:
+                mail_receivers_dic[receivers_dic_key] = receivers_dic[receivers_dic_key]
+        # split individual and group receivers
+        mail_receivers_individual_list = []
+        mail_receivers_group_list = []
+        for mail_receivers_dic_key in mail_receivers_dic.keys():
+            if re.search(r".*?individual$", mail_receivers_dic_key) != None:
+                mail_receivers_individual_list = mail_receivers_dic[mail_receivers_dic_key]
+            if re.search(r".*?group$", mail_receivers_dic_key) != None:
+                mail_receivers_group_list = mail_receivers_dic[mail_receivers_dic_key]
+
+        # for individual
+        mail_receivers_individual_mail_list = []
+        if len(mail_receivers_individual_list) != 0:
+            mail_receivers_individual_aamid_list = [aamid for person_dic in mail_receivers_individual_list for aamid in person_dic.keys()]
+            mail_receivers_individual_aamid_query_clause_str = '\'' + "','".join(mail_receivers_individual_aamid_list) + '\''
+            mail_receivers_individual_aamid_query_sql = f"select email from immp_cfg_user_mail_sms where aamid in ({mail_receivers_individual_aamid_query_clause_str})"
+            mail_receivers_individual_df = pd.read_sql(mail_receivers_individual_aamid_query_sql, con = immpdb_connection)
+            mail_receivers_individual_mail_list = mail_receivers_individual_df["email"].tolist()
+        # for group
+        mail_receivers_group_mail_list = []
+        if len(mail_receivers_group_list) != 0:
+            mail_receivers_group_query_clause_str = '\'' + "','".join(mail_receivers_group_list) + '\''
+            mail_receivers_group_query_sql = f"select email from immp_cfg_group_mail where cnname in ({mail_receivers_group_query_clause_str})"
+            mail_receivers_group_df = pd.read_sql(mail_receivers_group_query_sql, con = immpdb_connection)
+            mail_receivers_group_mail_list = mail_receivers_group_df["email"].tolist()
+
+        # combine individual and group receivers
+        mail_receivers_list = mail_receivers_individual_mail_list + mail_receivers_group_mail_list
+        # remove duplicates
+        mail_receivers_list = list(set(mail_receivers_list))
+        return mail_receivers_list

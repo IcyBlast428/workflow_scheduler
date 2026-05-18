@@ -29,6 +29,7 @@ if FLASK_ENV == 'development':
     dev_run_all = dev_run_job.get('run_all')
 
 
+# 项目重启时 interval 任务可能同时进入下一次运行，这里只给首轮注册加内存态错峰。
 INTERVAL_START_STAGGER_MAX_SECONDS = 300
 
 
@@ -61,6 +62,7 @@ def kill_process(pid):
         if os.name == 'nt':
             os.kill(pid, signal.SIGTERM)
         else:
+            # Linux 下任务以独立进程组启动，超时或强停时可以一起清理子进程。
             os.killpg(pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
@@ -92,6 +94,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
     '''
     start_time = datetime.datetime.now()
     event_group_name, event_folder_name = _task_dir_parts(dir_name, group_name, folder_name)
+    # 先记录内存中的开始事件，总览页可以立刻看到正在运行的任务色块。
     record_task_start(PID, task_name, event_group_name, event_folder_name, start_time)
     dic = {}
     output = ''
@@ -104,6 +107,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
         else:
             popen_kwargs['start_new_session'] = True
 
+        # 每个任务可以使用自己的 .venv；没有独立环境时回退到启动平台的 Python。
         executable = python_executable or sys.executable
         cmd = subprocess.Popen(
             [str(executable), str(path)],
@@ -118,6 +122,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
         try:
             stdout, err = cmd.communicate(timeout=timeout_seconds or None)
         except subprocess.TimeoutExpired:
+            # 超时后先温和终止进程组，仍不退出再强制 kill，避免任务残留。
             kill_process(cmd.pid)
             try:
                 stdout, err = cmd.communicate(timeout=5)
@@ -142,10 +147,12 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 pass
     finally:
         end_time = datetime.datetime.now()
+        # 任务结束后补齐内存事件的 end_time，避免总览页显示无限延伸的运行块。
         record_task_end(PID, start_time, end_time)
         output_encode = output.encode('utf-8')
         output_size = len(output_encode) // 1000
         if output_size >= 64:
+            # 数据库存储完整大日志不划算，超过阈值时截断并提示任务侧落文件。
             output = output_encode[:1000 * 63].decode('utf-8')
             warning = '\nThe log size exceed the limit, please consider saving the output as a file.'
             output += warning
@@ -195,7 +202,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 body += output.replace("'", "\\'")
                 send_mail(to_receivers = email_receiver_list, subject = "WFS任务:" + task_name + " 执行失败，请检查", body = body)
         
-        # 更新数据库日志
+        # 写入运行历史，CPU/内存图中的历史任务色块也依赖这张表。
         try:
             tasklog = output.replace("'", "\\'")
             run_history_sql = '''
@@ -362,6 +369,7 @@ def _should_process_in_dev(pid):
 
 
 def _sync_job_stats(job_list):
+    # 每次扫描后把文件系统中的任务清单同步到统计表，前端列表以这张表为基础展示状态。
     current_job_df = pd.DataFrame(job_list, columns=["pid", "group_name", "folder_name", "task_name", "scheduling_stat"])
     with GaussDB() as wfs_obj:
         wfs_connection = wfs_obj.get_connection()
@@ -531,6 +539,7 @@ def _stagger_interval_rules(pid, rules, enabled=True):
         return rules
 
     next_rules = dict(rules or {})
+    # 只改本次注册用的 trigger 参数，不回写数据库，因此不会改变用户配置的调度策略。
     next_rules['START_DATE'] = datetime.datetime.now(SCHEDULER_TZ) + datetime.timedelta(seconds=offset)
     logging.getLogger(__name__).info('stagger interval job %s by %s seconds after scheduler bootstrap', pid, offset)
     return next_rules
@@ -538,9 +547,9 @@ def _stagger_interval_rules(pid, rules, enabled=True):
 
 def aps_start(task_pid=None, action='refresh'):
     """
-    监听crontabs里的任务及启用
-    :param task_pid: 全任务扫描为None,否则为具体的pid
-    :param action: 是新增还是重载
+    扫描任务目录、合并数据库配置，并把可运行任务注册到 APScheduler。
+    :param task_pid: 全任务扫描为 None，否则只处理指定 PID
+    :param action: refresh/start/reload 等任务控制动作
     """
     job_list = []
     matched_target = task_pid is None
@@ -568,6 +577,7 @@ def aps_start(task_pid=None, action='refresh'):
                 raise ValueError(message)
             continue
 
+        # 读取前端持久化的调度策略，覆盖任务目录中的默认推断。
         spec = apply_persisted_schedule(spec)
 
         job_list.append([
@@ -606,6 +616,7 @@ def aps_start(task_pid=None, action='refresh'):
             raw_rules = spec.get('schedule_rules')
             if raw_rules is None:
                 raw_rules = {}
+            # 仅全量启动时对 interval 任务错峰，单个任务手动启动不额外延迟。
             raw_rules = _stagger_interval_rules(
                 pid,
                 raw_rules,

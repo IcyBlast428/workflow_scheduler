@@ -301,6 +301,23 @@ WFS_SCHEDULER_CONTROL_URL=http://127.0.0.1:8009
 
 ## 数据库
 
+平台本体只维护高斯数据库连接，入口是 `app/bootstrap/database.py` 中的 `WfsDB/GaussDB`。这部分只服务 WFS 自己的运行历史、系统日志、任务统计和任务配置表，不和任务业务库混用。
+
+任务和公共函数访问非高斯业务库时，使用 `app/common/db/` 下的连接工厂和适配器。兼容入口仍然是 `app/common/database.py` 中的 `NewDB`，当前平台主环境已内置 MySQL 适配器；Oracle、ClickHouse 等适配器位置已预留，使用时由对应任务环境安装驱动。
+
+连接策略保持简单稳定：平台高斯库默认使用短生命周期连接，由 ODBC 驱动层处理底层连接复用；`NewDB` 使用 SQLAlchemy Engine/QueuePool 管理非高斯业务库连接。普通任务建议按任务运行周期打开和关闭连接，高频任务或需要异步 IO 的任务，建议在自己的 `.venv` 中安装对应驱动并在任务内部维护更细粒度的连接池。
+
+任务中推荐写法：
+
+```python
+from app.common.database import NewDB
+
+with NewDB("mysql_immpdb") as db:
+    rows = db.execute_query_sql("select * from immp_cfg_user_mail_sms", return_json=True)
+```
+
+本地开发环境的业务库配置读取 `app/config/database/development.ini`，生产环境读取 `app/config/database/production.ini`。平台高斯库生产环境从 Nacos 读取 `gauss.<database>.<schema>.json`，例如默认 `sysimemedb_wfs` 对应 `gauss.sysimemedb.wfs.json`。
+
 平台依赖 `ddl.sql` 中的运行历史、系统日志、任务统计和任务配置表。首次部署或升级后请确认目标库已执行最新 DDL，尤其是：
 
 - `wfs_run_history`：任务执行历史和输出日志。

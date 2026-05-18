@@ -11,6 +11,8 @@ TASK_EVENT_RETENTION_SECONDS = 6 * 60 * 60
 
 
 class _CpuMonitor:
+    """后台采样 CPU/内存，用于总览页资源时间线。"""
+
     def __init__(self, interval=CPU_SAMPLE_INTERVAL_SECONDS, retention=CPU_RETENTION_SECONDS):
         self.interval = interval
         self.retention = retention
@@ -25,10 +27,12 @@ class _CpuMonitor:
             if self._started:
                 return
             self._started = True
+        # daemon 线程随进程退出，不阻塞 Web/Scheduler 停止。
         thread = threading.Thread(target=self._run, name='wfs-cpu-monitor', daemon=True)
         thread.start()
 
     def snapshot(self, hours=6):
+        # API 被访问时懒启动采样线程，避免仅导入模块就产生后台线程。
         self.start()
         since = datetime.datetime.now() - datetime.timedelta(hours=hours)
         with self._lock:
@@ -73,6 +77,7 @@ class _CpuMonitor:
                 total_delta = total - last_total
                 idle_delta = idle - last_idle
                 if total_delta > 0:
+                    # CPU 使用率通过两次系统累计时间差计算，第一轮采样只记录基线。
                     percent = max(0.0, min(100.0, (1.0 - (idle_delta / total_delta)) * 100.0))
             self._last_times = current
 
@@ -196,6 +201,8 @@ def _read_windows_memory_percent():
 
 
 class _TaskStartEvents:
+    """保存最近任务运行段，补足数据库历史写入前的实时视图。"""
+
     def __init__(self, retention=TASK_EVENT_RETENTION_SECONDS):
         self.retention = retention
         self._events = []
@@ -216,6 +223,7 @@ class _TaskStartEvents:
         cutoff = datetime.datetime.now() - datetime.timedelta(seconds=self.retention)
         with self._lock:
             self._events.append(event)
+            # 只保留总览页需要的最近窗口，避免长时间运行后内存无限增长。
             self._events = [item for item in self._events if item['start_time_obj'] >= cutoff]
 
     def complete(self, pid, start_time, end_time=None):
@@ -224,6 +232,7 @@ class _TaskStartEvents:
         with self._lock:
             for item in reversed(self._events):
                 if item.get('id') == pid and item.get('start_time') == start_key:
+                    # 结束时间用于前端把“运行中块”收口，避免色块一直延伸。
                     item['end_time'] = end_time.strftime('%Y-%m-%d %H:%M:%S')
                     item['end_time_obj'] = end_time
                     item['source'] = 'memory'
