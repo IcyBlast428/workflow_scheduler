@@ -14,6 +14,7 @@ from app.bootstrap.core import aps_start, call_task_once, kill_process
 from app.bootstrap.database import GaussDB
 from app.bootstrap.global_vars import TASK_DIR, error_msg, ignores, runnings, success_msg
 from app.bootstrap.schedule_config import load_schedule, preview_schedule, save_schedule
+from app.bootstrap.system_metrics import cpu_monitor_snapshot, recent_task_starts
 from app.bootstrap.task_loader import discover_task_specs
 from app.extensions import scheduler
 from app.settings import (
@@ -27,6 +28,7 @@ from app.settings import (
 
 MAX_PAGE_SIZE = 100
 RECENT_HOURS = 24
+CPU_TIMELINE_HOURS = 6
 
 
 def _get_page_args(default_pagesize=10):
@@ -237,6 +239,91 @@ def _load_recent_run_stats():
     }
 
 
+def _format_datetime_value(value):
+    if hasattr(value, 'strftime'):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    return text.replace('T', ' ')[:19]
+
+
+def _parse_datetime_value(value):
+    text = _format_datetime_value(value)
+    if not text:
+        return None
+    try:
+        return datetime.datetime.strptime(text, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return None
+
+
+def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
+    since = datetime.datetime.now() - datetime.timedelta(hours=hours)
+    markers = []
+    try:
+        with GaussDB() as db:
+            try:
+                rows = db.execute_query_sql(
+                    """
+                    SELECT pid, taskname, state, start_time, group_name, folder_name
+                    FROM wfs_run_history
+                    WHERE start_time >= ?
+                    ORDER BY start_time ASC
+                    LIMIT 1000
+                    """,
+                    return_json=True,
+                    params=(since,),
+                )
+            except Exception as err:
+                if 'group_name' not in str(err).lower() and 'folder_name' not in str(err).lower():
+                    raise
+                rows = db.execute_query_sql(
+                    """
+                    SELECT pid, taskname, state, start_time, '' AS group_name, '' AS folder_name
+                    FROM wfs_run_history
+                    WHERE start_time >= ?
+                    ORDER BY start_time ASC
+                    LIMIT 1000
+                    """,
+                    return_json=True,
+                    params=(since,),
+                )
+        for row in rows:
+            markers.append({
+                'id': row.get('pid'),
+                'name': row.get('taskname') or row.get('pid'),
+                'state': row.get('state'),
+                'group_name': row.get('group_name') or '',
+                'folder_name': row.get('folder_name') or '',
+                'start_time': _format_datetime_value(row.get('start_time')),
+                'source': 'history',
+            })
+    except Exception:
+        markers = []
+
+    by_key = {}
+    for item in markers + recent_task_starts(since):
+        start_time = _format_datetime_value(item.get('start_time'))
+        key = '{}|{}'.format(item.get('id') or '', start_time)
+        if not start_time or not item.get('id') or key in by_key:
+            continue
+        normalized = dict(item)
+        normalized['start_time'] = start_time
+        by_key[key] = normalized
+
+    return sorted(
+        by_key.values(),
+        key=lambda item: _parse_datetime_value(item.get('start_time')) or datetime.datetime.min,
+    )
+
+
+def _log_content(value):
+    if value in (None, ''):
+        return ' '
+    return str(value)
+
+
 def _latest_log_marker():
     try:
         with GaussDB() as db:
@@ -398,6 +485,7 @@ class Dashboard(Resource):
                 counters['failed_jobs'] += 1
 
         recent = _load_recent_run_stats()
+        cpu_metrics = cpu_monitor_snapshot(hours=CPU_TIMELINE_HOURS)
         data = {
             'scheduler': {
                 'enabled': WFS_ENABLE_SCHEDULER,
@@ -408,6 +496,14 @@ class Dashboard(Resource):
             'trend': recent['trend'],
             'failure_rank': recent['failure_rank'],
             'recent_runs': recent['recent_runs'],
+            'cpu_timeline': {
+                'samples': cpu_metrics['samples'],
+                'markers': _load_task_start_markers(CPU_TIMELINE_HOURS),
+                'current': cpu_metrics['current'],
+                'sample_interval_seconds': cpu_metrics['sample_interval_seconds'],
+                'retention_hours': cpu_metrics['retention_hours'],
+                'warning': cpu_metrics['warning'],
+            },
             'warning': recent['error'],
         }
         return success_msg(data)
@@ -725,7 +821,7 @@ class DetailLog(Resource):
                 res = db.execute_query_sql(sql=sql, return_json=False, params=(pid,))
         except Exception as exc:
             return error_msg('log read failed: ' + str(exc))
-        return success_msg(res[0][0] if res else ' ')
+        return success_msg(_log_content(res[0][0]) if res else ' ')
 
 
 class TaskLogDetail(Resource):
@@ -746,7 +842,7 @@ class TaskLogDetail(Resource):
                 return error_msg('missing log id')
         except Exception as exc:
             return error_msg('log read failed: ' + str(exc))
-        return success_msg(res[0][0] if res else ' ')
+        return success_msg(_log_content(res[0][0]) if res else ' ')
 
 
 class CallTask(Resource):

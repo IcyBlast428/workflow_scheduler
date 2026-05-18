@@ -66,7 +66,7 @@ def success_msg(data: [str, dict, list] = None):
     :return: 返回对象
     '''
     successObj = {
-        "data": data if data else {},
+        "data": data if data is not None else {},
         "status": "success",
         "code": 20000
     }

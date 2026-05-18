@@ -580,6 +580,22 @@ noscript {
   color: var(--warning) !important;
 }
 
+.cpu-panel {
+  margin-top: 16px;
+}
+
+.cpu-panel-head {
+  align-items: flex-start;
+}
+
+.cpu-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .rank-item,
 .recent-item {
   display: flex;
@@ -1072,21 +1088,27 @@ tbody tr:hover {
 
 .schedule-modal {
   width: min(1040px, calc(100vw - 32px));
+  height: min(820px, calc(100vh - 32px));
 }
 
 .schedule-body {
+  overflow: hidden;
   padding: 0;
 }
 
 .schedule-form {
   display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 0;
+  min-height: 0;
+  height: 100%;
 }
 
 .schedule-layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 520px;
+  overflow: auto;
 }
 
 .schedule-family-list {
@@ -1317,6 +1339,10 @@ tbody tr:hover {
 
 .schedule-footer {
   margin: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--panel);
 }
 
 .log-pre {

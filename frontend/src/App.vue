@@ -186,51 +186,23 @@
               </section>
             </div>
 
-            <div class="dashboard-layout">
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>失败排行</h2>
-                    <p>最近 24 小时内失败次数最多的任务。</p>
-                  </div>
+            <section class="panel cpu-panel">
+              <div class="panel-head cpu-panel-head">
+                <div>
+                  <h2>机器 CPU 与任务开始点</h2>
+                  <p>最近 {{ dashboard.cpu_timeline.retention_hours || 6 }} 小时采样，标记任务开始时间。</p>
                 </div>
-                <div v-if="!dashboard.failure_rank.length" class="empty-state compact">
-                  <strong>暂无失败任务</strong>
-                  <span>最近 24 小时没有失败记录。</span>
+                <div class="cpu-head-actions">
+                  <span class="tag info">当前 {{ cpuCurrentText }}</span>
+                  <span v-if="dashboard.cpu_timeline.warning" class="tag warning">采样异常</span>
                 </div>
-                <div v-else class="rank-list">
-                  <div v-for="item in dashboard.failure_rank" :key="item.id" class="rank-item">
-                    <div>
-                      <strong>{{ item.id }}</strong>
-                      <span>{{ item.name }}</span>
-                    </div>
-                    <span class="tag danger">{{ item.count }} 次</span>
-                  </div>
-                </div>
-              </section>
-
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>最近执行</h2>
-                    <p>最近 8 条任务执行记录。</p>
-                  </div>
-                </div>
-                <div v-if="!dashboard.recent_runs.length" class="empty-state compact">
-                  <strong>暂无执行记录</strong>
-                  <span>任务执行后会在这里出现。</span>
-                </div>
-                <div v-else class="recent-list">
-                  <div v-for="run in dashboard.recent_runs" :key="`${run.id}-${run.end_time}`" class="recent-item">
-                    <span class="tag" :class="Number(run.state) === 0 ? 'success' : 'danger'">{{ Number(run.state) === 0 ? '成功' : '失败' }}</span>
-                    <div>
-                      <strong>{{ run.id }}</strong>
-                      <span>{{ run.group_name || '-' }} / {{ run.folder_name || '-' }} · {{ run.end_time || '-' }}</span>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
+              </div>
+              <CpuTimelineChart
+                :samples="dashboard.cpu_timeline.samples"
+                :markers="dashboard.cpu_timeline.markers"
+                :retention-hours="dashboard.cpu_timeline.retention_hours || 6"
+              />
+            </section>
           </template>
         </template>
 
@@ -482,6 +454,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { api, clearToken, getToken, setToken } from './api';
 import ConfirmDialog from './components/ConfirmDialog.vue';
+import CpuTimelineChart from './components/CpuTimelineChart.vue';
 import LogTable from './components/LogTable.vue';
 import Pagination from './components/Pagination.vue';
 import ScheduleDialog from './components/ScheduleDialog.vue';
@@ -505,10 +478,13 @@ const busy = ref(false);
 const toasts = ref([]);
 const { confirmState, requestConfirm, resolveConfirm } = useConfirm();
 let eventSource = null;
+let dashboardPollTimer = null;
+let dashboardPollInFlight = false;
 let liveRefreshInFlight = false;
 let schedulePreviewSeq = 0;
 let liveTaskSignature = '';
 let liveLogSignature = '';
+const DASHBOARD_POLL_MS = 5000;
 
 const backendStatus = reactive({
   checking: false,
@@ -569,6 +545,14 @@ const dashboard = reactive({
   trend: [],
   failure_rank: [],
   recent_runs: [],
+  cpu_timeline: {
+    samples: [],
+    markers: [],
+    current: null,
+    sample_interval_seconds: 5,
+    retention_hours: 6,
+    warning: '',
+  },
   warning: '',
 });
 
@@ -635,6 +619,11 @@ const maxTrendValue = computed(() => Math.max(
   1,
   ...dashboard.trend.map((point) => Number(point.success || 0) + Number(point.failed || 0)),
 ));
+
+const cpuCurrentText = computed(() => {
+  const value = Number(dashboard.cpu_timeline.current);
+  return Number.isFinite(value) ? `${value.toFixed(1)}%` : '--';
+});
 
 function applyTheme() {
   document.documentElement.dataset.theme = theme.value;
@@ -726,9 +715,23 @@ async function retryBootstrap() {
 
 function showModal(title, content) {
   modal.title = title;
-  modal.content = String(content || ' ');
+  modal.content = formatModalContent(content);
   modal.wrap = true;
   modal.open = true;
+}
+
+function formatModalContent(content) {
+  if (content === undefined || content === null || content === '') {
+    return ' ';
+  }
+  if (typeof content === 'string') {
+    return content;
+  }
+  try {
+    return JSON.stringify(content, null, 2);
+  } catch (error) {
+    return String(content);
+  }
 }
 
 function closeModal() {
@@ -796,9 +799,17 @@ async function loadDashboard(options = {}) {
     dashboard.trend = data.trend || [];
     dashboard.failure_rank = data.failure_rank || [];
     dashboard.recent_runs = data.recent_runs || [];
+    Object.assign(dashboard.cpu_timeline, {
+      samples: [],
+      markers: [],
+      current: null,
+      sample_interval_seconds: 5,
+      retention_hours: 6,
+      warning: '',
+    }, data.cpu_timeline || {});
     dashboard.warning = data.warning || '';
   } catch (error) {
-    await handleRequestFailure(error, { state: dashboard, toastTitle: '总览加载失败' });
+    await handleRequestFailure(error, { state: dashboard, toastTitle: options.silent ? '' : '总览加载失败' });
   } finally {
     if (!options.silent) {
       dashboard.loading = false;
@@ -845,6 +856,7 @@ function switchView(nextView) {
   view.value = nextView;
   window.location.hash = nextView;
   mobileNavOpen.value = false;
+  syncDashboardPolling();
 }
 
 async function refreshActiveView() {
@@ -1188,7 +1200,7 @@ async function openTaskLog(row) {
       pid: row.id,
     });
     markBackendHealthy('后端连接正常');
-    modal.content = content || ' ';
+    modal.content = formatModalContent(content);
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '日志读取失败' });
     modal.content = error.message || ' ';
@@ -1282,6 +1294,40 @@ function eventSourceUrl() {
   return `/api/taskinfo/events?${params.toString()}`;
 }
 
+function shouldPollDashboard() {
+  return Boolean(token.value && view.value === 'dashboard' && document.visibilityState !== 'hidden');
+}
+
+async function pollDashboard() {
+  if (!shouldPollDashboard() || dashboardPollInFlight) {
+    return;
+  }
+  dashboardPollInFlight = true;
+  try {
+    await loadDashboard({ silent: true });
+  } finally {
+    dashboardPollInFlight = false;
+  }
+}
+
+function syncDashboardPolling() {
+  if (shouldPollDashboard()) {
+    if (!dashboardPollTimer) {
+      dashboardPollTimer = window.setInterval(pollDashboard, DASHBOARD_POLL_MS);
+    }
+    return;
+  }
+  stopDashboardPolling();
+}
+
+function stopDashboardPolling() {
+  if (dashboardPollTimer) {
+    window.clearInterval(dashboardPollTimer);
+    dashboardPollTimer = null;
+  }
+  dashboardPollInFlight = false;
+}
+
 function startLiveEvents() {
   if (!token.value || eventSource) {
     return;
@@ -1310,6 +1356,7 @@ function stopLiveEvents() {
   liveTaskSignature = '';
   liveLogSignature = '';
   liveRefreshInFlight = false;
+  syncDashboardPolling();
 }
 
 function applyTaskSnapshot(snapshotTasks = []) {
@@ -1385,6 +1432,7 @@ function handleLiveStreamError(event) {
 }
 
 function handleVisibilityChange() {
+  syncDashboardPolling();
   if (!token.value || document.visibilityState === 'hidden') {
     return;
   }
@@ -1395,6 +1443,7 @@ function handleVisibilityChange() {
 }
 
 watch(view, async (nextView) => {
+  syncDashboardPolling();
   if (!token.value) {
     return;
   }
@@ -1418,6 +1467,7 @@ watch(token, (nextToken) => {
   } else {
     stopLiveEvents();
   }
+  syncDashboardPolling();
 });
 
 window.addEventListener('hashchange', () => {
@@ -1445,6 +1495,7 @@ onMounted(async () => {
     await loadUser();
     await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
     startLiveEvents();
+    syncDashboardPolling();
   } catch (error) {
     clearToken();
     token.value = '';
@@ -1454,6 +1505,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopLiveEvents();
+  stopDashboardPolling();
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>

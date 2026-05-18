@@ -312,6 +312,7 @@ watch(
   (schedule) => {
     Object.assign(form, defaultForm(), schedule?.form || {});
     form.schedule_family = familyForType(form.schedule_type);
+    ensureOnceAtDateTime();
   },
   { immediate: true },
 );
@@ -320,6 +321,7 @@ watch(
   () => form.schedule_type,
   (scheduleType) => {
     form.schedule_family = familyForType(scheduleType);
+    ensureOnceAtDateTime();
   },
 );
 
@@ -331,6 +333,9 @@ watch(
     }
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
+      if (!canPreview()) {
+        return;
+      }
       emit('preview', { ...form });
     }, 350);
   },
@@ -367,6 +372,36 @@ function defaultForm() {
   };
 }
 
+function padNumber(value) {
+  return String(value).padStart(2, '0');
+}
+
+function defaultRunDateTime() {
+  const next = new Date(Date.now() + 5 * 60 * 1000);
+  next.setSeconds(0, 0);
+  return [
+    next.getFullYear(),
+    padNumber(next.getMonth() + 1),
+    padNumber(next.getDate()),
+  ].join('-') + `T${padNumber(next.getHours())}:${padNumber(next.getMinutes())}`;
+}
+
+function ensureOnceAtDateTime() {
+  if (form.schedule_type !== 'once_at') {
+    return;
+  }
+  if (!String(form.run_datetime || '').trim()) {
+    form.run_datetime = defaultRunDateTime();
+  }
+}
+
+function canPreview() {
+  if (form.schedule_type === 'once_at' && !String(form.run_datetime || '').trim()) {
+    return false;
+  }
+  return true;
+}
+
 function familyForType(scheduleType) {
   return familyOptions.find((family) => (
     typeOptions[family.id] || []
@@ -381,6 +416,7 @@ function selectFamily(familyId) {
 }
 
 function submit() {
+  ensureOnceAtDateTime();
   emit('save', { ...form });
 }
 </script>

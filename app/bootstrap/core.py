@@ -18,6 +18,7 @@ from app.common.mail import send_mail
 from app.common.sms import send_sms
 from app.bootstrap.database import GaussDB
 from app.settings import FLASK_ENV
+from app.bootstrap.system_metrics import record_task_start
 
 if FLASK_ENV == 'development':
     dev_ini = os.path.join(CONFIG_DIR, 'development.ini')
@@ -86,6 +87,8 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
     :return: 执行不返回
     '''
     start_time = datetime.datetime.now()
+    event_group_name, event_folder_name = _task_dir_parts(dir_name, group_name, folder_name)
+    record_task_start(PID, task_name, event_group_name, event_folder_name, start_time)
     dic = {}
     output = ''
     output_simple = ''
