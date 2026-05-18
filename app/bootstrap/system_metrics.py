@@ -156,6 +156,7 @@ class _TaskStartEvents:
             'group_name': group_name or '',
             'folder_name': folder_name or '',
             'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'end_time': '',
             'start_time_obj': start_time,
             'source': 'running',
         }

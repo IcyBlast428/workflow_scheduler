@@ -266,7 +266,7 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
             try:
                 rows = db.execute_query_sql(
                     """
-                    SELECT pid, taskname, state, start_time, group_name, folder_name
+                    SELECT pid, taskname, state, start_time, end_time, group_name, folder_name
                     FROM wfs_run_history
                     WHERE start_time >= ?
                     ORDER BY start_time ASC
@@ -280,7 +280,7 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
                     raise
                 rows = db.execute_query_sql(
                     """
-                    SELECT pid, taskname, state, start_time, '' AS group_name, '' AS folder_name
+                    SELECT pid, taskname, state, start_time, end_time, '' AS group_name, '' AS folder_name
                     FROM wfs_run_history
                     WHERE start_time >= ?
                     ORDER BY start_time ASC
@@ -297,6 +297,7 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
                 'group_name': row.get('group_name') or '',
                 'folder_name': row.get('folder_name') or '',
                 'start_time': _format_datetime_value(row.get('start_time')),
+                'end_time': _format_datetime_value(row.get('end_time')),
                 'source': 'history',
             })
     except Exception:
@@ -310,6 +311,7 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
             continue
         normalized = dict(item)
         normalized['start_time'] = start_time
+        normalized['end_time'] = _format_datetime_value(item.get('end_time'))
         by_key[key] = normalized
 
     return sorted(

@@ -2,6 +2,7 @@
 import datetime
 import logging
 import os
+import random
 import re
 import signal
 import subprocess
@@ -12,7 +13,7 @@ from configobj import ConfigObj
 import pandas as pd
 from app.bootstrap.global_vars import runnings, TASK_DIR, uuidhex, ignores,CONFIG_DIR
 from app.bootstrap.task_loader import discover_task_specs
-from app.bootstrap.schedule_config import apply_persisted_schedule, build_scheduler_trigger
+from app.bootstrap.schedule_config import SCHEDULER_TZ, apply_persisted_schedule, build_scheduler_trigger
 from app.extensions import scheduler
 from app.common.mail import send_mail
 from app.common.sms import send_sms
@@ -26,6 +27,9 @@ if FLASK_ENV == 'development':
     dev_run_job = config_base.get('dev_run_job') or {}
     dev_run_job_pid = dev_run_job.get('pid')
     dev_run_all = dev_run_job.get('run_all')
+
+
+INTERVAL_START_STAGGER_MAX_SECONDS = 300
 
 
 def getReceiverList(receiver_str, send_type, connection) -> list:
@@ -490,6 +494,44 @@ def call_task_once(pid):
     raise ValueError('task not found: {}'.format(pid))
 
 
+def _rule_int(rules, key):
+    try:
+        return int((rules or {}).get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _interval_seconds(rules):
+    return (
+        _rule_int(rules, 'WEEKS') * 7 * 24 * 60 * 60
+        + _rule_int(rules, 'DAYS') * 24 * 60 * 60
+        + _rule_int(rules, 'HOURS') * 60 * 60
+        + _rule_int(rules, 'MINUTES') * 60
+        + _rule_int(rules, 'SECONDS')
+    )
+
+
+def _stagger_interval_rules(pid, rules, enabled=True):
+    if not enabled:
+        return rules
+    if (rules or {}).get('START_DATE'):
+        return rules
+
+    seconds = _interval_seconds(rules)
+    if seconds <= 1:
+        return rules
+
+    max_offset = min(seconds - 1, INTERVAL_START_STAGGER_MAX_SECONDS)
+    offset = random.randint(0, max_offset)
+    if offset <= 0:
+        return rules
+
+    next_rules = dict(rules or {})
+    next_rules['START_DATE'] = datetime.datetime.now(SCHEDULER_TZ) + datetime.timedelta(seconds=offset)
+    logging.getLogger(__name__).info('stagger interval job %s by %s seconds after scheduler bootstrap', pid, offset)
+    return next_rules
+
+
 def aps_start(task_pid=None, action='refresh'):
     """
     监听crontabs里的任务及启用
@@ -560,6 +602,11 @@ def aps_start(task_pid=None, action='refresh'):
             raw_rules = spec.get('schedule_rules')
             if raw_rules is None:
                 raw_rules = {}
+            raw_rules = _stagger_interval_rules(
+                pid,
+                raw_rules,
+                enabled=(task_pid is None and spec.get('trigger') == 'interval'),
+            )
             trigger = build_scheduler_trigger(spec.get('trigger'), raw_rules)
             scheduler.add_job(
                 func=execute_py,

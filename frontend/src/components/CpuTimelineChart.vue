@@ -3,6 +3,7 @@
     ref="chartRoot"
     class="cpu-timeline"
     :class="{ dragging }"
+    :style="{ minHeight: `${chartHeight}px` }"
     @wheel="handleWheel"
     @mousedown="handleMouseDown"
     @mousemove="handleMouseMove"
@@ -11,11 +12,55 @@
   >
     <svg
       class="cpu-svg"
+      :style="{ height: `${chartHeight}px` }"
       :viewBox="`0 0 ${chartWidth} ${chartHeight}`"
       role="img"
       aria-label="CPU timeline"
     >
-      <rect class="cpu-plot-bg" :x="margin.left" :y="margin.top" :width="plotWidth" :height="plotHeight" rx="8" />
+      <g class="task-tracks">
+        <line
+          v-for="lane in taskLaneIndexes"
+          :key="lane"
+          :x1="margin.left"
+          :x2="plotRight"
+          :y1="laneCenterY(lane)"
+          :y2="laneCenterY(lane)"
+        />
+        <g
+          v-for="block in taskBlocks"
+          :key="block.key"
+          class="task-block-group"
+          @mouseenter="showTaskTooltip(block, $event)"
+          @mousemove="showTaskTooltip(block, $event)"
+          @mouseleave="clearTooltip"
+        >
+          <clipPath :id="block.clipId">
+            <rect :x="block.x" :y="block.y" :width="block.width" :height="taskBarHeight" rx="5" />
+          </clipPath>
+          <rect
+            class="task-block"
+            :class="{ running: block.running, failed: block.failed }"
+            :x="block.x"
+            :y="block.y"
+            :width="block.width"
+            :height="taskBarHeight"
+            rx="5"
+            :style="{ fill: block.color }"
+          />
+          <text
+            v-if="block.width >= 34"
+            class="task-block-label"
+            :x="block.x + 7"
+            :y="block.y + 15"
+            :clip-path="`url(#${block.clipId})`"
+          >
+            {{ block.label }}
+          </text>
+          <title>{{ taskTitle(block) }}</title>
+        </g>
+      </g>
+
+      <rect class="cpu-plot-bg" :x="margin.left" :y="plotTop" :width="plotWidth" :height="plotHeight" rx="8" />
 
       <g class="cpu-grid">
         <g v-for="tick in yTicks" :key="tick">
@@ -23,7 +68,7 @@
           <text :x="margin.left - 10" :y="yForCpu(tick) + 4" text-anchor="end">{{ tick }}%</text>
         </g>
         <g v-for="tick in xTicks" :key="tick.time">
-          <line :x1="xForTime(tick.time)" :x2="xForTime(tick.time)" :y1="margin.top" :y2="plotBottom" />
+          <line :x1="xForTime(tick.time)" :x2="xForTime(tick.time)" :y1="taskAreaTop" :y2="plotBottom" />
           <text :x="xForTime(tick.time)" :y="chartHeight - 18" text-anchor="middle">{{ tick.label }}</text>
         </g>
       </g>
@@ -31,21 +76,8 @@
       <path v-if="areaPath" class="cpu-area" :d="areaPath" />
       <path v-if="linePath" class="cpu-line" :d="linePath" />
 
-      <g
-        v-for="marker in visibleMarkers"
-        :key="`${marker.id}-${marker.start_time}`"
-        class="cpu-marker"
-        @mouseenter="showMarkerTooltip(marker, $event)"
-        @mousemove="showMarkerTooltip(marker, $event)"
-        @mouseleave="clearTooltip"
-      >
-        <line :x1="xForTime(marker.time)" :x2="xForTime(marker.time)" :y1="margin.top" :y2="plotBottom" />
-        <path :d="markerPath(marker)" />
-        <title>{{ markerTitle(marker) }}</title>
-      </g>
-
       <g v-if="hoverSample" class="cpu-hover">
-        <line :x1="xForTime(hoverSample.time)" :x2="xForTime(hoverSample.time)" :y1="margin.top" :y2="plotBottom" />
+        <line :x1="xForTime(hoverSample.time)" :x2="xForTime(hoverSample.time)" :y1="plotTop" :y2="plotBottom" />
         <circle :cx="xForTime(hoverSample.time)" :cy="yForCpu(hoverSample.cpu)" r="4" />
       </g>
     </svg>
@@ -70,10 +102,30 @@ const props = defineProps({
   retentionHours: { type: Number, default: 6 },
 });
 
+const CPU_PLOT_HEIGHT = 260;
+const TASK_LANE_HEIGHT = 24;
+const TASK_BAR_HEIGHT = 18;
+const TASK_AREA_PADDING = 16;
+const TASK_AREA_EMPTY_HEIGHT = 18;
+const MAX_TASK_LANES = 20;
+const MIN_TASK_BLOCK_WIDTH = 18;
+const palette = [
+  '#0f766e',
+  '#2563eb',
+  '#7c3aed',
+  '#be123c',
+  '#c2410c',
+  '#047857',
+  '#0369a1',
+  '#a21caf',
+  '#b45309',
+  '#4f46e5',
+];
+
 const chartRoot = ref(null);
 const chartWidth = ref(900);
-const chartHeight = 360;
-const margin = { top: 22, right: 24, bottom: 48, left: 56 };
+const margin = { left: 56, right: 24, bottom: 48 };
+const taskAreaTop = 16;
 const viewStart = ref(0);
 const viewEnd = ref(0);
 const userNavigated = ref(false);
@@ -90,9 +142,8 @@ const tooltip = reactive({
 let resizeObserver = null;
 
 const plotRight = computed(() => chartWidth.value - margin.right);
-const plotBottom = computed(() => chartHeight - margin.bottom);
 const plotWidth = computed(() => Math.max(1, chartWidth.value - margin.left - margin.right));
-const plotHeight = computed(() => Math.max(1, chartHeight - margin.top - margin.bottom));
+const taskBarHeight = TASK_BAR_HEIGHT;
 
 const normalizedSamples = computed(() => props.samples
   .map((item) => {
@@ -110,27 +161,41 @@ const normalizedSamples = computed(() => props.samples
   .filter(Boolean)
   .sort((left, right) => left.time - right.time));
 
-const normalizedMarkers = computed(() => props.markers
-  .map((item) => {
-    const time = parseTime(item.start_time || item.time || item.datetime);
-    if (!Number.isFinite(time)) {
+const normalizedTasks = computed(() => props.markers
+  .map((item, index) => {
+    const start = parseTime(item.start_time || item.time || item.datetime);
+    let end = parseTime(item.end_time);
+    if (!Number.isFinite(start)) {
       return null;
+    }
+    const running = !Number.isFinite(end);
+    if (running) {
+      end = Math.max(Date.now(), start + 1000);
+    }
+    if (end <= start) {
+      end = start + 1000;
     }
     return {
       ...item,
-      time,
-      start_time: item.start_time || formatFullTime(time),
+      index,
+      start,
+      end,
+      running,
+      start_time: item.start_time || formatFullTime(start),
+      end_time: item.end_time || '',
+      label: taskLabel(item),
+      failed: Number(item.state) !== 0 && item.state !== undefined && item.state !== null && item.state !== '',
     };
   })
   .filter(Boolean)
-  .sort((left, right) => left.time - right.time));
+  .sort((left, right) => left.start - right.start || left.end - right.end));
 
 const fullRange = computed(() => {
   const retentionMs = Math.max(1, props.retentionHours || 6) * 60 * 60 * 1000;
   const now = Date.now();
   const dataTimes = [
     ...normalizedSamples.value.map((item) => item.time),
-    ...normalizedMarkers.value.map((item) => item.time),
+    ...normalizedTasks.value.flatMap((item) => [item.start, item.end]),
   ].filter(Number.isFinite);
   const maxDataTime = dataTimes.length ? Math.max(...dataTimes) : now;
   const minDataTime = dataTimes.length ? Math.min(...dataTimes) : now;
@@ -147,13 +212,57 @@ const visibleSamples = computed(() => normalizedSamples.value.filter((item) => (
   item.time >= viewStart.value && item.time <= viewEnd.value
 )));
 
-const lineSamples = computed(() => {
-  return visibleSamples.value.slice();
+const lineSamples = computed(() => visibleSamples.value.slice());
+
+const visibleTasks = computed(() => normalizedTasks.value.filter((item) => (
+  item.end >= viewStart.value && item.start <= viewEnd.value
+)));
+
+const laidOutTasks = computed(() => {
+  const laneEnds = [];
+  const gapMs = ((viewEnd.value - viewStart.value) / plotWidth.value) * 4;
+  return visibleTasks.value.map((task) => {
+    let lane = laneEnds.findIndex((end) => task.start >= end + gapMs);
+    if (lane === -1) {
+      lane = laneEnds.length < MAX_TASK_LANES ? laneEnds.length : leastBusyLane(laneEnds);
+    }
+    laneEnds[lane] = Math.max(laneEnds[lane] || 0, task.end);
+    return { ...task, lane };
+  });
 });
 
-const visibleMarkers = computed(() => normalizedMarkers.value.filter((item) => (
-  item.time >= viewStart.value && item.time <= viewEnd.value
-)));
+const taskLaneCount = computed(() => {
+  if (!laidOutTasks.value.length) {
+    return 0;
+  }
+  return Math.min(MAX_TASK_LANES, Math.max(...laidOutTasks.value.map((item) => item.lane)) + 1);
+});
+
+const taskAreaHeight = computed(() => (
+  taskLaneCount.value
+    ? TASK_AREA_PADDING + taskLaneCount.value * TASK_LANE_HEIGHT
+    : TASK_AREA_EMPTY_HEIGHT
+));
+const plotTop = computed(() => taskAreaTop + taskAreaHeight.value);
+const plotHeight = computed(() => CPU_PLOT_HEIGHT);
+const plotBottom = computed(() => plotTop.value + plotHeight.value);
+const chartHeight = computed(() => plotBottom.value + margin.bottom);
+const taskLaneIndexes = computed(() => Array.from({ length: taskLaneCount.value }, (_, index) => index));
+
+const taskBlocks = computed(() => laidOutTasks.value.map((task, index) => {
+  const startX = xForTime(Math.max(task.start, viewStart.value));
+  const endX = xForTime(Math.min(task.end, viewEnd.value));
+  const width = Math.max(MIN_TASK_BLOCK_WIDTH, endX - startX);
+  return {
+    ...task,
+    key: `${task.id || task.index}-${task.start}-${index}`,
+    clipId: `task-clip-${index}-${Math.abs(hashText(`${task.id || ''}${task.start}`))}`,
+    x: Math.min(startX, plotRight.value - MIN_TASK_BLOCK_WIDTH),
+    y: laneY(task.lane),
+    width,
+    color: taskColor(task),
+  };
+}));
 
 const yTicks = [100, 75, 50, 25, 0];
 
@@ -188,7 +297,7 @@ const areaPath = computed(() => {
 });
 
 const tooltipStyle = computed(() => {
-  const width = 220;
+  const width = 240;
   const left = Math.min(Math.max(8, tooltip.x + 12), Math.max(8, chartWidth.value - width - 8));
   const top = Math.max(8, tooltip.y - 10);
   return {
@@ -269,6 +378,52 @@ function formatTick(time, span) {
   return new Intl.DateTimeFormat('zh-CN', options).format(new Date(time));
 }
 
+function formatDuration(start, end) {
+  const seconds = Math.max(1, Math.round((end - start) / 1000));
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remain = seconds % 60;
+  if (minutes < 60) {
+    return remain ? `${minutes} 分 ${remain} 秒` : `${minutes} 分`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const minuteRemain = minutes % 60;
+  return minuteRemain ? `${hours} 小时 ${minuteRemain} 分` : `${hours} 小时`;
+}
+
+function taskLabel(task) {
+  const id = task.id || '任务';
+  const name = task.name && task.name !== id ? task.name : '';
+  return name ? `${id} · ${name}` : id;
+}
+
+function hashText(text) {
+  return String(text || '').split('').reduce((total, char) => (
+    ((total << 5) - total) + char.charCodeAt(0)
+  ), 0);
+}
+
+function taskColor(task) {
+  if (task.failed) {
+    return '#dc2626';
+  }
+  return palette[Math.abs(hashText(task.id || task.name || task.index)) % palette.length];
+}
+
+function leastBusyLane(laneEnds) {
+  let lane = 0;
+  let value = laneEnds[0] || 0;
+  laneEnds.forEach((item, index) => {
+    if (item < value) {
+      lane = index;
+      value = item;
+    }
+  });
+  return lane;
+}
+
 function xForTime(time) {
   const span = Math.max(1, viewEnd.value - viewStart.value);
   return margin.left + ((time - viewStart.value) / span) * plotWidth.value;
@@ -276,6 +431,14 @@ function xForTime(time) {
 
 function yForCpu(cpu) {
   return plotBottom.value - (Math.max(0, Math.min(100, cpu)) / 100) * plotHeight.value;
+}
+
+function laneY(lane) {
+  return plotTop.value - TASK_AREA_PADDING - ((lane + 1) * TASK_LANE_HEIGHT) + 3;
+}
+
+function laneCenterY(lane) {
+  return laneY(lane) + TASK_BAR_HEIGHT / 2;
 }
 
 function timeForX(x) {
@@ -320,7 +483,7 @@ function pointY(event) {
 }
 
 function handleWheel(event) {
-  if (!normalizedSamples.value.length && !normalizedMarkers.value.length) {
+  if (!normalizedSamples.value.length && !normalizedTasks.value.length) {
     return;
   }
   event.preventDefault();
@@ -390,7 +553,7 @@ function showSampleTooltip(event) {
   }
   const x = pointX(event);
   const y = pointY(event);
-  if (x < margin.left || x > plotRight.value || y < margin.top || y > plotBottom.value) {
+  if (x < margin.left || x > plotRight.value || y < plotTop.value || y > plotBottom.value) {
     clearTooltip();
     return;
   }
@@ -410,14 +573,15 @@ function showSampleTooltip(event) {
   tooltip.y = y;
 }
 
-function showMarkerTooltip(marker, event) {
+function showTaskTooltip(block, event) {
   hoverSample.value = null;
   tooltip.open = true;
-  tooltip.title = marker.id || '任务';
+  tooltip.title = block.label;
   tooltip.lines = [
-    marker.name || marker.id || '',
-    marker.start_time,
-    marker.group_name || marker.folder_name ? `${marker.group_name || '-'} / ${marker.folder_name || '-'}` : '',
+    `开始 ${block.start_time}`,
+    block.running ? '运行中' : `结束 ${block.end_time || formatFullTime(block.end)}`,
+    `耗时 ${formatDuration(block.start, block.end)}`,
+    block.group_name || block.folder_name ? `${block.group_name || '-'} / ${block.folder_name || '-'}` : '',
   ].filter(Boolean);
   tooltip.x = pointX(event);
   tooltip.y = pointY(event);
@@ -428,21 +592,18 @@ function clearTooltip() {
   tooltip.open = false;
 }
 
-function markerPath(marker) {
-  const x = xForTime(marker.time);
-  const y = margin.top + 10;
-  return `M ${x.toFixed(1)} ${y - 6} L ${(x + 5).toFixed(1)} ${y.toFixed(1)} L ${x.toFixed(1)} ${y + 6} L ${(x - 5).toFixed(1)} ${y.toFixed(1)} Z`;
-}
-
-function markerTitle(marker) {
-  return [marker.id, marker.name, marker.start_time].filter(Boolean).join(' · ');
+function taskTitle(block) {
+  return [
+    block.label,
+    block.start_time,
+    block.running ? '运行中' : (block.end_time || formatFullTime(block.end)),
+  ].filter(Boolean).join(' · ');
 }
 </script>
 
 <style scoped>
 .cpu-timeline {
   position: relative;
-  min-height: 360px;
   overflow: hidden;
   touch-action: none;
 }
@@ -454,7 +615,33 @@ function markerTitle(marker) {
 .cpu-svg {
   display: block;
   width: 100%;
-  height: 360px;
+}
+
+.task-tracks line {
+  stroke: var(--line);
+  stroke-dasharray: 2 6;
+  stroke-width: 1;
+}
+
+.task-block {
+  stroke: rgba(255, 255, 255, 0.48);
+  stroke-width: 1;
+}
+
+.task-block.running {
+  stroke: #facc15;
+  stroke-width: 2;
+}
+
+.task-block.failed {
+  fill: var(--danger);
+}
+
+.task-block-label {
+  fill: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  pointer-events: none;
 }
 
 .cpu-plot-bg {
@@ -485,18 +672,6 @@ function markerTitle(marker) {
   stroke-linejoin: round;
   stroke-width: 2.4;
   pointer-events: none;
-}
-
-.cpu-marker line {
-  stroke: #f59e0b;
-  stroke-dasharray: 4 4;
-  stroke-width: 1.4;
-}
-
-.cpu-marker path {
-  fill: #f59e0b;
-  stroke: var(--panel);
-  stroke-width: 1.4;
 }
 
 .cpu-hover line {
