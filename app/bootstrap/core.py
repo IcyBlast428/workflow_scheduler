@@ -81,7 +81,7 @@ def _task_dir_parts(dir_name='', group_name='', folder_name=''):
     return (parts + [''])[:2]
 
 
-def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_name='', folder_name=''):
+def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_name='', folder_name='', python_executable=''):
     '''
     执行py文件 并记录到日志中
     :param task_name:
@@ -104,8 +104,9 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
         else:
             popen_kwargs['start_new_session'] = True
 
+        executable = python_executable or sys.executable
         cmd = subprocess.Popen(
-            [sys.executable, str(path)],
+            [str(executable), str(path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -485,6 +486,7 @@ def call_task_once(pid):
                 spec.get('timeout_seconds') or 0,
                 spec.get('group_name') or '',
                 spec.get('folder_name') or '',
+                spec.get('python_executable') or '',
             ],
             id='manual_{}_{}'.format(pid, uuidhex()),
             name='Manual run: {}'.format(spec.get('task_name')),
@@ -621,6 +623,7 @@ def aps_start(task_pid=None, action='refresh'):
                     spec.get('timeout_seconds') or 0,
                     spec.get('group_name') or '',
                     spec.get('folder_name') or '',
+                    spec.get('python_executable') or '',
                 ],
                 name=spec.get('task_name'),
                 replace_existing=True,

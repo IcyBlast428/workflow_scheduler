@@ -65,6 +65,28 @@ def resolve_main_file(task_dir, main_file):
     return main_path
 
 
+def _venv_python_path(venv_dir):
+    venv_dir = Path(venv_dir)
+    candidates = [
+        venv_dir / 'Scripts' / 'python.exe',
+        venv_dir / 'bin' / 'python',
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return ''
+
+
+def resolve_python_executable(group_dir, task_dir):
+    task_python = _venv_python_path(Path(task_dir) / '.venv')
+    if task_python:
+        return task_python, 'task'
+    group_python = _venv_python_path(Path(group_dir) / '.venv')
+    if group_python:
+        return group_python, 'group'
+    return '', 'project'
+
+
 def infer_main_file(task_dir):
     task_dir = Path(task_dir)
     if (task_dir / DEFAULT_MAIN_FILE).is_file():
@@ -153,7 +175,9 @@ def _apply_record(spec, record):
 
 def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, records_by_folder=None):
     task_dir = Path(task_dir)
+    group_dir = task_dir.parent
     inferred_main_file = infer_main_file(task_dir)
+    python_executable, python_source = resolve_python_executable(group_dir, task_dir)
     pid = folder_name
     max_instances = 1
     timeout_seconds = 0
@@ -182,6 +206,8 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
         'main_file': (inferred_main_file or '').strip(),
         'main_file_path': None,
         'main_file_options': list_python_entry_files(task_dir),
+        'python_executable': python_executable,
+        'python_source': python_source,
         'error': None,
         'main_file_error': '',
         'config_record': None,

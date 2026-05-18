@@ -1,36 +1,149 @@
 # Workflow Scheduler
 
-Workflow Scheduler 是一个基于 `Flask + APScheduler + Vue 3` 的内网定时任务调度平台。后端负责扫描 `app/jobs/<group>/<task>/` 下的任务代码，前端负责登录、总览看板、任务配置、调度策略、任务控制、日志查询和代码更新。
+Workflow Scheduler 是一个面向内网运维和业务脚本的定时任务调度平台，基于 `Flask + APScheduler + Vue 3` 构建。平台扫描 `app/jobs/<group>/<task>/` 下的任务代码，提供登录、任务列表、调度配置、手动触发、暂停强停、运行日志、系统日志、代码更新，以及总览页的 CPU/内存时间线监控。
+
+总览页会把机器 CPU、内存使用率和任务运行时间段叠加在同一张时间图中：CPU 为蓝线，内存为黄线；成功任务为绿色运行块，失败任务为红色运行块，运行中的任务为紫色运行块。图表支持滚轮缩放时间轴、中键拖动时间轴，适合观察“任务开始执行”和“机器资源升高”之间的关系。
 
 生产环境推荐拆成两个进程：
 
-- Web 管理进程：监听 `0.0.0.0:8008`，只提供页面和 API，不直接运行调度器。
+- Web 管理进程：监听 `0.0.0.0:8008`，提供页面和 API，不直接运行调度器。
 - Scheduler 控制进程：监听 `127.0.0.1:8009`，单 worker 运行 APScheduler 和任务控制接口。
 
-本地开发仍可以使用单进程模式，方便调试。
+本地开发可以使用单进程模式，方便调试。
 
 ## 目录结构
 
 ```text
 workflow-scheduler/
-├── app/                    Flask 应用、API、调度器、配置和构建产物
+├── app/
 │   ├── api/                用户接口与任务接口
-│   ├── bootstrap/          调度注册、任务校验、数据库封装
+│   ├── bootstrap/          调度注册、任务扫描、数据库封装、系统指标采样
 │   ├── config/             development / production 配置
-│   ├── dist/               Vue 构建产物，由 Flask/Gunicorn 托管
+│   ├── dist/               前端构建产物，由 Flask/Gunicorn 托管
 │   └── jobs/               任务目录，按 group/task 分层
 ├── frontend/               Vue 3 + Vite 前端源码
 ├── logs/                   本地运行日志
-├── backend_dev_runner.py   Windows/本地开发启动入口
+├── backend_dev_runner.py   本地开发启动入口
 ├── run.py                  Flask/Gunicorn 应用入口
 ├── run.sh                  Linux 命令行启动脚本
+├── requirements.txt        平台主环境依赖
 ├── wfs.service             systemd Web 管理进程
 └── wfs-scheduler.service   systemd Scheduler 控制进程
 ```
 
+## 任务与依赖管理
+
+平台主环境只应该安装“调度平台本身”需要的依赖，例如 Flask、APScheduler、数据库驱动、pandas 等。子任务依赖建议和主项目分开管理，避免某个任务升级第三方库后影响平台或其他任务。
+
+任务目录规范：
+
+```text
+app/jobs/<group>/<task>/
+├── main.py
+├── README.md              # 推荐：任务说明、负责人、运行手册
+├── requirements.txt       # 可选：当前任务的依赖
+└── .venv/                 # 可选：当前任务的独立虚拟环境
+```
+
+也可以按任务组共享一套环境：
+
+```text
+app/jobs/<group>/
+├── .venv/
+├── requirements.txt       # 可选：当前任务组共享依赖
+└── <task>/
+    └── main.py
+```
+
+任务执行时 Python 解释器的选择顺序：
+
+1. 如果存在 `app/jobs/<group>/<task>/.venv`，使用任务自己的虚拟环境。
+2. 否则如果存在 `app/jobs/<group>/.venv`，使用任务组共享虚拟环境。
+3. 否则使用平台主环境，也就是启动 WFS 的 Python。
+
+推荐策略：
+
+- 平台主环境：只安装 `requirements.txt`，保持稳定。
+- 简单同质任务：可以直接使用平台主环境，但新增依赖前要确认不会影响现有任务。
+- 同一业务域任务：使用 `app/jobs/<group>/.venv`，适合一组任务共享数据库 SDK、业务 SDK 或同版本工具库。
+- 依赖差异大的任务：使用 `app/jobs/<group>/<task>/.venv`，让单个任务完全隔离。
+- 共享业务代码：抽成内部公共包或共享模块，固定版本后安装到对应任务环境，不建议在多个任务目录复制同一段代码。
+
+示例：为单个任务创建独立环境。
+
+```bash
+cd app/jobs/testJob/test_job
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python main.py
+```
+
+Windows：
+
+```powershell
+cd app\jobs\testJob\test_job
+python -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+```
+
+示例：为任务组创建共享环境。
+
+```bash
+cd app/jobs/testJob
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+生产准入建议：
+
+- 每个任务至少提供 `main.py`，并能独立运行。
+- 依赖文件和运行环境要随任务一起维护。
+- 脚本尽量幂等，失败后可重试，或具备补偿能力。
+- 在前端配置合理的超时时间和最大并发。
+- 任务依赖变化时，先在对应 `.venv` 验证，再刷新调度器。
+
+## 任务发现与调度配置
+
+平台扫描 `app/jobs/<group>/<task>/`，默认使用 `<task>` 目录名作为 PID。PID 是任务在调度器、运行日志和统计表中的全局唯一 ID，只允许字母、数字、下划线和中划线。
+
+入口文件规则：
+
+- 如果任务目录里有 `main.py`，默认作为入口文件。
+- 如果只有一个 `.py` 文件，会自动作为入口候选。
+- 如果入口文件缺失或不明确，任务会显示为配置异常，需要在前端“配置”弹窗中选择或填写入口文件。
+
+调度配置由前端保存到 `wfs_task_config`，不再依赖任务目录中的旧版 `config.ini`。如果旧任务仍保留 `config.ini`，可以作为迁移参考，但实际调度以数据库配置为准。
+
+当前支持的调度策略：
+
+- 周期间隔：每分钟、每小时、每 N 分钟、每 N 小时。
+- 固定时间：每天固定时间、每周固定时间、每月固定日期固定时间、每月最后一天固定时间、单次指定时间。
+- 时间窗口：例如 `09:30` 到 `18:15` 之间每 N 分钟执行。
+- 高级规则：自定义 Cron 字段。
+
+为避免项目重启后大量 interval 任务同时启动，Scheduler 批量注册 interval 任务时会为首次执行加入一个内存中的随机错峰时间。这个错峰不会写回数据库，也不会改变任务的周期策略。
+
+推荐新增任务流程：
+
+1. 创建目录 `app/jobs/<group>/<task>/`，`<task>` 建议直接使用稳定 PID。
+2. 编写 `main.py` 和任务 README。
+3. 如有特殊依赖，创建任务级或组级 `.venv` 并安装依赖。
+4. 本地运行 `python main.py` 或对应 `.venv` 的 Python 验证任务逻辑。
+5. 启动平台后点击“重扫新增”，确认任务出现在任务列表。
+6. 在任务列表点击“配置”，维护展示名称、入口文件、最大并发、超时秒数和调度策略。
+7. 保存配置后，如果“启用自动调度”已打开，Scheduler 会刷新并注册该任务。
+
 ## 本地开发
 
-先构建前端：
+安装后端依赖：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
+```
+
+构建前端：
 
 ```powershell
 cd frontend
@@ -38,11 +151,11 @@ npm.cmd install
 npm.cmd run build
 ```
 
-再启动后端单进程模式：
+启动后端单进程模式：
 
 ```powershell
 cd ..
-python backend_dev_runner.py
+.\.venv\Scripts\python.exe backend_dev_runner.py
 ```
 
 访问地址：
@@ -57,13 +170,26 @@ http://127.0.0.1:8008/
 http://127.0.0.1:8008/api/user/health
 ```
 
+前端开发模式：
+
+```powershell
+cd frontend
+npm.cmd run dev
+```
+
+Vite 默认访问：
+
+```text
+http://127.0.0.1:5173/
+```
+
 Linux 本地也可以使用：
 
 ```bash
 ./run.sh single
 ```
 
-如果需要模拟生产双进程，可以开两个终端：
+如果需要模拟生产双进程：
 
 ```bash
 ./run.sh scheduler
@@ -77,14 +203,16 @@ Linux 本地也可以使用：
 部署步骤：
 
 ```bash
+cd /data/wfs
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip check
+
 cd /data/wfs/frontend
 npm install
 npm run build
 
 cd /data/wfs
-pip install -r requirements.txt
-pip check
-
 sudo cp wfs.service /etc/systemd/system/wfs.service
 sudo cp wfs-scheduler.service /etc/systemd/system/wfs-scheduler.service
 sudo systemctl daemon-reload
@@ -93,6 +221,14 @@ sudo systemctl start wfs-scheduler
 sudo systemctl start wfs
 sudo systemctl status wfs-scheduler
 sudo systemctl status wfs
+```
+
+如果任务或任务组使用独立 `.venv`，部署时需要额外安装对应依赖。例如：
+
+```bash
+cd /data/wfs/app/jobs/testJob/test_job
+/data/wfs/.venv/bin/python -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
 查看日志：
@@ -161,89 +297,27 @@ WFS_ENABLE_SCHEDULER=false
 WFS_SCHEDULER_CONTROL_URL=http://127.0.0.1:8009
 ```
 
-管理员账号、token、头像地址、代码更新路径等也从 `app/config/*.ini` 或环境变量读取。
+管理员账号、token、头像地址、代码更新路径等也从 `app/config/*.ini` 或环境变量读取。生产环境请不要提交真实密钥或长期有效 token。
 
-## 任务规范
+## 数据库
 
-典型任务目录：
+平台依赖 `ddl.sql` 中的运行历史、系统日志、任务统计和任务配置表。首次部署或升级后请确认目标库已执行最新 DDL，尤其是：
 
-```text
-app/jobs/<group>/<task>/
-├── main.py
-├── README.md              # 推荐：任务说明、负责人、运行手册
-└── requirements.txt       # 可选：该任务或任务组的额外依赖
-```
-
-目录命名规范：
-
-- `<group>` 表示业务域或系统域，例如 `billing`、`databaseSync`、`opsReport`。
-- `<task>` 表示 Task 名，也是默认 `PID`，例如目录 `app/jobs/billing/monthly_report/` 的默认 PID 就是 `monthly_report`。
-- `PID` 是调度器和数据库统计表里的全局唯一任务 ID，只允许字母、数字、下划线和中划线。第三阶段开始不再从 `config.ini` 读取 PID，推荐直接用 `<task>` 目录名作为稳定 ID。
-- `PID` 不能重复。平台扫描时会校验所有任务；只要发现重复，冲突任务都会显示为配置错误，调度器不会注册。
-- `task_name`、入口文件、最大并发、超时秒数、是否启用自动调度和调度策略都在前端“配置”弹窗维护，并保存到 `wfs_task_config`。
-- 新增任务后先执行“重扫新增”，确认组名、Task 名、PID 和入口文件都正确，再在前端保存调度策略。未保存调度策略的任务会保持停止状态，但仍然允许手动触发一次。
-
-任务目录不再需要 `config.ini`。如果目录中还保留旧版 `config.ini`，平台不会再把它作为调度来源；后续请以 `wfs_task_config` 和前端配置为准。
-
-任务发现和入口文件规则：
-
-- 平台扫描 `app/jobs/<group>/<task>/`，默认使用 `<task>` 作为 PID。
-- 如果目录里有 `main.py`，默认作为入口文件；如果只有一个 `.py` 文件，会自动作为入口候选。
-- 如果入口文件缺失或不明确，任务会显示为配置异常，需要在前端配置里选择或填写入口文件。
-- 未配置调度策略的任务不会被 APScheduler 自动注册，但“触发”按钮仍可立即执行一次，用于调试和上线前验证。
-
-任务配置由 `app/bootstrap/task_loader.py` 发现和校验，调度注册入口是 `app/bootstrap/core.py` 的 `aps_start()`。任务元数据会拆分记录为 `group_name`、`folder_name`、`pid` 和 `task_name`，其中 `wfs_job_stats.pid` 是主键，`wfs_task_config.pid` 是前端运行配置主键。
-
-推荐的新建任务流程：
-
-1. 在 `app/jobs/<group>/<task>/` 下创建任务目录，`<task>` 建议等于 `PID`。
-2. 编写 `main.py`，入口脚本应尽量幂等，失败后可重复执行或具备补偿能力。
-3. 本地单独运行 `python main.py` 验证依赖和业务逻辑。
-4. 启动平台后点击“重扫新增”，确认任务出现在任务列表。
-5. 在任务列表点击“配置”，维护展示名称、入口文件、最大并发、超时秒数和调度策略。
-6. 保存配置后，如果“启用自动调度”已打开，Scheduler 会刷新该任务并立即按策略注册；如果关闭，则任务保持停止状态。
-
-### 前端调整调度策略
-
-任务列表的“配置”按钮会读取当前任务运行配置和调度策略，保存后刷新单个任务调度并立即生效。第三阶段开始，`wfs_task_config` 是唯一调度配置来源；生产环境必须先执行新版 `ddl.sql` 创建该表。
-
-当前支持：
-
-- 周期间隔：每分钟、每小时、每 N 分钟、每 N 小时。
-- 固定时间：每天固定时间、每周固定时间、每月固定日期固定时间、每月最后一天固定时间、单次指定时间。
-- 时间窗口：例如 `09:30` 到 `18:15` 之间每 N 分钟执行，支持非整点边界。
-- 高级规则：自定义 Cron 字段，用于覆盖更复杂的表达式。
-
-调度弹窗会展示未来一段时间的执行点，便于保存前确认策略是否符合预期。现在开发人员只需要上传核心代码，调度、超时、启停状态和入口文件由平台维护。
-
-## 子程序依赖管理建议
-
-任务越来越多后，不建议所有子程序长期共用一个无限膨胀的 Python 环境。推荐按复杂度分层治理：
-
-- 简单同质任务：继续使用项目主环境，但必须把依赖锁定在根目录 `requirements.txt`，新增依赖前确认不会影响现有任务。
-- 同一业务域任务：优先按 `<group>` 维护一套依赖，例如 `app/jobs/<group>/requirements.txt`，由部署流程安装到该组专用虚拟环境。
-- 依赖差异很大的任务：为单个 `<task>` 准备独立虚拟环境或容器，任务配置中后续可以扩展 `PYTHON_BIN` 指向专用解释器。
-- 多任务共享逻辑：抽成内部公共包，例如 `app/jobs/_libs` 或单独 Python package，并固定版本；避免在多个任务目录复制同一段业务代码。
-- 有先后关系的任务：在任务 README 中显式写清依赖关系、上游产物和失败处理方式；如果关系越来越多，后续应升级为 DAG/工作流模型，而不是靠目录顺序或命名约定隐式串联。
-- 生产准入：新增任务至少完成 `python main.py` 本地验证、依赖安装验证、`PID` 唯一验证、超时配置确认和失败可重试确认。
-
-## 常用接口
-
-- `/api/user/health`：健康检查
-- `/api/user/login`：登录
-- `/api/taskinfo/dashboard`：首页总览数据
-- `/api/taskinfo/state`：任务列表
-- `/api/taskinfo/events`：实时事件流，推送任务状态和日志游标变化
-- `/api/taskinfo/schedule`：读取、预览和保存调度策略
-- `/api/taskinfo/editTask`：任务启动、暂停、强停、刷新
-- `/api/taskinfo/call_task`：手动触发任务，暂停状态下也允许执行一次
-- `/api/taskinfo/taskLogs`：任务执行日志
-- `/api/taskinfo/systemLogs`：调度器系统日志
-- `/api/taskinfo/updatecode`：执行代码更新
+- `wfs_run_history`：任务执行历史和输出日志。
+- `wfs_schedule_history`：调度器系统事件。
+- `wfs_job_stats`：任务统计和最近状态。
+- `wfs_task_config`：前端保存的任务运行配置和调度策略。
 
 ## 前端
 
-前端包含总览、任务列表、调度日志和系统日志。修改前端源码后需要重新构建：
+前端包含：
+
+- 总览：CPU/内存折线图、任务运行色块、时间轴缩放和平移。
+- 任务列表：任务扫描、配置、启动、暂停、强停、手动触发。
+- 调度日志：查看任务执行历史和输出。
+- 系统日志：查看调度器事件和异常。
+
+修改前端源码后需要重新构建：
 
 ```bash
 cd frontend
@@ -251,6 +325,20 @@ npm run build
 ```
 
 构建产物会写入 `app/dist`，生产访问 `http://<server>:8008/` 即可。
+
+## 常用接口
+
+- `/api/user/health`：健康检查
+- `/api/user/login`：登录
+- `/api/taskinfo/dashboard`：总览数据，包含 CPU/内存采样和任务运行段
+- `/api/taskinfo/state`：任务列表
+- `/api/taskinfo/events`：实时事件流
+- `/api/taskinfo/schedule`：读取、预览和保存调度策略
+- `/api/taskinfo/editTask`：任务启动、暂停、强停、刷新
+- `/api/taskinfo/call_task`：手动触发任务，暂停状态下也允许执行一次
+- `/api/taskinfo/taskLogs`：任务执行日志
+- `/api/taskinfo/systemLogs`：调度器系统日志
+- `/api/taskinfo/updatecode`：执行代码更新
 
 ## ODBC 配置
 
