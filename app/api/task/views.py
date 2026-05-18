@@ -508,6 +508,7 @@ class Dashboard(Resource):
                 'samples': cpu_metrics['samples'],
                 'markers': _load_task_start_markers(CPU_TIMELINE_HOURS),
                 'current': cpu_metrics['current'],
+                'current_memory': cpu_metrics['current_memory'],
                 'sample_interval_seconds': cpu_metrics['sample_interval_seconds'],
                 'retention_hours': cpu_metrics['retention_hours'],
                 'warning': cpu_metrics['warning'],

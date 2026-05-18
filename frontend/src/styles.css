@@ -455,6 +455,14 @@ noscript {
   padding: 22px;
 }
 
+.content.dashboard-content {
+  height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px 22px 22px;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -581,7 +589,11 @@ noscript {
 }
 
 .cpu-panel {
-  margin-top: 16px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0;
 }
 
 .cpu-panel-head {
@@ -594,6 +606,11 @@ noscript {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.cpu-panel .cpu-timeline {
+  flex: 1;
+  min-height: 0;
 }
 
 .rank-item,

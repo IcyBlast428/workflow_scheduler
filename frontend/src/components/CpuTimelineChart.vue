@@ -3,7 +3,6 @@
     ref="chartRoot"
     class="cpu-timeline"
     :class="{ dragging }"
-    :style="{ minHeight: `${chartHeight}px` }"
     @wheel="handleWheel"
     @mousedown="handleMouseDown"
     @mousemove="handleMouseMove"
@@ -32,6 +31,7 @@
 
       <path v-if="areaPath" class="cpu-area" :d="areaPath" />
       <path v-if="linePath" class="cpu-line" :d="linePath" />
+      <path v-if="memoryLinePath" class="memory-line" :d="memoryLinePath" />
 
       <g class="task-tracks">
         <line
@@ -79,6 +79,13 @@
       <g v-if="hoverSample" class="cpu-hover">
         <line :x1="xForTime(hoverSample.time)" :x2="xForTime(hoverSample.time)" :y1="plotTop" :y2="plotBottom" />
         <circle :cx="xForTime(hoverSample.time)" :cy="yForCpu(hoverSample.cpu)" r="4" />
+        <circle
+          v-if="Number.isFinite(hoverSample.memory)"
+          class="memory-dot"
+          :cx="xForTime(hoverSample.time)"
+          :cy="yForCpu(hoverSample.memory)"
+          r="4"
+        />
       </g>
     </svg>
 
@@ -102,7 +109,7 @@ const props = defineProps({
   retentionHours: { type: Number, default: 6 },
 });
 
-const CPU_PLOT_HEIGHT = 560;
+const MIN_CHART_HEIGHT = 420;
 const TASK_LANE_HEIGHT = 24;
 const TASK_BAR_HEIGHT = 18;
 const TASK_AREA_PADDING = 10;
@@ -123,6 +130,7 @@ const palette = [
 
 const chartRoot = ref(null);
 const chartWidth = ref(900);
+const chartHeight = ref(640);
 const margin = { top: 22, left: 56, right: 24, bottom: 48 };
 const viewStart = ref(0);
 const viewEnd = ref(0);
@@ -147,12 +155,14 @@ const normalizedSamples = computed(() => props.samples
   .map((item) => {
     const time = parseTime(item.time || item.datetime || item.timestamp);
     const cpu = Number(item.cpu ?? item.value ?? item.usage);
+    const memory = Number(item.memory ?? item.mem ?? item.memory_percent);
     if (!Number.isFinite(time) || !Number.isFinite(cpu)) {
       return null;
     }
     return {
       time,
       cpu: Math.max(0, Math.min(100, cpu)),
+      memory: Number.isFinite(memory) ? Math.max(0, Math.min(100, memory)) : null,
       raw: item,
     };
   })
@@ -249,9 +259,8 @@ const taskLaneCount = computed(() => {
 });
 
 const plotTop = computed(() => margin.top);
-const plotHeight = computed(() => CPU_PLOT_HEIGHT);
+const plotHeight = computed(() => Math.max(260, chartHeight.value - margin.top - margin.bottom));
 const plotBottom = computed(() => plotTop.value + plotHeight.value);
-const chartHeight = computed(() => plotBottom.value + margin.bottom);
 const taskLaneIndexes = computed(() => Array.from({ length: taskLaneCount.value }, (_, index) => index));
 
 const taskBlocks = computed(() => laidOutTasks.value.map((task, index) => {
@@ -270,7 +279,7 @@ const taskBlocks = computed(() => laidOutTasks.value.map((task, index) => {
   };
 }));
 
-const yTicks = [100, 75, 50, 25, 0];
+const yTicks = Array.from({ length: 11 }, (_, index) => 100 - index * 10);
 
 const xTicks = computed(() => {
   const span = Math.max(1, viewEnd.value - viewStart.value);
@@ -290,6 +299,16 @@ const linePath = computed(() => {
   }
   return lineSamples.value
     .map((item, index) => `${index === 0 ? 'M' : 'L'} ${xForTime(item.time).toFixed(1)} ${yForCpu(item.cpu).toFixed(1)}`)
+    .join(' ');
+});
+
+const memoryLinePath = computed(() => {
+  const samples = lineSamples.value.filter((item) => Number.isFinite(item.memory));
+  if (!samples.length) {
+    return '';
+  }
+  return samples
+    .map((item, index) => `${index === 0 ? 'M' : 'L'} ${xForTime(item.time).toFixed(1)} ${yForCpu(item.memory).toFixed(1)}`)
     .join(' ');
 });
 
@@ -351,7 +370,10 @@ function measure() {
   if (!chartRoot.value) {
     return;
   }
-  chartWidth.value = Math.max(320, Math.round(chartRoot.value.clientWidth || 900));
+  const rect = chartRoot.value.getBoundingClientRect();
+  chartWidth.value = Math.max(320, Math.round(rect.width || chartRoot.value.clientWidth || 900));
+  const fallbackHeight = window.innerHeight ? window.innerHeight - rect.top - 22 : 640;
+  chartHeight.value = Math.max(MIN_CHART_HEIGHT, Math.round(rect.height || chartRoot.value.clientHeight || fallbackHeight));
 }
 
 function parseTime(value) {
@@ -415,7 +437,10 @@ function taskColor(task) {
   if (task.failed) {
     return '#dc2626';
   }
-  return palette[Math.abs(hashText(task.id || task.name || task.index)) % palette.length];
+  if (task.running) {
+    return '#7c3aed';
+  }
+  return '#16a34a';
 }
 
 function leastBusyLane(laneEnds) {
@@ -577,7 +602,10 @@ function showSampleTooltip(event) {
   hoverSample.value = nearest;
   tooltip.open = true;
   tooltip.title = formatFullTime(nearest.time);
-  tooltip.lines = [`CPU ${nearest.cpu.toFixed(1)}%`];
+  tooltip.lines = [
+    `CPU ${nearest.cpu.toFixed(1)}%`,
+    Number.isFinite(nearest.memory) ? `内存 ${nearest.memory.toFixed(1)}%` : '',
+  ].filter(Boolean);
   tooltip.x = x;
   tooltip.y = y;
 }
@@ -613,6 +641,8 @@ function taskTitle(block) {
 <style scoped>
 .cpu-timeline {
   position: relative;
+  height: 100%;
+  min-height: 420px;
   overflow: hidden;
   touch-action: none;
 }
@@ -624,6 +654,7 @@ function taskTitle(block) {
 .cpu-svg {
   display: block;
   width: 100%;
+  height: 100%;
 }
 
 .task-tracks line {
@@ -638,7 +669,7 @@ function taskTitle(block) {
 }
 
 .task-block.running {
-  stroke: #facc15;
+  stroke: #ede9fe;
   stroke-width: 2;
 }
 
@@ -683,6 +714,15 @@ function taskTitle(block) {
   pointer-events: none;
 }
 
+.memory-line {
+  fill: none;
+  stroke: #facc15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+  pointer-events: none;
+}
+
 .cpu-hover line {
   stroke: var(--muted);
   stroke-dasharray: 3 4;
@@ -692,6 +732,10 @@ function taskTitle(block) {
   fill: #38bdf8;
   stroke: var(--panel);
   stroke-width: 2;
+}
+
+.cpu-hover .memory-dot {
+  fill: #facc15;
 }
 
 .cpu-tooltip {

@@ -115,7 +115,7 @@
         </div>
       </header>
 
-      <section class="content">
+      <section class="content" :class="{ 'dashboard-content': view === 'dashboard' }">
         <div v-if="backendStatus.error" class="inline-alert danger content-alert">
           <strong>当前后端连接异常</strong>
           <span>{{ backendStatus.error }}</span>
@@ -126,37 +126,15 @@
           <div v-if="dashboard.loading" class="loading-bar"></div>
           <div v-if="dashboard.error" class="error-state">{{ dashboard.error }}</div>
           <template v-else>
-            <div class="summary-grid dashboard-grid">
-              <div class="metric-card hero-metric">
-                <span>任务总数</span>
-                <strong>{{ dashboard.summary.total }}</strong>
-              </div>
-              <div class="metric-card">
-                <span>调度中</span>
-                <strong>{{ dashboard.summary.running }}</strong>
-              </div>
-              <div class="metric-card">
-                <span>执行中</span>
-                <strong>{{ dashboard.summary.pending }}</strong>
-              </div>
-              <div class="metric-card">
-                <span>最近失败任务</span>
-                <strong>{{ dashboard.summary.failed_jobs }}</strong>
-              </div>
-              <div class="metric-card">
-                <span>配置异常</span>
-                <strong>{{ dashboard.summary.invalid }}</strong>
-              </div>
-            </div>
-
             <section class="panel cpu-panel">
               <div class="panel-head cpu-panel-head">
                 <div>
-                  <h2>机器 CPU 与任务开始点</h2>
-                  <p>最近 {{ dashboard.cpu_timeline.retention_hours || 6 }} 小时采样，任务运行段叠加在 CPU 曲线上。</p>
+                  <h2>机器 CPU / 内存与任务运行段</h2>
+                  <p>最近 {{ dashboard.cpu_timeline.retention_hours || 6 }} 小时采样，任务运行段叠加在资源曲线上。</p>
                 </div>
                 <div class="cpu-head-actions">
-                  <span class="tag info">当前 {{ cpuCurrentText }}</span>
+                  <span class="tag info">CPU {{ cpuCurrentText }}</span>
+                  <span class="tag warning">内存 {{ memoryCurrentText }}</span>
                   <span v-if="dashboard.cpu_timeline.warning" class="tag warning">采样异常</span>
                 </div>
               </div>
@@ -512,6 +490,7 @@ const dashboard = reactive({
     samples: [],
     markers: [],
     current: null,
+    current_memory: null,
     sample_interval_seconds: 5,
     retention_hours: 6,
     warning: '',
@@ -585,6 +564,11 @@ const maxTrendValue = computed(() => Math.max(
 
 const cpuCurrentText = computed(() => {
   const value = Number(dashboard.cpu_timeline.current);
+  return Number.isFinite(value) ? `${value.toFixed(1)}%` : '--';
+});
+
+const memoryCurrentText = computed(() => {
+  const value = Number(dashboard.cpu_timeline.current_memory);
   return Number.isFinite(value) ? `${value.toFixed(1)}%` : '--';
 });
 
@@ -766,6 +750,7 @@ async function loadDashboard(options = {}) {
       samples: [],
       markers: [],
       current: null,
+      current_memory: null,
       sample_interval_seconds: 5,
       retention_hours: 6,
       warning: '',

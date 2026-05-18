@@ -43,6 +43,7 @@ class _CpuMonitor:
         return {
             'samples': samples,
             'current': samples[-1]['cpu'] if samples else None,
+            'current_memory': samples[-1].get('memory') if samples else None,
             'sample_interval_seconds': self.interval,
             'retention_hours': hours,
             'warning': warning,
@@ -84,6 +85,7 @@ class _CpuMonitor:
             'time': now.strftime('%Y-%m-%d %H:%M:%S'),
             'time_obj': now,
             'cpu': round(percent, 1),
+            'memory': _read_memory_percent(),
         }
         with self._lock:
             self._samples.append(sample)
@@ -95,6 +97,12 @@ def _read_cpu_times():
     if os.name == 'nt':
         return _read_windows_cpu_times()
     return _read_proc_stat_cpu_times()
+
+
+def _read_memory_percent():
+    if os.name == 'nt':
+        return _read_windows_memory_percent()
+    return _read_proc_meminfo_percent()
 
 
 def _read_proc_stat_cpu_times():
@@ -111,6 +119,26 @@ def _read_proc_stat_cpu_times():
     idle = values[3] + (values[4] if len(values) > 4 else 0)
     total = sum(values)
     return idle, total
+
+
+def _read_proc_meminfo_percent():
+    values = {}
+    try:
+        with open('/proc/meminfo', 'r', encoding='utf-8') as handle:
+            for line in handle:
+                key, raw_value = line.split(':', 1)
+                values[key] = int(raw_value.strip().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+    total = values.get('MemTotal')
+    available = values.get('MemAvailable')
+    if not total or available is None:
+        free = values.get('MemFree', 0) + values.get('Buffers', 0) + values.get('Cached', 0)
+        available = free
+    if not total:
+        return None
+    return round(max(0.0, min(100.0, (1.0 - (available / total)) * 100.0)), 1)
 
 
 def _filetime_to_int(filetime):
@@ -140,6 +168,31 @@ def _read_windows_cpu_times():
     idle_time = _filetime_to_int(idle)
     total_time = _filetime_to_int(kernel) + _filetime_to_int(user)
     return idle_time, total_time
+
+
+def _read_windows_memory_percent():
+    class MEMORYSTATUSEX(ctypes.Structure):
+        _fields_ = [
+            ('dwLength', ctypes.c_ulong),
+            ('dwMemoryLoad', ctypes.c_ulong),
+            ('ullTotalPhys', ctypes.c_ulonglong),
+            ('ullAvailPhys', ctypes.c_ulonglong),
+            ('ullTotalPageFile', ctypes.c_ulonglong),
+            ('ullAvailPageFile', ctypes.c_ulonglong),
+            ('ullTotalVirtual', ctypes.c_ulonglong),
+            ('ullAvailVirtual', ctypes.c_ulonglong),
+            ('ullAvailExtendedVirtual', ctypes.c_ulonglong),
+        ]
+
+    status = MEMORYSTATUSEX()
+    status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+    try:
+        ok = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+    except Exception:
+        return None
+    if not ok:
+        return None
+    return round(float(status.dwMemoryLoad), 1)
 
 
 class _TaskStartEvents:
