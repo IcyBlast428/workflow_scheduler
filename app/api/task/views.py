@@ -308,6 +308,12 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
         start_time = _format_datetime_value(item.get('start_time'))
         key = '{}|{}'.format(item.get('id') or '', start_time)
         if not start_time or not item.get('id') or key in by_key:
+            existing = by_key.get(key)
+            if existing and existing.get('end_time'):
+                continue
+            if existing and not _format_datetime_value(item.get('end_time')):
+                continue
+        if not start_time or not item.get('id'):
             continue
         normalized = dict(item)
         normalized['start_time'] = start_time

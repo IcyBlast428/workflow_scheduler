@@ -149,48 +149,11 @@
               </div>
             </div>
 
-            <div class="dashboard-layout">
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>最近 24 小时执行趋势</h2>
-                    <p>按小时统计成功与失败次数，用于快速判断是否出现集中异常。</p>
-                  </div>
-                </div>
-                <div class="trend-chart">
-                  <div v-for="point in dashboard.trend" :key="point.hour" class="trend-point" :title="`${point.hour} 成功 ${point.success} / 失败 ${point.failed}`">
-                    <div class="trend-bars">
-                      <span class="trend-bar success" :style="{ height: trendHeight(point.success) }"></span>
-                      <span class="trend-bar failed" :style="{ height: trendHeight(point.failed) }"></span>
-                    </div>
-                    <small>{{ point.hour.slice(6) }}</small>
-                  </div>
-                </div>
-              </section>
-
-              <section class="panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>调度器状态</h2>
-                    <p>当前 Web 进程与 Scheduler 控制进程的工作状态。</p>
-                  </div>
-                </div>
-                <div class="scheduler-card">
-                  <span class="tag" :class="dashboard.scheduler.enabled ? 'success' : 'warning'">
-                    {{ dashboard.scheduler.enabled ? '调度器进程' : 'Web 管理进程' }}
-                  </span>
-                  <strong>{{ dashboard.scheduler.job_count }} 个已注册任务</strong>
-                  <p v-if="dashboard.scheduler.control_url">控制地址：{{ dashboard.scheduler.control_url }}</p>
-                  <p v-if="dashboard.warning" class="dashboard-warning">{{ dashboard.warning }}</p>
-                </div>
-              </section>
-            </div>
-
             <section class="panel cpu-panel">
               <div class="panel-head cpu-panel-head">
                 <div>
                   <h2>机器 CPU 与任务开始点</h2>
-                  <p>最近 {{ dashboard.cpu_timeline.retention_hours || 6 }} 小时采样，标记任务开始时间。</p>
+                  <p>最近 {{ dashboard.cpu_timeline.retention_hours || 6 }} 小时采样，任务运行段叠加在 CPU 曲线上。</p>
                 </div>
                 <div class="cpu-head-actions">
                   <span class="tag info">当前 {{ cpuCurrentText }}</span>

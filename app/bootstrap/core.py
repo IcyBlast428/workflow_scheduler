@@ -19,7 +19,7 @@ from app.common.mail import send_mail
 from app.common.sms import send_sms
 from app.bootstrap.database import GaussDB
 from app.settings import FLASK_ENV
-from app.bootstrap.system_metrics import record_task_start
+from app.bootstrap.system_metrics import record_task_end, record_task_start
 
 if FLASK_ENV == 'development':
     dev_ini = os.path.join(CONFIG_DIR, 'development.ini')
@@ -140,6 +140,8 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 # 此进程并没有开始就中断了
                 pass
     finally:
+        end_time = datetime.datetime.now()
+        record_task_end(PID, start_time, end_time)
         output_encode = output.encode('utf-8')
         output_size = len(output_encode) // 1000
         if output_size >= 64:
@@ -223,7 +225,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                     state,
                     tasklog,
                     start_time,
-                    datetime.datetime.now(),
+                    end_time,
                 )
             )
             job_stats_sql = "update wfs_job_stats set last_status = ? where pid = ?"
@@ -245,7 +247,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
             sql = r"""INSERT INTO wfs_run_history(id,pid,taskname,dirname,state,tasklog,start_time,end_time) VALUES 
             ('{}','{}','{}','{}','{}','{}','{}','{}')""".format(uuidhex(), PID, task_name, dir_name, state,
                                                                 output.replace("'", "\\'"), start_time,
-                                                                datetime.datetime.now())
+                                                                end_time)
             wfs_obj.execute_sql(sql, params=None)
         wfs_obj.close()
 

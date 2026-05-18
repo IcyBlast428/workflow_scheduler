@@ -17,6 +17,22 @@
       role="img"
       aria-label="CPU timeline"
     >
+      <rect class="cpu-plot-bg" :x="margin.left" :y="plotTop" :width="plotWidth" :height="plotHeight" rx="8" />
+
+      <g class="cpu-grid">
+        <g v-for="tick in yTicks" :key="tick">
+          <line :x1="margin.left" :x2="plotRight" :y1="yForCpu(tick)" :y2="yForCpu(tick)" />
+          <text :x="margin.left - 10" :y="yForCpu(tick) + 4" text-anchor="end">{{ tick }}%</text>
+        </g>
+        <g v-for="tick in xTicks" :key="tick.time">
+          <line :x1="xForTime(tick.time)" :x2="xForTime(tick.time)" :y1="plotTop" :y2="plotBottom" />
+          <text :x="xForTime(tick.time)" :y="chartHeight - 18" text-anchor="middle">{{ tick.label }}</text>
+        </g>
+      </g>
+
+      <path v-if="areaPath" class="cpu-area" :d="areaPath" />
+      <path v-if="linePath" class="cpu-line" :d="linePath" />
+
       <g class="task-tracks">
         <line
           v-for="lane in taskLaneIndexes"
@@ -48,7 +64,7 @@
             :style="{ fill: block.color }"
           />
           <text
-            v-if="block.width >= 34"
+            v-if="block.width >= 56"
             class="task-block-label"
             :x="block.x + 7"
             :y="block.y + 15"
@@ -59,22 +75,6 @@
           <title>{{ taskTitle(block) }}</title>
         </g>
       </g>
-
-      <rect class="cpu-plot-bg" :x="margin.left" :y="plotTop" :width="plotWidth" :height="plotHeight" rx="8" />
-
-      <g class="cpu-grid">
-        <g v-for="tick in yTicks" :key="tick">
-          <line :x1="margin.left" :x2="plotRight" :y1="yForCpu(tick)" :y2="yForCpu(tick)" />
-          <text :x="margin.left - 10" :y="yForCpu(tick) + 4" text-anchor="end">{{ tick }}%</text>
-        </g>
-        <g v-for="tick in xTicks" :key="tick.time">
-          <line :x1="xForTime(tick.time)" :x2="xForTime(tick.time)" :y1="taskAreaTop" :y2="plotBottom" />
-          <text :x="xForTime(tick.time)" :y="chartHeight - 18" text-anchor="middle">{{ tick.label }}</text>
-        </g>
-      </g>
-
-      <path v-if="areaPath" class="cpu-area" :d="areaPath" />
-      <path v-if="linePath" class="cpu-line" :d="linePath" />
 
       <g v-if="hoverSample" class="cpu-hover">
         <line :x1="xForTime(hoverSample.time)" :x2="xForTime(hoverSample.time)" :y1="plotTop" :y2="plotBottom" />
@@ -102,13 +102,12 @@ const props = defineProps({
   retentionHours: { type: Number, default: 6 },
 });
 
-const CPU_PLOT_HEIGHT = 260;
+const CPU_PLOT_HEIGHT = 560;
 const TASK_LANE_HEIGHT = 24;
 const TASK_BAR_HEIGHT = 18;
-const TASK_AREA_PADDING = 16;
-const TASK_AREA_EMPTY_HEIGHT = 18;
+const TASK_AREA_PADDING = 10;
 const MAX_TASK_LANES = 20;
-const MIN_TASK_BLOCK_WIDTH = 18;
+const MIN_TASK_BLOCK_WIDTH = 4;
 const palette = [
   '#0f766e',
   '#2563eb',
@@ -124,8 +123,7 @@ const palette = [
 
 const chartRoot = ref(null);
 const chartWidth = ref(900);
-const margin = { left: 56, right: 24, bottom: 48 };
-const taskAreaTop = 16;
+const margin = { top: 22, left: 56, right: 24, bottom: 48 };
 const viewStart = ref(0);
 const viewEnd = ref(0);
 const userNavigated = ref(false);
@@ -161,8 +159,8 @@ const normalizedSamples = computed(() => props.samples
   .filter(Boolean)
   .sort((left, right) => left.time - right.time));
 
-const normalizedTasks = computed(() => props.markers
-  .map((item, index) => {
+const normalizedTasks = computed(() => {
+  const tasks = props.markers.map((item, index) => {
     const start = parseTime(item.start_time || item.time || item.datetime);
     let end = parseTime(item.end_time);
     if (!Number.isFinite(start)) {
@@ -187,8 +185,20 @@ const normalizedTasks = computed(() => props.markers
       failed: Number(item.state) !== 0 && item.state !== undefined && item.state !== null && item.state !== '',
     };
   })
-  .filter(Boolean)
-  .sort((left, right) => left.start - right.start || left.end - right.end));
+    .filter(Boolean);
+
+  const byKey = new Map();
+  tasks.forEach((task) => {
+    const key = `${task.id || ''}|${task.start_time}`;
+    const existing = byKey.get(key);
+    if (!existing || (existing.running && !task.running) || task.end > existing.end) {
+      byKey.set(key, task);
+    }
+  });
+
+  return Array.from(byKey.values())
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+});
 
 const fullRange = computed(() => {
   const retentionMs = Math.max(1, props.retentionHours || 6) * 60 * 60 * 1000;
@@ -238,12 +248,7 @@ const taskLaneCount = computed(() => {
   return Math.min(MAX_TASK_LANES, Math.max(...laidOutTasks.value.map((item) => item.lane)) + 1);
 });
 
-const taskAreaHeight = computed(() => (
-  taskLaneCount.value
-    ? TASK_AREA_PADDING + taskLaneCount.value * TASK_LANE_HEIGHT
-    : TASK_AREA_EMPTY_HEIGHT
-));
-const plotTop = computed(() => taskAreaTop + taskAreaHeight.value);
+const plotTop = computed(() => margin.top);
 const plotHeight = computed(() => CPU_PLOT_HEIGHT);
 const plotBottom = computed(() => plotTop.value + plotHeight.value);
 const chartHeight = computed(() => plotBottom.value + margin.bottom);
@@ -252,12 +257,13 @@ const taskLaneIndexes = computed(() => Array.from({ length: taskLaneCount.value 
 const taskBlocks = computed(() => laidOutTasks.value.map((task, index) => {
   const startX = xForTime(Math.max(task.start, viewStart.value));
   const endX = xForTime(Math.min(task.end, viewEnd.value));
-  const width = Math.max(MIN_TASK_BLOCK_WIDTH, endX - startX);
+  const x = Math.max(margin.left, Math.min(startX, plotRight.value - MIN_TASK_BLOCK_WIDTH));
+  const width = Math.max(MIN_TASK_BLOCK_WIDTH, Math.min(plotRight.value - x, endX - x));
   return {
     ...task,
     key: `${task.id || task.index}-${task.start}-${index}`,
     clipId: `task-clip-${index}-${Math.abs(hashText(`${task.id || ''}${task.start}`))}`,
-    x: Math.min(startX, plotRight.value - MIN_TASK_BLOCK_WIDTH),
+    x,
     y: laneY(task.lane),
     width,
     color: taskColor(task),
@@ -434,7 +440,10 @@ function yForCpu(cpu) {
 }
 
 function laneY(lane) {
-  return plotTop.value - TASK_AREA_PADDING - ((lane + 1) * TASK_LANE_HEIGHT) + 3;
+  return Math.max(
+    plotTop.value + 6,
+    plotBottom.value - TASK_AREA_PADDING - ((lane + 1) * TASK_LANE_HEIGHT),
+  );
 }
 
 function laneCenterY(lane) {

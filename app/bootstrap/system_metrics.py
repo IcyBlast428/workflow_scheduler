@@ -165,6 +165,17 @@ class _TaskStartEvents:
             self._events.append(event)
             self._events = [item for item in self._events if item['start_time_obj'] >= cutoff]
 
+    def complete(self, pid, start_time, end_time=None):
+        end_time = end_time or datetime.datetime.now()
+        start_key = start_time.strftime('%Y-%m-%d %H:%M:%S') if hasattr(start_time, 'strftime') else str(start_time or '')[:19]
+        with self._lock:
+            for item in reversed(self._events):
+                if item.get('id') == pid and item.get('start_time') == start_key:
+                    item['end_time'] = end_time.strftime('%Y-%m-%d %H:%M:%S')
+                    item['end_time_obj'] = end_time
+                    item['source'] = 'memory'
+                    return
+
     def recent(self, since):
         with self._lock:
             events = [
@@ -174,6 +185,7 @@ class _TaskStartEvents:
             ]
         for item in events:
             item.pop('start_time_obj', None)
+            item.pop('end_time_obj', None)
         return events
 
 
@@ -193,6 +205,10 @@ def record_task_start(pid, task_name='', group_name='', folder_name='', start_ti
         folder_name=folder_name,
         start_time=start_time,
     )
+
+
+def record_task_end(pid, start_time, end_time=None):
+    _task_starts.complete(pid, start_time, end_time=end_time)
 
 
 def recent_task_starts(since):
