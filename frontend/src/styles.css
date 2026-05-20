@@ -285,7 +285,7 @@ noscript {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -302,9 +302,13 @@ noscript {
 
 .brand {
   display: flex;
-  gap: 12px;
+  justify-content: center;
   align-items: center;
-  padding: 22px 18px;
+  padding: 18px 12px;
+}
+
+.brand-copy {
+  display: none;
 }
 
 .brand h1 {
@@ -323,21 +327,22 @@ noscript {
 
 .nav {
   display: grid;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 10px;
 }
 
 .nav-button {
+  position: relative;
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 12px;
-  border: 0;
-  border-radius: var(--radius);
-  color: var(--sidebar-text);
+  min-height: 52px;
+  display: grid;
+  place-items: center;
+  gap: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: var(--sidebar-muted);
   background: transparent;
-  text-align: left;
 }
 
 .nav-button:hover {
@@ -346,11 +351,39 @@ noscript {
 }
 
 .nav-button.active {
-  background: var(--brand);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: linear-gradient(135deg, var(--brand), #0b8f83);
   color: #ffffff;
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.24);
 }
 
-.nav-icon,
+.nav-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.nav-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.nav-svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .btn-icon {
   width: 18px;
   display: inline-grid;

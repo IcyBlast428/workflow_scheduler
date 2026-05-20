@@ -63,7 +63,7 @@
     <aside class="sidebar" :class="{ open: mobileNavOpen }">
       <div class="brand">
         <div class="brand-mark">WFS</div>
-        <div>
+        <div class="brand-copy">
           <h1>{{ user.project || '定时任务调度' }}</h1>
           <span>Workflow Scheduler</span>
         </div>
@@ -76,10 +76,20 @@
           class="nav-button"
           :class="{ active: view === item.id }"
           type="button"
+          :title="item.label"
+          :aria-label="item.label"
           @click="switchView(item.id)"
         >
-          <span class="nav-icon">{{ item.icon }}</span>
-          {{ item.label }}
+          <span class="nav-icon" aria-hidden="true">
+            <svg class="nav-svg" viewBox="0 0 24 24" role="img">
+              <path
+                v-for="path in item.iconPaths"
+                :key="path"
+                :d="path"
+              />
+            </svg>
+          </span>
+          <span class="nav-label">{{ item.label }}</span>
         </button>
       </nav>
     </aside>
@@ -403,10 +413,51 @@ import TaskTable from './components/TaskTable.vue';
 import { useConfirm } from './composables/useConfirm';
 
 const navItems = [
-  { id: 'dashboard', label: '总览', icon: '◇', description: '任务健康度、执行趋势与调度器状态。' },
-  { id: 'tasks', label: '任务列表', icon: '□', description: '任务扫描、调度状态与运行控制。' },
-  { id: 'taskLogs', label: '调度日志', icon: '▣', description: '脚本执行历史与输出摘要。' },
-  { id: 'systemLogs', label: '系统日志', icon: '!', description: '调度器事件与系统异常记录。' },
+  {
+    id: 'dashboard',
+    label: '总览',
+    iconPaths: [
+      'M4 13.5a8 8 0 1 1 16 0',
+      'M8 15h8',
+      'M12 15l3.4-5.8',
+      'M7 19h10',
+    ],
+    description: 'CPU、内存与任务运行关系。',
+  },
+  {
+    id: 'tasks',
+    label: '任务列表',
+    iconPaths: [
+      'M4.5 6.5h15',
+      'M4.5 12h15',
+      'M4.5 17.5h15',
+      'M8 4.5v4',
+      'M16 10v4',
+      'M11 15.5v4',
+    ],
+    description: '任务扫描、调度状态与运行控制。',
+  },
+  {
+    id: 'taskLogs',
+    label: '调度日志',
+    iconPaths: [
+      'M7 4.5h7l3 3v12H7z',
+      'M14 4.5v4h4',
+      'M9.5 12h5',
+      'M9.5 15.5h5',
+    ],
+    description: '脚本执行历史与输出摘要。',
+  },
+  {
+    id: 'systemLogs',
+    label: '系统日志',
+    iconPaths: [
+      'M12 3.8l7 4v8.4l-7 4-7-4V7.8z',
+      'M12 8v5',
+      'M12 16.3v.2',
+    ],
+    description: '调度器事件与系统异常记录。',
+  },
 ];
 
 const ready = ref(false);
