@@ -156,7 +156,7 @@ def _record_maps():
     by_pid = {}
     by_folder = {}
     for row in _load_task_config_records():
-        # 既支持按 PID 匹配，也支持旧任务首次保存前按 group/folder 匹配。
+        # PID 是任务身份的唯一来源；group/folder 只作为历史配置迁移时的辅助匹配。
         pid = row.get('pid')
         if pid:
             by_pid[pid] = row
@@ -165,6 +165,22 @@ def _record_maps():
         if group_name and folder_name:
             by_folder[(group_name, folder_name)] = row
     return by_pid, by_folder
+
+
+def _folder_record_belongs_to_task(record, group_name, folder_name, pid):
+    """防止脏数据把 A 任务的配置套到 B 任务上。"""
+    if not record:
+        return False
+    record_pid = record.get('pid')
+    if record_pid and record_pid != pid:
+        return False
+    record_group = record.get('group_name')
+    record_folder = record.get('folder_name')
+    if record_group and record_group != group_name:
+        return False
+    if record_folder and record_folder != folder_name:
+        return False
+    return True
 
 
 def _apply_record(spec, record):
@@ -231,12 +247,13 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
 
     record = None
     if records_by_pid is not None:
-        record = records_by_pid.get(pid)
+        candidate = records_by_pid.get(pid)
+        if candidate:
+            record = candidate
     if not record and records_by_folder is not None:
-        record = records_by_folder.get((group_name, folder_name))
-        if record and record.get('pid'):
-            # 前端允许用户把 PID 从默认目录名改成稳定业务 ID。
-            spec['pid'] = record.get('pid')
+        candidate = records_by_folder.get((group_name, folder_name))
+        if _folder_record_belongs_to_task(candidate, group_name, folder_name, pid):
+            record = candidate
     try:
         _apply_record(spec, record)
     except Exception as exc:

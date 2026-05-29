@@ -468,8 +468,8 @@ def _record_schedule(spec, record):
     form = schedule_to_form(trigger, rules, schedule_type=schedule_type, saved_form=saved_form, spec=spec_for_form, enabled=enabled)
     return {
         'pid': spec.get('pid'),
-        'group_name': record.get('group_name') or spec.get('group_name') or '',
-        'folder_name': record.get('folder_name') or spec.get('folder_name') or '',
+        'group_name': spec.get('group_name') or record.get('group_name') or '',
+        'folder_name': spec.get('folder_name') or record.get('folder_name') or '',
         'task_name': record.get('task_name') or spec.get('task_name') or '',
         'main_file': record.get('main_file') or spec.get('main_file') or '',
         'main_file_options': spec.get('main_file_options') or [],
