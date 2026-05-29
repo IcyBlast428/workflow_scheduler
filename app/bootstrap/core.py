@@ -368,7 +368,7 @@ def _should_process_in_dev(pid):
     return True
 
 
-def _sync_job_stats(job_list):
+def _sync_job_stats(job_list, prune_missing=True):
     # 每次扫描后把文件系统中的任务清单同步到统计表，前端列表以这张表为基础展示状态。
     current_job_df = pd.DataFrame(job_list, columns=["pid", "group_name", "folder_name", "task_name", "scheduling_stat"])
     with GaussDB() as wfs_obj:
@@ -378,12 +378,13 @@ def _sync_job_stats(job_list):
         current_pids = set(current_job_df["pid"].tolist()) if not current_job_df.empty else set()
         database_pids = set(current_job_in_database_df["pid"].tolist()) if not current_job_in_database_df.empty else set()
 
-        for removed_pid in sorted(database_pids - current_pids):
-            wfs_obj.execute_sql(
-                sql="delete from wfs_job_stats where pid = ?",
-                params=(removed_pid,)
-            )
-            logging.getLogger(__name__).info("remove_job: %s", removed_pid)
+        if prune_missing:
+            for removed_pid in sorted(database_pids - current_pids):
+                wfs_obj.execute_sql(
+                    sql="delete from wfs_job_stats where pid = ?",
+                    params=(removed_pid,)
+                )
+                logging.getLogger(__name__).info("remove_job: %s", removed_pid)
 
         if current_job_df.empty:
             return
@@ -655,5 +656,6 @@ def aps_start(task_pid=None, action='refresh'):
 
     _ensure_listener_registered()
     logging.getLogger(__name__).info("lens(job_list):" + str(len(job_list)))
-    _sync_job_stats(job_list)
+    # 单任务刷新只同步当前 PID，不能用局部 job_list 删除其他任务的统计行。
+    _sync_job_stats(job_list, prune_missing=(task_pid is None))
     logging.getLogger(__name__).info('end to run aps_start pid={} action={}'.format(task_pid, action))

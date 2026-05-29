@@ -167,12 +167,14 @@ def _record_maps():
     return by_pid, by_folder
 
 
-def _folder_record_belongs_to_task(record, group_name, folder_name, pid):
-    """防止脏数据把 A 任务的配置套到 B 任务上。"""
+def _record_belongs_to_task(record, group_name, folder_name, pid, require_same_pid=True):
+    """任务配置必须同时归属于当前 PID 和当前目录，避免历史脏数据串到别的任务。"""
     if not record:
         return False
     record_pid = record.get('pid')
-    if record_pid and record_pid != pid:
+    if require_same_pid and record_pid != pid:
+        return False
+    if not require_same_pid and record_pid and record_pid != pid:
         return False
     record_group = record.get('group_name')
     record_folder = record.get('folder_name')
@@ -248,11 +250,11 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
     record = None
     if records_by_pid is not None:
         candidate = records_by_pid.get(pid)
-        if candidate:
+        if _record_belongs_to_task(candidate, group_name, folder_name, pid):
             record = candidate
     if not record and records_by_folder is not None:
         candidate = records_by_folder.get((group_name, folder_name))
-        if _folder_record_belongs_to_task(candidate, group_name, folder_name, pid):
+        if _record_belongs_to_task(candidate, group_name, folder_name, pid, require_same_pid=False):
             record = candidate
     try:
         _apply_record(spec, record)

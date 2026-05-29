@@ -382,6 +382,22 @@ def _load_schedule_record(pid):
         return None
 
 
+def _record_belongs_to_spec(record, spec):
+    if not record or not spec:
+        return False
+    if record.get('pid') != spec.get('pid'):
+        return False
+    # 如果历史记录里已经保存了目录信息，就必须和当前扫描到的任务目录一致。
+    # 这样即使库里残留了错误的 group/folder，也不会把 A 任务配置展示到 B 任务上。
+    record_group = record.get('group_name')
+    record_folder = record.get('folder_name')
+    if record_group and record_group != spec.get('group_name'):
+        return False
+    if record_folder and record_folder != spec.get('folder_name'):
+        return False
+    return True
+
+
 def _normalize_task_config(spec, form):
     task_name = str(form.get('task_name') or spec.get('task_name') or spec.get('folder_name') or '').strip()
     main_file = str(form.get('main_file') or spec.get('main_file') or '').strip()
@@ -511,6 +527,8 @@ def load_schedule(pid):
     if spec.get('error'):
         raise ValueError('task config is invalid: {}'.format(spec.get('error')))
     record = _load_schedule_record(pid)
+    if record and not _record_belongs_to_spec(record, spec):
+        record = None
     data = _record_schedule(spec, record) if record else _unconfigured_schedule(spec)
     try:
         if data['configured']:

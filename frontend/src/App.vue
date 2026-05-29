@@ -473,6 +473,7 @@ let eventSource = null;
 let dashboardPollTimer = null;
 let dashboardPollInFlight = false;
 let liveRefreshInFlight = false;
+let scheduleLoadSeq = 0;
 let schedulePreviewSeq = 0;
 let liveTaskSignature = '';
 let liveLogSignature = '';
@@ -1002,6 +1003,8 @@ async function pauseTask(row) {
 }
 
 async function openScheduleDialog(row) {
+  const seq = ++scheduleLoadSeq;
+  schedulePreviewSeq += 1;
   scheduleDialog.open = true;
   scheduleDialog.loading = true;
   scheduleDialog.saving = false;
@@ -1013,15 +1016,23 @@ async function openScheduleDialog(row) {
   scheduleDialog.data = null;
   try {
     const data = await api.taskSchedule({ pid: row.id });
+    if (seq !== scheduleLoadSeq || scheduleDialog.task?.id !== row.id) {
+      return;
+    }
     markBackendHealthy('后端连接正常');
     scheduleDialog.data = data;
     scheduleDialog.preview = data.preview || [];
     scheduleDialog.previewError = data.preview_error || '';
   } catch (error) {
+    if (seq !== scheduleLoadSeq || scheduleDialog.task?.id !== row.id) {
+      return;
+    }
     scheduleDialog.error = error.message;
     await handleRequestFailure(error, { toastTitle: '调度配置加载失败' });
   } finally {
-    scheduleDialog.loading = false;
+    if (seq === scheduleLoadSeq && scheduleDialog.task?.id === row.id) {
+      scheduleDialog.loading = false;
+    }
   }
 }
 
@@ -1029,6 +1040,7 @@ function closeScheduleDialog() {
   if (scheduleDialog.saving) {
     return;
   }
+  scheduleLoadSeq += 1;
   schedulePreviewSeq += 1;
   scheduleDialog.previewLoading = false;
   scheduleDialog.open = false;
@@ -1067,19 +1079,23 @@ async function saveSchedule(form) {
   if (!scheduleDialog.task) {
     return;
   }
+  const taskId = scheduleDialog.task.id;
   scheduleDialog.saving = true;
   scheduleDialog.error = '';
   try {
     const data = await api.updateTaskSchedule({
-      pid: scheduleDialog.task.id,
+      pid: taskId,
       ...form,
     });
+    if (scheduleDialog.task?.id !== taskId) {
+      return;
+    }
     markBackendHealthy('后端连接正常');
     scheduleDialog.data = data;
     scheduleDialog.preview = data.preview || [];
     scheduleDialog.previewError = data.preview_error || '';
     scheduleDialog.open = false;
-    pushToast('success', '任务配置已保存', `${scheduleDialog.task.id} 已刷新运行配置。`);
+    pushToast('success', '任务配置已保存', `${taskId} 已刷新运行配置。`);
     await Promise.all([loadTasks(), loadDashboard({ silent: true })]);
   } catch (error) {
     scheduleDialog.error = error.message;
