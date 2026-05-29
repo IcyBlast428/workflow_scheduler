@@ -1,0 +1,26 @@
+[Unit]
+Description=Workflow Scheduler
+Requires=wfs-scheduler.service
+After=network-online.target wfs-scheduler.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment="WFS_ENV=production"
+Environment="WFS_ENABLE_SCHEDULER=false"
+Environment="WFS_SCHEDULER_CONTROL_URL=http://127.0.0.1:8009"
+Environment="PYTHONPATH=/data/wfs"
+Environment="ODBCSYSINI=/data/wfs/app/config/driver/dws_odbc/etc"
+Environment="ODBCINI=/data/wfs/app/config/driver/dws_odbc/etc/odbc.ini"
+WorkingDirectory=/data/wfs
+ExecStart=/data/wfs/.venv/bin/gunicorn --workers 2 --worker-class gthread --threads 8 --timeout 120 --keep-alive 75 --bind 0.0.0.0:8008 --access-logfile - --error-logfile - run:app
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=workflow-scheduler
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
