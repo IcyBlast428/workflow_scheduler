@@ -285,7 +285,7 @@ app_name=定时任务调度
 [runtime]
 repo_path=/data/wfs
 code_remote=origin
-code_branch=main
+code_branch=workflow_scheduler
 enable_scheduler=true
 scheduler_control_url=
 ```

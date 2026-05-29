@@ -129,6 +129,44 @@ def _scheduler_json(resource_path, params=None, timeout=10):
     return payload.get('data') or {}
 
 
+def _run_git_command(args):
+    proc = subprocess.Popen(
+        ["git"] + args,
+        cwd=CODE_UPDATE_PATH,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout, stderr = proc.communicate()
+    output = stdout.decode('utf-8', errors='ignore')
+    error_output = stderr.decode('utf-8', errors='ignore')
+    return proc.returncode, output, error_output
+
+
+def _update_code_to_configured_branch():
+    """把生产工作树切到配置的远端分支，避免把当前分支内容混进部署目录。"""
+    target_ref = '{}/{}'.format(CODE_UPDATE_REMOTE, CODE_UPDATE_BRANCH)
+    fetch_refspec = '+refs/heads/{}:refs/remotes/{}'.format(CODE_UPDATE_BRANCH, target_ref)
+    commands = [
+        ['fetch', '--prune', CODE_UPDATE_REMOTE, fetch_refspec],
+        ['checkout', '-B', CODE_UPDATE_BRANCH, target_ref],
+        ['reset', '--hard', target_ref],
+    ]
+    outputs = [
+        'target branch: {}'.format(target_ref),
+        'repo path: {}'.format(CODE_UPDATE_PATH),
+    ]
+    for command in commands:
+        returncode, stdout, stderr = _run_git_command(command)
+        outputs.append('$ git {}'.format(' '.join(command)))
+        if stdout:
+            outputs.append(stdout.rstrip())
+        if stderr:
+            outputs.append(stderr.rstrip())
+        if returncode != 0:
+            return False, '\n'.join(outputs)
+    return True, '\n'.join(outputs)
+
+
 def _load_job_stats():
     try:
         with GaussDB() as db:
@@ -807,16 +845,10 @@ class Reload(Resource):
 class Code(Resource):
     def post(self):
         try:
-            proc = subprocess.Popen(
-                ["git", "pull", CODE_UPDATE_REMOTE, CODE_UPDATE_BRANCH],
-                cwd=CODE_UPDATE_PATH,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = proc.communicate()
-            if proc.returncode == 0:
-                return success_msg('code update succeeded\n' + stdout.decode('utf-8', errors='ignore'))
-            return error_msg('code update failed\n' + stderr.decode('utf-8', errors='ignore'))
+            ok, message = _update_code_to_configured_branch()
+            if ok:
+                return success_msg('code update succeeded\n' + message)
+            return error_msg('code update failed\n' + message)
         except Exception as exp:
             return error_msg('code update exception: ' + str(exp))
 

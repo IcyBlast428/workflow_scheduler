@@ -49,6 +49,11 @@ def list_python_entry_files(task_dir):
     ]
 
 
+def _has_python_entry_candidate(task_dir):
+    """只有包含直接 Python 入口候选文件的目录才认为是任务目录。"""
+    return bool(list_python_entry_files(task_dir))
+
+
 def resolve_main_file(task_dir, main_file):
     if not main_file:
         raise ValueError('MAIN_FILE is required')
@@ -110,6 +115,9 @@ def iter_task_directories(task_root=TASK_DIR):
             continue
         for task_dir in sorted(group_dir.iterdir(), key=lambda path: path.name):
             if _is_hidden_name(task_dir.name) or not task_dir.is_dir():
+                continue
+            # 纯分类目录不展示为任务；至少要有一个直接的 .py 入口候选文件。
+            if not _has_python_entry_candidate(task_dir):
                 continue
             yield group_dir.name, task_dir.name, task_dir
 
