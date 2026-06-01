@@ -475,9 +475,11 @@ let dashboardPollInFlight = false;
 let liveRefreshInFlight = false;
 let scheduleLoadSeq = 0;
 let schedulePreviewSeq = 0;
+let liveReconnectTimer = null;
 let liveTaskSignature = '';
 let liveLogSignature = '';
 const DASHBOARD_POLL_MS = 5000;
+const LIVE_RECONNECT_MS = 3000;
 
 const backendStatus = reactive({
   checking: false,
@@ -934,7 +936,6 @@ async function editTask(row, state) {
       details: [
         `任务名称：${row.name}`,
         `组名：${row.group_name || '-'}`,
-        `Task 名：${row.folder_name || '-'}`,
         '如果脚本正在写入数据，请确认它具备幂等或补偿能力。',
       ],
       confirmText: '强制停止',
@@ -1347,8 +1348,10 @@ function startLiveEvents() {
   if (!token.value || eventSource) {
     return;
   }
+  clearLiveReconnectTimer();
   eventSource = new EventSource(eventSourceUrl());
   eventSource.onopen = () => {
+    clearLiveReconnectTimer();
     liveState.connected = true;
     liveState.lastEvent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     markBackendHealthy('后端连接正常');
@@ -1358,10 +1361,16 @@ function startLiveEvents() {
   eventSource.onerror = () => {
     liveState.connected = false;
     liveState.lastEvent = '正在重连';
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    scheduleLiveReconnect();
   };
 }
 
 function stopLiveEvents() {
+  clearLiveReconnectTimer();
   if (eventSource) {
     eventSource.close();
     eventSource = null;
@@ -1372,6 +1381,23 @@ function stopLiveEvents() {
   liveLogSignature = '';
   liveRefreshInFlight = false;
   syncDashboardPolling();
+}
+
+function clearLiveReconnectTimer() {
+  if (liveReconnectTimer) {
+    window.clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = null;
+  }
+}
+
+function scheduleLiveReconnect() {
+  if (!token.value || document.visibilityState === 'hidden' || liveReconnectTimer) {
+    return;
+  }
+  liveReconnectTimer = window.setTimeout(() => {
+    liveReconnectTimer = null;
+    startLiveEvents();
+  }, LIVE_RECONNECT_MS);
 }
 
 function applyTaskSnapshot(snapshotTasks = []) {

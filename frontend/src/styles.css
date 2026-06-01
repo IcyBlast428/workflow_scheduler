@@ -831,7 +831,7 @@ table {
 .task-table {
   width: 100%;
   table-layout: fixed;
-  min-width: 1428px;
+  min-width: 1296px;
 }
 
 .task-table .col-id {
@@ -842,8 +842,7 @@ table {
   width: 188px;
 }
 
-.task-table .col-group,
-.task-table .col-folder {
+.task-table .col-group {
   width: 132px;
 }
 

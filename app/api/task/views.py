@@ -13,7 +13,7 @@ from flask_restful import Resource
 from app.bootstrap.core import aps_start, call_task_once, kill_process
 from app.bootstrap.database import GaussDB
 from app.bootstrap.global_vars import TASK_DIR, error_msg, ignores, runnings, success_msg
-from app.bootstrap.schedule_config import load_schedule, preview_schedule, save_schedule
+from app.bootstrap.schedule_config import load_schedule, preview_schedule, save_schedule, set_schedule_enabled
 from app.bootstrap.system_metrics import cpu_monitor_snapshot, recent_task_starts
 from app.bootstrap.task_loader import discover_task_specs
 from app.extensions import scheduler
@@ -676,16 +676,19 @@ class Action(Resource):
                 ignores.add(pid)
                 if scheduler.get_job(pid):
                     scheduler.remove_job(pid)
+                set_schedule_enabled(pid, False)
                 msg = 'task paused'
             elif state == "kill":
                 ignores.add(pid)
                 if scheduler.get_job(pid):
                     scheduler.remove_job(pid)
                 self.kill(pid)
+                set_schedule_enabled(pid, False)
                 msg = 'task stopped'
             elif state == "start":
                 ignores.remove(pid)
                 self.kill(pid)
+                set_schedule_enabled(pid, True)
                 aps_start(task_pid=pid, action='start')
                 msg = 'task started'
             elif state == 'refresh':

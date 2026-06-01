@@ -152,35 +152,32 @@ def _load_task_config_records():
         return []
 
 
+def build_task_pid(group_name, folder_name):
+    return '{}__{}'.format(group_name, folder_name)
+
+
 def _record_maps():
     by_pid = {}
-    by_folder = {}
     for row in _load_task_config_records():
-        # PID 是任务身份的唯一来源；group/folder 只作为历史配置迁移时的辅助匹配。
+        # PID 是任务配置唯一主键，不再按旧的 folder_name 或 group/folder 做兜底匹配。
         pid = row.get('pid')
         if pid:
             by_pid[pid] = row
-        group_name = row.get('group_name')
-        folder_name = row.get('folder_name')
-        if group_name and folder_name:
-            by_folder[(group_name, folder_name)] = row
-    return by_pid, by_folder
+    return by_pid
 
 
-def _record_belongs_to_task(record, group_name, folder_name, pid, require_same_pid=True):
+def _record_belongs_to_task(record, group_name, folder_name, pid):
     """任务配置必须同时归属于当前 PID 和当前目录，避免历史脏数据串到别的任务。"""
     if not record:
         return False
     record_pid = record.get('pid')
-    if require_same_pid and record_pid != pid:
+    if record_pid != pid:
         return False
-    if not require_same_pid and record_pid and record_pid != pid:
+    record_group = record.get('group_name') or ''
+    record_folder = record.get('folder_name') or ''
+    if record_group != group_name:
         return False
-    record_group = record.get('group_name')
-    record_folder = record.get('folder_name')
-    if record_group and record_group != group_name:
-        return False
-    if record_folder and record_folder != folder_name:
+    if record_folder != folder_name:
         return False
     return True
 
@@ -206,12 +203,12 @@ def _apply_record(spec, record):
     spec['schedule_source'] = 'database'
 
 
-def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, records_by_folder=None):
+def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None):
     task_dir = Path(task_dir)
     group_dir = task_dir.parent
     inferred_main_file = infer_main_file(task_dir)
     python_executable, python_source = resolve_python_executable(group_dir, task_dir)
-    pid = folder_name
+    pid = build_task_pid(group_name, folder_name)
     max_instances = 1
     timeout_seconds = 0
 
@@ -252,10 +249,6 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
         candidate = records_by_pid.get(pid)
         if _record_belongs_to_task(candidate, group_name, folder_name, pid):
             record = candidate
-    if not record and records_by_folder is not None:
-        candidate = records_by_folder.get((group_name, folder_name))
-        if _record_belongs_to_task(candidate, group_name, folder_name, pid, require_same_pid=False):
-            record = candidate
     try:
         _apply_record(spec, record)
     except Exception as exc:
@@ -274,9 +267,9 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, recor
 
 def discover_task_specs(task_root=TASK_DIR):
     specs = []
-    records_by_pid, records_by_folder = _record_maps()
+    records_by_pid = _record_maps()
     for group_name, folder_name, task_dir in iter_task_directories(task_root):
-        spec = load_task_spec(group_name, folder_name, task_dir, records_by_pid, records_by_folder)
+        spec = load_task_spec(group_name, folder_name, task_dir, records_by_pid)
         specs.append(spec)
 
     pid_locations = {}

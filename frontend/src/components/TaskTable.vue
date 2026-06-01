@@ -5,7 +5,6 @@
         <col class="col-id">
         <col class="col-name">
         <col class="col-group">
-        <col class="col-folder">
         <col class="col-status">
         <col class="col-pending">
         <col class="col-result">
@@ -18,7 +17,6 @@
           <th>PID</th>
           <th>任务名称</th>
           <th>组名</th>
-          <th>Task 名</th>
           <th>状态</th>
           <th>执行中</th>
           <th>最近结果</th>
@@ -36,7 +34,6 @@
             <div v-else-if="!row.schedule_configured" class="muted clip">尚未配置调度策略</div>
           </td>
           <td class="mono clip" :title="row.group_name || '-'">{{ row.group_name || '-' }}</td>
-          <td class="mono clip" :title="row.folder_name || '-'">{{ row.folder_name || '-' }}</td>
           <td>
             <span class="tag" :class="stateClass(row)">{{ stateText(row) }}</span>
           </td>

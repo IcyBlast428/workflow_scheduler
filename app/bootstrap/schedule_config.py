@@ -389,11 +389,11 @@ def _record_belongs_to_spec(record, spec):
         return False
     # 如果历史记录里已经保存了目录信息，就必须和当前扫描到的任务目录一致。
     # 这样即使库里残留了错误的 group/folder，也不会把 A 任务配置展示到 B 任务上。
-    record_group = record.get('group_name')
-    record_folder = record.get('folder_name')
-    if record_group and record_group != spec.get('group_name'):
+    record_group = record.get('group_name') or ''
+    record_folder = record.get('folder_name') or ''
+    if record_group != (spec.get('group_name') or ''):
         return False
-    if record_folder and record_folder != spec.get('folder_name'):
+    if record_folder != (spec.get('folder_name') or ''):
         return False
     return True
 
@@ -555,4 +555,41 @@ def save_schedule(pid, form):
     trigger, rules, schedule_type = build_schedule_payload(form or {})
     build_scheduler_trigger(trigger, rules)
     _save_schedule_record(spec, trigger, rules, schedule_type, form or {})
+    return load_schedule(pid)
+
+
+def set_schedule_enabled(pid, enabled):
+    spec = find_task_spec(pid)
+    if not spec:
+        raise ValueError('task not found: {}'.format(pid))
+    if spec.get('error'):
+        raise ValueError('task config is invalid: {}'.format(spec.get('error')))
+
+    record = _load_schedule_record(pid)
+    if not record or not _record_belongs_to_spec(record, spec):
+        raise ValueError('task {} has no saved schedule strategy yet'.format(pid))
+    if not record.get('trigger_type') or not _json_loads(record.get('trigger_json'), {}):
+        raise ValueError('task {} has no schedule strategy yet'.format(pid))
+
+    saved_form = _json_loads(record.get('schedule_json'), {})
+    saved_form['enabled'] = bool(enabled)
+    enabled_text = 'true' if enabled else 'false'
+
+    from app.bootstrap.database import GaussDB
+    with GaussDB() as db:
+        db.execute_sql(
+            """
+            UPDATE wfs_task_config
+            SET enabled = ?, schedule_json = ?, group_name = ?, folder_name = ?, updated_at = ?
+            WHERE pid = ?
+            """,
+            params=(
+                enabled_text,
+                _json_dumps(saved_form),
+                spec.get('group_name') or '',
+                spec.get('folder_name') or '',
+                datetime.datetime.now(),
+                pid,
+            ),
+        )
     return load_schedule(pid)

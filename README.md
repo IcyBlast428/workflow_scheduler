@@ -105,7 +105,7 @@ python -m venv .venv
 
 ## 任务发现与调度配置
 
-平台扫描 `app/jobs/<group>/<task>/`，默认使用 `<task>` 目录名作为 PID。PID 是任务在调度器、运行日志和统计表中的全局唯一 ID，只允许字母、数字、下划线和中划线。
+平台扫描 `app/jobs/<group>/<task>/`，默认使用 `<group>__<task>` 作为 PID。PID 是任务在调度器、运行日志和统计表中的全局唯一 ID，只允许字母、数字、下划线和中划线。
 
 入口文件规则：
 
@@ -126,7 +126,7 @@ python -m venv .venv
 
 推荐新增任务流程：
 
-1. 创建目录 `app/jobs/<group>/<task>/`，`<task>` 建议直接使用稳定 PID。
+1. 创建目录 `app/jobs/<group>/<task>/`，任务 PID 会生成为 `<group>__<task>`，目录名确定后不要频繁改动。
 2. 编写 `main.py` 和任务 README。
 3. 如有特殊依赖，创建任务级或组级 `.venv` 并安装依赖。
 4. 本地运行 `python main.py` 或对应 `.venv` 的 Python 验证任务逻辑。
