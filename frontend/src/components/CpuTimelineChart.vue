@@ -197,16 +197,7 @@ const normalizedTasks = computed(() => {
   })
     .filter(Boolean);
 
-  const byKey = new Map();
-  tasks.forEach((task) => {
-    const key = `${task.id || ''}|${task.start_time}`;
-    const existing = byKey.get(key);
-    if (!existing || (existing.running && !task.running) || task.end > existing.end) {
-      byKey.set(key, task);
-    }
-  });
-
-  return Array.from(byKey.values())
+  return mergeTaskBlocks(tasks)
     .sort((left, right) => left.start - right.start || left.end - right.end);
 });
 
@@ -443,6 +434,54 @@ function taskColor(task) {
   return '#16a34a';
 }
 
+function shouldMergeTaskBlock(left, right) {
+  if ((left.id || '') !== (right.id || '')) {
+    return false;
+  }
+  const startGap = Math.abs(left.start - right.start);
+  if (startGap > 2000) {
+    return false;
+  }
+  const overlaps = Math.min(left.end, right.end) >= Math.max(left.start, right.start) - 1000;
+  const similarEnd = Math.abs(left.end - right.end) <= 5000;
+  return overlaps || similarEnd;
+}
+
+function mergeTaskBlock(left, right) {
+  const completed = !left.running || !right.running;
+  const preferred = right.source === 'history' ? right : left;
+  return {
+    ...left,
+    ...preferred,
+    start: Math.min(left.start, right.start),
+    end: Math.max(left.end, right.end),
+    running: !completed,
+    failed: left.failed || right.failed,
+    start_time: left.start <= right.start ? left.start_time : right.start_time,
+    end_time: right.end_time || left.end_time || '',
+    label: taskLabel({
+      id: left.id || right.id,
+      name: preferred.name || left.name || right.name,
+    }),
+  };
+}
+
+function mergeTaskBlocks(tasks) {
+  const merged = [];
+  tasks
+    .slice()
+    .sort((left, right) => (left.id || '').localeCompare(right.id || '') || left.start - right.start)
+    .forEach((task) => {
+      const index = merged.findIndex((item) => shouldMergeTaskBlock(item, task));
+      if (index === -1) {
+        merged.push(task);
+        return;
+      }
+      merged[index] = mergeTaskBlock(merged[index], task);
+    });
+  return merged;
+}
+
 function leastBusyLane(laneEnds) {
   let lane = 0;
   let value = laneEnds[0] || 0;
@@ -523,10 +562,11 @@ function handleWheel(event) {
   event.preventDefault();
   userNavigated.value = true;
   const x = Math.max(margin.left, Math.min(plotRight.value, pointX(event)));
-  const center = timeForX(x);
   const span = viewEnd.value - viewStart.value;
   const nextSpan = span * (event.deltaY > 0 ? 1.25 : 0.8);
-  const ratio = (center - viewStart.value) / span;
+  const rightZoomZoneStart = margin.left + plotWidth.value * 0.8;
+  const center = x >= rightZoomZoneStart ? viewEnd.value : timeForX(x);
+  const ratio = x >= rightZoomZoneStart ? 1 : (center - viewStart.value) / span;
   setDomain(center - nextSpan * ratio, center + nextSpan * (1 - ratio));
 }
 

@@ -314,6 +314,73 @@ def _parse_datetime_value(value):
         return None
 
 
+def _task_marker_end(item):
+    end_time = _parse_datetime_value(item.get('end_time'))
+    start_time = _parse_datetime_value(item.get('start_time'))
+    return end_time or start_time
+
+
+def _same_task_marker(left, right):
+    if (left.get('id') or '') != (right.get('id') or ''):
+        return False
+    left_start = _parse_datetime_value(left.get('start_time'))
+    right_start = _parse_datetime_value(right.get('start_time'))
+    if not left_start or not right_start:
+        return False
+    if abs((left_start - right_start).total_seconds()) > 2:
+        return False
+    left_end = _task_marker_end(left)
+    right_end = _task_marker_end(right)
+    if not left_end or not right_end:
+        return True
+    overlap = min(left_end, right_end) >= max(left_start, right_start) - datetime.timedelta(seconds=1)
+    similar_end = abs((left_end - right_end).total_seconds()) <= 5
+    return overlap or similar_end
+
+
+def _merge_task_marker(left, right):
+    left_start = _parse_datetime_value(left.get('start_time'))
+    right_start = _parse_datetime_value(right.get('start_time'))
+    left_end = _parse_datetime_value(left.get('end_time'))
+    right_end = _parse_datetime_value(right.get('end_time'))
+    preferred = right if right.get('source') == 'history' else left
+    start_time = min([item for item in (left_start, right_start) if item])
+    merged = dict(left)
+    merged.update(preferred)
+    merged['start_time'] = _format_datetime_value(start_time)
+    if left_end or right_end:
+        merged['end_time'] = _format_datetime_value(max([item for item in (left_end, right_end) if item]))
+        merged['source'] = preferred.get('source') or 'history'
+    else:
+        merged['end_time'] = ''
+        merged['source'] = 'running'
+    if left.get('state') not in (None, '') and right.get('state') in (None, ''):
+        merged['state'] = left.get('state')
+    return merged
+
+
+def _dedupe_task_markers(items):
+    merged = []
+    for item in sorted(items, key=lambda value: (
+        value.get('id') or '',
+        _parse_datetime_value(value.get('start_time')) or datetime.datetime.min,
+        0 if value.get('source') == 'history' else 1,
+    )):
+        start_time = _format_datetime_value(item.get('start_time'))
+        if not start_time or not item.get('id'):
+            continue
+        normalized = dict(item)
+        normalized['start_time'] = start_time
+        normalized['end_time'] = _format_datetime_value(item.get('end_time'))
+        for index, existing in enumerate(merged):
+            if _same_task_marker(existing, normalized):
+                merged[index] = _merge_task_marker(existing, normalized)
+                break
+        else:
+            merged.append(normalized)
+    return merged
+
+
 def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
     since = datetime.datetime.now() - datetime.timedelta(hours=hours)
     markers = []
@@ -359,25 +426,8 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
     except Exception:
         markers = []
 
-    by_key = {}
-    for item in markers + recent_task_starts(since):
-        start_time = _format_datetime_value(item.get('start_time'))
-        key = '{}|{}'.format(item.get('id') or '', start_time)
-        if not start_time or not item.get('id') or key in by_key:
-            existing = by_key.get(key)
-            if existing and existing.get('end_time'):
-                continue
-            if existing and not _format_datetime_value(item.get('end_time')):
-                continue
-        if not start_time or not item.get('id'):
-            continue
-        normalized = dict(item)
-        normalized['start_time'] = start_time
-        normalized['end_time'] = _format_datetime_value(item.get('end_time'))
-        by_key[key] = normalized
-
     return sorted(
-        by_key.values(),
+        _dedupe_task_markers(markers + recent_task_starts(since)),
         key=lambda item: _parse_datetime_value(item.get('start_time')) or datetime.datetime.min,
     )
 
