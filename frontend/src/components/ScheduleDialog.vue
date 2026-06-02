@@ -347,7 +347,7 @@ onUnmounted(() => {
 
 function defaultForm() {
   return {
-    enabled: true,
+    enabled: false,
     task_name: '',
     main_file: 'main.py',
     max_instances: 1,

@@ -498,7 +498,7 @@ def call_task_once(pid):
                 spec.get('python_executable') or '',
             ],
             id='manual_{}_{}'.format(pid, uuidhex()),
-            name='Manual run: {}'.format(spec.get('task_name')),
+            name='Manual run: {}'.format(spec.get('task_name') or pid),
             replace_existing=False,
             max_instances=1,
             misfire_grace_time=60,
@@ -554,10 +554,13 @@ def aps_start(task_pid=None, action='refresh'):
     """
     job_list = []
     matched_target = task_pid is None
+    discovered_pids = set()
 
     logging.getLogger(__name__).info('begin to run aps_start pid={} action={}'.format(task_pid, action))
     for spec in discover_task_specs(TASK_DIR):
         pid = spec.get('pid')
+        if pid:
+            discovered_pids.add(pid)
 
         if task_pid and pid != task_pid:
             continue
@@ -637,7 +640,7 @@ def aps_start(task_pid=None, action='refresh'):
                     spec.get('folder_name') or '',
                     spec.get('python_executable') or '',
                 ],
-                name=spec.get('task_name'),
+                name=spec.get('task_name') or pid,
                 replace_existing=True,
                 max_instances=spec.get('max_instances') or 1,
                 coalesce=True,
@@ -653,6 +656,13 @@ def aps_start(task_pid=None, action='refresh'):
 
     if task_pid and not matched_target:
         raise ValueError('task not found: {}'.format(task_pid))
+
+    if task_pid is None:
+        for job in scheduler.get_jobs():
+            if str(job.id).startswith('manual_'):
+                continue
+            if job.id not in discovered_pids:
+                scheduler.remove_job(job.id)
 
     _ensure_listener_registered()
     logging.getLogger(__name__).info("lens(job_list):" + str(len(job_list)))

@@ -134,6 +134,7 @@ def _load_task_config_records():
                            max_instances, timeout_seconds, trigger_type, schedule_type,
                            schedule_json, trigger_json, updated_at
                     FROM wfs_task_config
+                    ORDER BY updated_at DESC
                     """,
                     return_json=True,
                 )
@@ -144,6 +145,7 @@ def _load_task_config_records():
                     SELECT pid, group_name, folder_name, task_name, trigger_type, schedule_type,
                            schedule_json, trigger_json, updated_at
                     FROM wfs_task_config
+                    ORDER BY updated_at DESC
                     """,
                     return_json=True,
                 )
@@ -161,25 +163,14 @@ def _record_maps():
     for row in _load_task_config_records():
         # PID 是任务配置唯一主键，不再按旧的 folder_name 或 group/folder 做兜底匹配。
         pid = row.get('pid')
-        if pid:
+        if pid and pid not in by_pid:
             by_pid[pid] = row
     return by_pid
 
 
 def _record_belongs_to_task(record, group_name, folder_name, pid):
-    """任务配置必须同时归属于当前 PID 和当前目录，避免历史脏数据串到别的任务。"""
-    if not record:
-        return False
-    record_pid = record.get('pid')
-    if record_pid != pid:
-        return False
-    record_group = record.get('group_name') or ''
-    record_folder = record.get('folder_name') or ''
-    if record_group != group_name:
-        return False
-    if record_folder != folder_name:
-        return False
-    return True
+    """任务配置只按 PID 归属，group/folder 只是扫描和展示元数据。"""
+    return bool(record and record.get('pid') == pid)
 
 
 def _apply_record(spec, record):
@@ -222,7 +213,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None):
         'config_base': None,
         'config': {},
         'pid': pid,
-        'task_name': folder_name,
+        'task_name': '',
         'raw_start': 'false',
         'start_enabled': False,
         'trigger': '',

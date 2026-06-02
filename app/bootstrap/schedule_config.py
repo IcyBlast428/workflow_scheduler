@@ -16,11 +16,22 @@ SCHEDULER_TZ = pytz_timezone('Asia/Shanghai')
 PREVIEW_LIMIT = 16
 
 
-def find_task_spec(pid):
+def find_task_spec(pid=None, group_name=None, folder_name=None):
+    if not pid:
+        return None
     for spec in discover_task_specs(TASK_DIR):
         if spec.get('pid') == pid:
             return spec
     return None
+
+
+def resolve_task_spec(pid=None, group_name=None, folder_name=None):
+    spec = find_task_spec(pid=pid)
+    if not spec:
+        raise ValueError('task not found: {}'.format(pid or ''))
+    if spec.get('error'):
+        raise ValueError('task config is invalid: {}'.format(spec.get('error')))
+    return spec
 
 
 def _as_text(value, default=''):
@@ -291,7 +302,7 @@ def schedule_to_form(trigger, rules, schedule_type=None, saved_form=None, spec=N
     form = _default_form(enabled=enabled)
     if spec:
         form.update({
-            'task_name': spec.get('task_name') or spec.get('folder_name') or '',
+            'task_name': spec.get('task_name') or '',
             'main_file': spec.get('main_file') or '',
             'max_instances': spec.get('max_instances') or 1,
             'timeout_seconds': spec.get('timeout_seconds') or 0,
@@ -373,6 +384,8 @@ def _load_schedule_record(pid):
                        schedule_json, trigger_json, updated_at
                 FROM wfs_task_config
                 WHERE pid = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
                 """,
                 params=(pid,),
                 return_json=True,
@@ -383,23 +396,11 @@ def _load_schedule_record(pid):
 
 
 def _record_belongs_to_spec(record, spec):
-    if not record or not spec:
-        return False
-    if record.get('pid') != spec.get('pid'):
-        return False
-    # 如果历史记录里已经保存了目录信息，就必须和当前扫描到的任务目录一致。
-    # 这样即使库里残留了错误的 group/folder，也不会把 A 任务配置展示到 B 任务上。
-    record_group = record.get('group_name') or ''
-    record_folder = record.get('folder_name') or ''
-    if record_group != (spec.get('group_name') or ''):
-        return False
-    if record_folder != (spec.get('folder_name') or ''):
-        return False
-    return True
+    return bool(record and spec and record.get('pid') == spec.get('pid'))
 
 
 def _normalize_task_config(spec, form):
-    task_name = str(form.get('task_name') or spec.get('task_name') or spec.get('folder_name') or '').strip()
+    task_name = str(form.get('task_name') or spec.get('task_name') or '').strip()
     main_file = str(form.get('main_file') or spec.get('main_file') or '').strip()
     max_instances = _as_int(form.get('max_instances') or 1, 'max_instances', 1)
     timeout_seconds = _as_int(form.get('timeout_seconds') or 0, 'timeout_seconds', 0)
@@ -437,33 +438,22 @@ def _save_schedule_record(spec, trigger, rules, schedule_type, form):
     )
     with GaussDB() as db:
         try:
-            rows = db.execute_query_sql(
-                "SELECT pid FROM wfs_task_config WHERE pid = ?",
+            # 旧版本如果没有主键约束，可能留下同 PID 多行。保存时先清理再插入，
+            # 让数据库重新回到“一个 PID 一条配置”的模型。
+            db.execute_sql(
+                "DELETE FROM wfs_task_config WHERE pid = ?",
                 params=(spec.get('pid'),),
-                return_json=False,
             )
-            if rows:
-                db.execute_sql(
-                    """
-                    UPDATE wfs_task_config
-                    SET group_name = ?, folder_name = ?, task_name = ?, main_file = ?, enabled = ?,
-                        max_instances = ?, timeout_seconds = ?, trigger_type = ?, schedule_type = ?,
-                        schedule_json = ?, trigger_json = ?, updated_at = ?
-                    WHERE pid = ?
-                    """,
-                    params=payload[1:] + (payload[0],),
-                )
-            else:
-                db.execute_sql(
-                    """
-                    INSERT INTO wfs_task_config (
-                        pid, group_name, folder_name, task_name, main_file, enabled,
-                        max_instances, timeout_seconds, trigger_type, schedule_type,
-                        schedule_json, trigger_json, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    params=payload,
-                )
+            db.execute_sql(
+                """
+                INSERT INTO wfs_task_config (
+                    pid, group_name, folder_name, task_name, main_file, enabled,
+                    max_instances, timeout_seconds, trigger_type, schedule_type,
+                    schedule_json, trigger_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params=payload,
+            )
         except Exception as exc:
             raise RuntimeError('wfs_task_config schema is outdated, please run the latest ddl.sql: {}'.format(exc))
 
@@ -501,7 +491,7 @@ def _record_schedule(spec, record):
 
 
 def _unconfigured_schedule(spec):
-    form = schedule_to_form('', {}, spec=spec, enabled=True)
+    form = schedule_to_form('', {}, spec=spec, enabled=False)
     return {
         'pid': spec.get('pid'),
         'group_name': spec.get('group_name') or '',
@@ -520,12 +510,8 @@ def _unconfigured_schedule(spec):
     }
 
 
-def load_schedule(pid):
-    spec = find_task_spec(pid)
-    if not spec:
-        raise ValueError('task not found: {}'.format(pid))
-    if spec.get('error'):
-        raise ValueError('task config is invalid: {}'.format(spec.get('error')))
+def load_schedule(pid, group_name=None, folder_name=None):
+    spec = resolve_task_spec(pid=pid)
     record = _load_schedule_record(pid)
     if record and not _record_belongs_to_spec(record, spec):
         record = None
@@ -546,26 +532,19 @@ def apply_persisted_schedule(spec):
 
 
 def save_schedule(pid, form):
-    spec = find_task_spec(pid)
-    if not spec:
-        raise ValueError('task not found: {}'.format(pid))
-    if spec.get('error'):
-        raise ValueError('task config is invalid: {}'.format(spec.get('error')))
+    form = form or {}
+    spec = resolve_task_spec(pid=pid)
 
-    trigger, rules, schedule_type = build_schedule_payload(form or {})
+    trigger, rules, schedule_type = build_schedule_payload(form)
     build_scheduler_trigger(trigger, rules)
-    _save_schedule_record(spec, trigger, rules, schedule_type, form or {})
-    return load_schedule(pid)
+    _save_schedule_record(spec, trigger, rules, schedule_type, form)
+    return load_schedule(spec.get('pid'))
 
 
-def set_schedule_enabled(pid, enabled):
-    spec = find_task_spec(pid)
-    if not spec:
-        raise ValueError('task not found: {}'.format(pid))
-    if spec.get('error'):
-        raise ValueError('task config is invalid: {}'.format(spec.get('error')))
+def set_schedule_enabled(pid, enabled, group_name=None, folder_name=None):
+    spec = resolve_task_spec(pid=pid)
 
-    record = _load_schedule_record(pid)
+    record = _load_schedule_record(spec.get('pid'))
     if not record or not _record_belongs_to_spec(record, spec):
         raise ValueError('task {} has no saved schedule strategy yet'.format(pid))
     if not record.get('trigger_type') or not _json_loads(record.get('trigger_json'), {}):
@@ -589,7 +568,7 @@ def set_schedule_enabled(pid, enabled):
                 spec.get('group_name') or '',
                 spec.get('folder_name') or '',
                 datetime.datetime.now(),
-                pid,
+                spec.get('pid'),
             ),
         )
-    return load_schedule(pid)
+    return load_schedule(spec.get('pid'))

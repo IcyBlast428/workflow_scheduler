@@ -190,7 +190,7 @@
               <div class="filter-actions">
                 <button class="btn" type="button" :disabled="tasks.loading" @click="reloadTasks(false)">
                   <span class="btn-icon">+</span>
-                  重扫新增
+                  同步任务
                 </button>
                 <button class="btn danger" type="button" :disabled="tasks.loading" @click="reloadTasks(true)">
                   <span class="btn-icon">!</span>
@@ -226,7 +226,7 @@
             <div v-if="tasks.error" class="error-state">{{ tasks.error }}</div>
             <div v-else-if="!tasks.items.length && !tasks.loading" class="empty-state">
               <strong>没有匹配的任务</strong>
-              <span>可以清空筛选条件，或点击“重扫新增”同步 app/jobs 目录。</span>
+              <span>可以清空筛选条件，或点击“同步任务”同步 app/jobs 目录。</span>
             </div>
             <TaskTable
               v-else
@@ -947,7 +947,10 @@ async function editTask(row, state) {
   }
   busy.value = true;
   try {
-    const message = await api.editTask({ id: row.id, state });
+    const message = await api.editTask({
+      id: row.id,
+      state,
+    });
     markBackendHealthy('后端连接正常');
     pushToast('success', '操作成功', message);
     await loadTasks();
@@ -1013,13 +1016,25 @@ async function openScheduleDialog(row) {
   scheduleDialog.preview = [];
   scheduleDialog.previewError = '';
   scheduleDialog.previewLoading = false;
-  scheduleDialog.task = row;
+  scheduleDialog.task = { ...row };
   scheduleDialog.data = null;
   try {
-    const data = await api.taskSchedule({ pid: row.id });
+    const data = await api.taskSchedule({
+      pid: row.id,
+    });
     if (seq !== scheduleLoadSeq || scheduleDialog.task?.id !== row.id) {
       return;
     }
+    if (data.pid && data.pid !== row.id) {
+      throw new Error(`后端返回 PID ${data.pid} 与当前任务 ${row.id} 不一致，请刷新页面后重试。`);
+    }
+    scheduleDialog.task = {
+      ...row,
+      id: row.id,
+      name: data.task_name || row.name,
+      group_name: data.group_name || row.group_name || '',
+      folder_name: data.folder_name || row.folder_name || '',
+    };
     markBackendHealthy('后端连接正常');
     scheduleDialog.data = data;
     scheduleDialog.preview = data.preview || [];
@@ -1091,6 +1106,9 @@ async function saveSchedule(form) {
     if (scheduleDialog.task?.id !== taskId) {
       return;
     }
+    if (data.pid && data.pid !== taskId) {
+      throw new Error(`后端保存 PID ${data.pid} 与当前任务 ${taskId} 不一致。`);
+    }
     markBackendHealthy('后端连接正常');
     scheduleDialog.data = data;
     scheduleDialog.preview = data.preview || [];
@@ -1117,7 +1135,7 @@ async function openLatestLog(row) {
 }
 
 async function reloadTasks(fullReload) {
-  const label = fullReload ? '全量重载' : '重扫新增任务';
+  const label = fullReload ? '全量重载' : '同步任务';
   if (fullReload) {
     const confirmed = await requestConfirm({
       title: '全量重载调度器',
@@ -1151,12 +1169,12 @@ async function reloadTasks(fullReload) {
 async function handleUpdateCode() {
   const confirmed = await requestConfirm({
     title: '更新服务器代码',
-    message: '该操作会在服务端执行 git pull，并返回命令输出。',
+    message: '该操作会把服务端代码切到配置分支的最新提交，并同步任务列表。',
     details: [
       '更新后如果包含后端代码变更，仍需要按部署流程重启服务。',
-      '如果仓库存在未提交变更，git pull 可能失败。',
+      '新增任务会出现在列表里，被删除的任务会从列表和调度器中移除。',
     ],
-    confirmText: '执行 git pull',
+    confirmText: '更新代码',
     danger: true,
   });
   if (!confirmed) {
@@ -1167,7 +1185,8 @@ async function handleUpdateCode() {
     const message = await api.updateCode();
     markBackendHealthy('后端连接正常');
     showModal('代码更新结果', message);
-    pushToast('success', '代码更新完成', '已返回 git pull 输出。');
+    pushToast('success', '代码更新完成', '已同步任务列表。');
+    await Promise.all([loadTasks(), loadGroups(), loadDashboard({ silent: true })]);
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '代码更新失败' });
   } finally {

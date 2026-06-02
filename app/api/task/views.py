@@ -13,7 +13,7 @@ from flask_restful import Resource
 from app.bootstrap.core import aps_start, call_task_once, kill_process
 from app.bootstrap.database import GaussDB
 from app.bootstrap.global_vars import TASK_DIR, error_msg, ignores, runnings, success_msg
-from app.bootstrap.schedule_config import load_schedule, preview_schedule, save_schedule, set_schedule_enabled
+from app.bootstrap.schedule_config import load_schedule, preview_schedule, resolve_task_spec, save_schedule, set_schedule_enabled
 from app.bootstrap.system_metrics import cpu_monitor_snapshot, recent_task_starts
 from app.bootstrap.task_loader import discover_task_specs
 from app.extensions import scheduler
@@ -165,6 +165,24 @@ def _update_code_to_configured_branch():
         if returncode != 0:
             return False, '\n'.join(outputs)
     return True, '\n'.join(outputs)
+
+
+def _sync_tasks_after_code_update():
+    if _scheduler_control_enabled():
+        url = urljoin(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/', 'api/taskinfo/overloading')
+        headers = {}
+        token = request.headers.get('X-Token') or request.args.get('token')
+        if token:
+            headers['X-Token'] = token
+        response = requests.post(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get('code') != 20000:
+            raise RuntimeError(payload.get('message') or 'scheduler sync failed')
+        return str(payload.get('data') or payload.get('message') or 'tasks synchronized')
+
+    aps_start()
+    return 'tasks synchronized'
 
 
 def _load_job_stats():
@@ -657,7 +675,9 @@ class Schedule(Resource):
             return error_msg('missing task pid')
         try:
             data = save_schedule(pid, payload)
-            aps_start(task_pid=pid, action='refresh')
+            if data.get('pid') != pid:
+                return error_msg('schedule save pid mismatch: request {}, response {}'.format(pid, data.get('pid')))
+            aps_start(task_pid=data.get('pid') or pid, action='refresh')
             return success_msg(data)
         except Exception as exc:
             return error_msg(str(exc))
@@ -672,6 +692,8 @@ class Action(Resource):
         pid = req_data.get('id')
         state = req_data.get('state')
         try:
+            spec = resolve_task_spec(pid=pid)
+            pid = spec.get('pid')
             if state == "pause":
                 ignores.add(pid)
                 if scheduler.get_job(pid):
@@ -850,6 +872,11 @@ class Code(Resource):
         try:
             ok, message = _update_code_to_configured_branch()
             if ok:
+                try:
+                    sync_message = _sync_tasks_after_code_update()
+                    message += '\n\nsync result:\n{}'.format(sync_message)
+                except Exception as sync_exc:
+                    message += '\n\nsync warning:\n{}'.format(sync_exc)
                 return success_msg('code update succeeded\n' + message)
             return error_msg('code update failed\n' + message)
         except Exception as exp:
