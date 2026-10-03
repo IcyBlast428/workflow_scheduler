@@ -40,6 +40,9 @@ def _parts(filename, directory=False):
 
 def _root(spec):
     root = Path(TASK_DIR).resolve()
+    if spec.get('managed'):
+        from app.bootstrap.task_packages import storage_root
+        root = storage_root()
     task = Path(spec['task_dir']).absolute()
     try:
         relative = task.relative_to(root)

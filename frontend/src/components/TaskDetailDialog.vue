@@ -4,6 +4,7 @@
       <header class="modal-head"><h3>任务详情：{{ pid }}</h3><button class="btn icon-only" title="关闭" @click="$emit('close')">×</button></header>
       <div class="modal-body task-detail-body">
         <div class="detail-toolbar"><div class="filter-actions" aria-label="详情内容"><button v-for="item in tabs" :key="item.id" class="btn" :aria-pressed="tab === item.id" :class="tab === item.id ? 'primary' : ''" @click="selectTab(item.id)">{{ item.label }}</button></div><button class="btn detail-refresh" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新详情' }}</button></div>
+        <div v-if="canManage" class="filter-actions"><button class="btn" @click="$emit('packages',pid)">管理代码版本</button></div>
         <LoadingStatus :active="loading || (tab === 'source' && sourceLoading)" :label="tab === 'source' && sourceLoading ? '正在读取任务文件…' : '正在更新任务详情…'" />
         <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div>
         <div class="detail-panels" :aria-busy="loading">
@@ -37,7 +38,7 @@ import { statusLabel, actionLabel, statusClass } from '../executionLabels';
 import TaskSourceViewer from './TaskSourceViewer.vue';
 import LoadingStatus from './LoadingStatus.vue';
 const props = defineProps({ pid: {type:String,default:''}, canManage:Boolean });
-const emit = defineEmits(['close','execution','confirmRestore']);
+const emit = defineEmits(['close','execution','confirmRestore','packages']);
 const data = ref({}), tab = ref('description'), error = ref(''), loading = ref(false), restoring = ref(false);
 const sourceVisited = ref(false);
 const sourceLoading = ref(false);

@@ -13,7 +13,7 @@
           <span>最近心跳：{{ record.heartbeat || '-' }}</span>
           <span>计划：{{ record.scheduled_time || record.created_at || '-' }} · 启动延迟：{{ record.start_delay_seconds?.toFixed(2) ?? '-' }} 秒</span>
         </div>
-        <details v-if="record.code_version" class="disclosure"><summary>本次执行的代码与环境</summary><div class="disclosure-body"><p>发布版本：{{ record.code_version.release }} · {{ record.code_version.python }}</p><p class="mono">入口 {{ record.code_version.entry }} · SHA256 {{ record.code_version.entry_sha256 }}</p><p class="mono">依赖摘要 {{ record.code_version.dependency_sha256 }}</p><p class="hint">代码查看页显示当前文件；历史执行以此处版本和摘要为准。</p></div></details>
+        <details v-if="record.code_version" class="disclosure"><summary>本次执行的代码与环境</summary><div class="disclosure-body"><p>平台版本：{{ record.code_version.release }} · {{ record.code_version.python }}</p><p v-if="record.code_version.task_release" class="mono">任务版本 {{ record.code_version.task_release }} · 包 SHA256 {{ record.code_version.package_sha256 }}</p><p class="mono">入口 {{ record.code_version.entry }} · SHA256 {{ record.code_version.entry_sha256 }}</p><p class="mono">依赖摘要 {{ record.code_version.dependency_sha256 }}</p><p class="hint">代码查看页显示当前文件；历史执行以此处版本和摘要为准。</p></div></details>
         <p v-if="record.reason" class="inline-alert warning">{{ record.reason }}</p>
         <p v-if="record.log_truncated" class="hint">保留日志已达到容量上限，后续输出已丢弃。</p>
         <button v-if="canOperate && record.status && !['queued','running'].includes(record.status)" class="btn" :disabled="retrying" @click="$emit('retry',record)">再执行一次</button>

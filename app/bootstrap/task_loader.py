@@ -197,14 +197,14 @@ def _apply_record(spec, record):
     spec['schedule_source'] = 'database'
 
 
-def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None):
+def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_override=None):
     task_dir = Path(task_dir)
     group_dir = task_dir.parent
     inferred_main_file = infer_main_file(task_dir)
     python_executable, python_source = resolve_python_executable(group_dir, task_dir)
     identity_error = ''
     manifest = task_dir / '.wfs-task.json'
-    pid = build_task_pid(group_name, folder_name)
+    pid = pid_override or build_task_pid(group_name, folder_name)
     if manifest.exists():
         try:
             if manifest.is_symlink() or manifest.stat().st_size > 4096:
@@ -280,7 +280,8 @@ def invalidate_task_cache():
         _cache.clear()
 
 
-def discover_task_specs(task_root=TASK_DIR):
+def discover_task_specs(task_root=None):
+    task_root = TASK_DIR if task_root is None else task_root
     key = str(task_root)
     with _cache_lock:
         cached = _cache.get(key)
@@ -297,6 +298,9 @@ def _discover_task_specs(task_root=TASK_DIR):
     for group_name, folder_name, task_dir in iter_task_directories(task_root):
         spec = load_task_spec(group_name, folder_name, task_dir, records_by_pid)
         specs.append(spec)
+
+    from app.bootstrap.task_packages import discovery
+    specs = discovery(records_by_pid, specs)
 
     pid_locations = {}
     for spec in specs:

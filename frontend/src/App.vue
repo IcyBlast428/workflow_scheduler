@@ -113,7 +113,7 @@
             <strong>{{ backendStatus.reachable ? '后端正常' : '后端异常' }}</strong>
             <span>{{ backendStatus.checkedAt || '未检测' }}</span>
           </div>
-          <div v-if="!['dashboard', 'matrix', 'admin'].includes(view)" class="status-chip" :class="liveState.connected ? 'online' : 'offline'">
+          <div v-if="!['dashboard', 'matrix', 'admin', 'packages'].includes(view)" class="status-chip" :class="liveState.connected ? 'online' : 'offline'">
             <strong>{{ liveState.connected ? '实时同步' : '实时断开' }}</strong>
             <span>{{ liveState.lastEvent || '等待连接' }}</span>
           </div>
@@ -186,9 +186,10 @@
             <div class="panel-head">
               <div>
                 <h2>任务列表</h2>
-                <p>从 app/jobs 目录扫描任务代码，运行配置和调度策略由前端维护。</p>
+                <p>查看已发布任务和 Git 任务，维护调度策略与运行状态。</p>
               </div>
               <div class="filter-actions">
+                <button v-if="canManage" class="btn primary" type="button" @click="openPackages('')">任务发布 / 新增</button>
                 <button v-if="canManage" class="btn" type="button" :disabled="tasks.loading" @click="reloadTasks(false)">
                   <span class="btn-icon">+</span>
                   同步任务
@@ -336,6 +337,7 @@
           </section>
         </template>
 
+        <template v-else-if="view === 'packages' && canManage"><TaskPackageManager :confirm="requestConfirm" :initial-pid="packagePid" @detail="detailPid = $event" @changed="refreshPackageTasks" /></template>
         <template v-else-if="view === 'admin' && canManage"><AdminPanel /></template>
         <template v-else>
           <section class="panel">
@@ -418,7 +420,7 @@
   </div>
 
   <ConfirmDialog :model-value="confirmState" @resolve="resolveConfirm" />
-  <TaskDetailDialog :pid="detailPid" :can-manage="canManage" @close="detailPid = ''" @execution="openExecution" @confirm-restore="confirmRestore" />
+  <TaskDetailDialog :pid="detailPid" :can-manage="canManage" @close="detailPid = ''" @execution="openExecution" @confirm-restore="confirmRestore" @packages="openPackages" />
   <ExecutionDialog :run-id="executionRunId" :can-operate="canOperate" :retrying="retryingExecution" @retry="retryExecution" @close="executionRunId = ''" />
   <ScheduleDialog
     :open="scheduleDialog.open"
@@ -456,6 +458,7 @@ import TaskTable from './components/TaskTable.vue';
 import TaskDetailDialog from './components/TaskDetailDialog.vue';
 import ExecutionDialog from './components/ExecutionDialog.vue';
 import AdminPanel from './components/AdminPanel.vue';
+import TaskPackageManager from './components/TaskPackageManager.vue';
 import DashboardSummary from './components/DashboardSummary.vue';
 import ExecutionMatrix from './components/ExecutionMatrix.vue';
 import { canTrigger } from './executionLabels';
@@ -510,12 +513,14 @@ const navItems = [
     ],
     description: '调度器事件与系统异常记录。',
   },
+  { id:'packages', label:'任务发布', iconPaths:['M3 7l9-4 9 4-9 4z','M3 7v10l9 4 9-4V7','M12 11v10'], description:'任务包上传、发布、版本回滚与回收站。' },
   { id:'admin', label:'账户与审计', iconPaths:['M4 6h16','M4 12h16','M4 18h16'], description:'账户权限与操作记录。' },
 ];
 
 const ready = ref(false);
 const token = ref(getToken());
 const view = ref(window.location.hash.replace('#', '') || 'dashboard');
+const packagePid = ref('');
 const theme = ref(localStorage.getItem('workflow_scheduler_theme') || 'dark');
 const mobileNavOpen = ref(false);
 const loginLoading = ref(false);
@@ -558,7 +563,7 @@ const user = reactive({
 });
 const canManage = computed(() => user.roles.includes('admin'));
 const canOperate = computed(() => canManage.value || user.roles.includes('operator'));
-const visibleNavItems = computed(() => navItems.filter(item => item.id !== 'admin' || canManage.value));
+const visibleNavItems = computed(() => navItems.filter(item => !['admin','packages'].includes(item.id) || canManage.value));
 
 const { tasks, favorites, onlyFavorites, selectedTasks, batchBusy, saveFilters, toggleFavorite, toggleSelected } = useTaskWorkspace(() => user.name);
 const liveState = reactive({
@@ -774,7 +779,7 @@ async function loadUser() {
   user.avatar = data.avatar || '/static/img/head.gif';
   user.roles = data.roles || [];
   if (data.csrf_token) { setToken(data.csrf_token); token.value = data.csrf_token; }
-  if (view.value === 'admin' && !canManage.value) switchView('tasks');
+  if (['admin','packages'].includes(view.value) && !canManage.value) switchView('tasks');
 }
 
 async function loadDashboard(options = {}) {
@@ -858,6 +863,9 @@ function switchView(nextView) {
   syncDashboardPolling();
 }
 
+function openPackages(pid) { detailPid.value = ''; packagePid.value = pid; switchView('packages'); }
+async function refreshPackageTasks() { await Promise.all([loadTasks(),loadGroups()]); }
+
 async function refreshActiveView() {
   const reachable = await checkBackend({ silent: true });
   if (!reachable) {
@@ -873,6 +881,8 @@ async function refreshActiveView() {
     await Promise.all([loadTaskLogs(), loadTaskIds()]);
   } else if (view.value === 'matrix') {
     window.dispatchEvent(new Event('wfs:matrix-refresh'));
+  } else if (view.value === 'packages') {
+    window.dispatchEvent(new Event('wfs:packages-refresh'));
   } else {
     await Promise.all([loadSystemLogs(), loadSystemIds()]);
   }
@@ -1404,7 +1414,7 @@ function stopDashboardPolling() {
 }
 
 async function pollLiveEvents() {
-  if (!token.value || livePollInFlight || ['dashboard','matrix','admin'].includes(view.value) || document.visibilityState === 'hidden') {
+  if (!token.value || livePollInFlight || ['dashboard','matrix','admin','packages'].includes(view.value) || document.visibilityState === 'hidden') {
     return;
   }
   livePollInFlight = true;

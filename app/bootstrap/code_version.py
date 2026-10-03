@@ -1,5 +1,6 @@
 """Execution provenance, without copying source for every invocation."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -33,7 +34,16 @@ def execution_version(entry, python_executable=''):
             lock = parent/name
             if lock.is_file() and lock.stat().st_size<=2*1024*1024:
                 requirements.append((name,hashlib.sha256(lock.read_bytes()).hexdigest()))
-    return {'release':cached('release-revision',30,_release,mutable=False),
+    task_version = {}
+    from app.bootstrap.task_packages import storage_root
+    try:
+        relative = path.relative_to(storage_root())
+        if len(relative.parts) >= 5 and relative.parts[1] == 'releases' and relative.parts[3] == 'code':
+            marker = storage_root().joinpath(*relative.parts[:3]) / '.release.json'
+            task_version = json.loads(marker.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        pass
+    return {**task_version, 'release':cached('release-revision',30,_release,mutable=False),
             'entry':path.name,'entry_sha256':digest,'python':cached(('python-version',executable),300,runtime,mutable=False),
             'dependency_sha256':hashlib.sha256(repr(requirements).encode()).hexdigest(),
             'immutable_release':(BASE_DIR.parent/'.release-revision').is_file()}

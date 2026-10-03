@@ -13,3 +13,5 @@ def init_api(app):
     task_api(Api(app=app, prefix='/api/taskinfo'))
     from app.api.operations import blueprint
     app.register_blueprint(blueprint)
+    from app.api.task_packages import blueprint as packages_blueprint
+    app.register_blueprint(packages_blueprint)

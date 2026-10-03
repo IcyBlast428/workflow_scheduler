@@ -286,3 +286,7 @@ bash scripts/local_service.sh start
 
 备份包含 SQLite 快照、执行状态/日志、审计待写文件和指标，并检查数据库完整性。恢复时停止服务，将 `database.sqlite3` 放回原数据库路径，将归档内 `data` 内容放回原 `WFS_DATA_DIR`；保留原 `.env.local`，其中的签名密钥和管理员摘要不在备份内。备份包含业务日志和账户摘要，请限制访问。GaussDB 需另行执行目标数据库支持的一致备份，再备份共享数据目录；此本地工具不备份生产数据库。
 - `POST /api/taskinfo/updatecode`：检查 Git 更新。
+
+### 任务代码发布
+
+新增「任务发布」页面，支持多文件 ZIP 上传、只读差异预览、离线依赖检查、发布、代码回滚和回收站。原 Git 任务可保留编号导入，现有调度配置和日志延续使用。部署前应用 `007_task_packages.sql`；操作方式、离线依赖和数据目录见 [任务包管理说明](docs/task-packages.md)。

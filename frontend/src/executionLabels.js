@@ -22,5 +22,7 @@ export function canTrigger(row) {
   return row.state !== 'invalid' && (row.running_instances || 0) < (row.max_instances || 1);
 }
 export function actionLabel(action) {
+  const packages = {package_upload:'上传任务包',package_import:'导入任务版本',package_prepare:'检查任务依赖',package_publish:'发布任务版本',package_rollback:'回滚任务代码',package_trash:'任务移入回收站',package_restore:'恢复任务'};
+  if (packages[action]) return packages[action];
   return ({login:'登录',logout:'退出','/api/taskinfo/editTask':'任务启停或刷新','/api/taskinfo/call_task':'手动执行','/api/taskinfo/schedule':'修改调度配置','/api/taskinfo/restore':'恢复配置','/api/taskinfo/overloading':'同步或重载任务','/api/taskinfo/updatecode':'检查版本','/api/admin/users':'维护账户'})[action] || action;
 }

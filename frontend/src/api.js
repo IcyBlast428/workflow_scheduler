@@ -47,7 +47,9 @@ async function request(path, options = {}) {
   }
 
   let body;
-  if (options.body !== undefined) {
+  if (options.formData !== undefined) {
+    body = options.formData;
+  } else if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(options.body);
   }
@@ -85,6 +87,10 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  packages(pid = '') { return request('/api/taskinfo/packages', { params: { pid } }); },
+  packagePreview(pid, version, path) { return request('/api/taskinfo/packages/preview', { params: { pid, version, path } }); },
+  uploadPackage(formData) { return request('/api/taskinfo/packages/upload', { method: 'POST', formData, timeout: 65000 }); },
+  packageAction(body) { return request('/api/taskinfo/packages/action', { method: 'POST', body, timeout: 65000 }); },
   health() {
     return request('/api/user/health');
   },

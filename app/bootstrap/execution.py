@@ -100,7 +100,8 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
     limits = limits or {}
     try:
         current = read_run(run_id)
-        update_run(run_id, code_version=execution_version(path,python_executable), start_delay_seconds=max(0,(start-datetime.datetime.fromisoformat(current.get('scheduled_time') or current['created_at'])).total_seconds()))
+        provenance = execution_version(path, python_executable)
+        update_run(run_id, code_version=provenance, start_delay_seconds=max(0,(start-datetime.datetime.fromisoformat(current.get('scheduled_time') or current['created_at'])).total_seconds()))
         record_task_start(PID, task_name, group_name, folder_name, start)
         if runnings.is_cancelled(reservation):
             state, output = -15, 'Task stopped before execution.'
@@ -108,6 +109,16 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
             entry = Path(path).resolve()
             child_env = os.environ.copy()
             child_env['PYTHONIOENCODING'] = 'utf-8'
+            if provenance.get('task_release'):
+                child_env['PYTHONDONTWRITEBYTECODE'] = '1'
+            # Business output has a stable home across code updates/rollbacks.
+            from app.bootstrap.global_vars import DATA_DIR
+            import re
+            if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,199}', str(PID)):
+                data_dir = Path(DATA_DIR) / 'task-data' / PID
+                data_dir.mkdir(parents=True, exist_ok=True)
+                child_env['WFS_TASK_DATA_DIR'] = str(data_dir.resolve())
+                child_env['WFS_TASK_ID'] = PID
             for key in ('WFS_SECRET_KEY', 'WFS_ADMIN_PASSWORD_HASH', 'WFS_USERS_JSON'):
                 child_env.pop(key, None)
             child_env['PYTHONPATH'] = os.pathsep.join(filter(None, (str(BASE_DIR.parent), child_env.get('PYTHONPATH'))))

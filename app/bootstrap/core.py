@@ -191,7 +191,11 @@ def _sync_job_stats(job_list, prune_missing=True):
         db.begin_transaction()
         try:
             if prune_missing:
+                from app.bootstrap.task_packages import registry
+                preserved = set(registry())
                 for pid in existing - current:
+                    if pid in preserved:
+                        continue
                     db.execute_sql('DELETE FROM wfs_job_stats WHERE pid=?', params=(pid,))
             for pid, group, folder, name, enabled in job_list:
                 if pid in existing:
@@ -203,6 +207,7 @@ def _sync_job_stats(job_list, prune_missing=True):
             db.set_rollback()
             raise
 
+@serialized_configuration
 def call_task_once(pid, actor='admin'):
     for spec in discover_task_specs(TASK_DIR):
         if spec.get('pid') != pid:
@@ -304,6 +309,8 @@ def aps_start(task_pid=None, action='refresh'):
     :param action: refresh/start/reload 等任务控制动作
     """
     if task_pid is None:
+        from app.bootstrap.task_packages import recover
+        recover()
         start_operations()
         from app.bootstrap.system_metrics import cpu_monitor_snapshot
         cpu_monitor_snapshot()
