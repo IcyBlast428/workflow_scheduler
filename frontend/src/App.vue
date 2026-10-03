@@ -1,7 +1,7 @@
 ﻿<template>
   <div v-if="!ready" class="boot-screen">
     <div class="boot-card">
-      <div class="boot-mark">WFS</div>
+      <BrandLogo class="boot-mark" />
       <div class="boot-copy">
         <strong>定时任务调度</strong>
         <span>{{ backendStatus.message }}</span>
@@ -20,7 +20,7 @@
   <main v-else-if="!token" class="login-screen">
     <section class="login-panel">
       <div class="login-brief">
-        <div class="brand-mark">WFS</div>
+        <BrandLogo />
         <h1>定时任务调度</h1>
         <p>面向内网运维任务的调度控制台，集中管理任务扫描、暂停启动、运行日志与系统异常记录。</p>
       </div>
@@ -28,7 +28,7 @@
         <div class="login-form-head">
           <div>
             <h2>登录控制台</h2>
-            <p class="hint">使用后端配置中的管理员账户登录。</p>
+            <p class="hint">使用已分配的账户登录。</p>
           </div>
         </div>
         <div
@@ -51,7 +51,7 @@
           <label for="password">密码</label>
           <input id="password" v-model="loginForm.password" class="input" type="password" autocomplete="current-password">
         </div>
-        <button class="btn primary" type="submit" :disabled="loginLoading || !backendStatus.reachable">
+        <button class="btn primary" type="submit" aria-label="登录" :disabled="loginLoading || !backendStatus.reachable">
           <span class="btn-icon">></span>
           {{ loginLoading ? '登录中...' : '登录' }}
         </button>
@@ -62,7 +62,7 @@
   <div v-else class="app-shell">
     <aside class="sidebar" :class="{ open: mobileNavOpen }">
       <div class="brand">
-        <div class="brand-mark">WFS</div>
+        <BrandLogo />
         <div class="brand-copy">
           <h1>{{ user.project || '定时任务调度' }}</h1>
           <span>Workflow Scheduler</span>
@@ -71,7 +71,7 @@
       <button class="btn icon-only mobile-menu" type="button" title="菜单" @click="mobileNavOpen = !mobileNavOpen">≡</button>
       <nav class="nav">
         <button
-          v-for="item in navItems"
+          v-for="item in visibleNavItems"
           :key="item.id"
           class="nav-button"
           :class="{ active: view === item.id }"
@@ -105,23 +105,19 @@
             <span class="btn-icon">{{ theme === 'dark' ? '☾' : '☼' }}</span>
             {{ theme === 'dark' ? '深色' : '浅色' }}
           </button>
-          <button class="btn warning" type="button" :disabled="busy" @click="handleUpdateCode">
+          <button v-if="canManage" class="btn warning" type="button" :disabled="busy" @click="handleUpdateCode">
             <span class="btn-icon">^</span>
-            更新代码
+            检查更新
           </button>
           <div class="status-chip" :class="backendStatus.reachable ? 'online' : 'offline'">
             <strong>{{ backendStatus.reachable ? '后端正常' : '后端异常' }}</strong>
             <span>{{ backendStatus.checkedAt || '未检测' }}</span>
           </div>
-          <div class="status-chip" :class="liveState.connected ? 'online' : 'offline'">
+          <div v-if="!['dashboard', 'matrix', 'admin'].includes(view)" class="status-chip" :class="liveState.connected ? 'online' : 'offline'">
             <strong>{{ liveState.connected ? '实时同步' : '实时断开' }}</strong>
             <span>{{ liveState.lastEvent || '等待连接' }}</span>
           </div>
-          <div class="user-chip">
-            <img class="avatar" :src="user.avatar || '/static/img/head.gif'" alt="">
-            <span>{{ user.name || 'Admin' }}</span>
-          </div>
-          <button class="btn ghost" type="button" @click="handleLogout">退出</button>
+          <UserMenu :name="user.name || 'Admin'" :avatar="user.avatar" @logout="handleLogout" />
         </div>
       </header>
 
@@ -133,9 +129,10 @@
         </div>
 
         <template v-if="view === 'dashboard'">
-          <div v-if="dashboard.loading" class="loading-bar"></div>
+          <LoadingStatus :active="dashboard.loading" label="正在更新总览…" />
           <div v-if="dashboard.error" class="error-state">{{ dashboard.error }}</div>
-          <template v-else>
+          <template v-if="!dashboard.error || dashboard.loaded">
+            <DashboardSummary :summary="dashboard.summary" :failures="dashboard.failure_rank" :recent="dashboard.recent_runs" @tasks="showFilteredTasks" @detail="detailPid = $event" />
             <section class="panel cpu-panel">
               <div class="panel-head cpu-panel-head">
                 <div>
@@ -157,6 +154,10 @@
           </template>
         </template>
 
+        <template v-else-if="view === 'matrix'">
+          <ExecutionMatrix :user-key="user.name" @task="detailPid = $event" @execution="openExecution" @logs="openMatrixLogs" />
+        </template>
+
         <template v-else-if="view === 'tasks'">
           <div class="summary-grid">
             <div class="metric-card">
@@ -164,11 +165,11 @@
               <strong>{{ tasks.total }}</strong>
             </div>
             <div class="metric-card">
-              <span>本页运行中</span>
+              <span>本页调度已启用</span>
               <strong>{{ taskSummary.running }}</strong>
             </div>
             <div class="metric-card">
-              <span>本页执行中</span>
+              <span>本页有活动实例</span>
               <strong>{{ taskSummary.pending }}</strong>
             </div>
             <div class="metric-card">
@@ -176,7 +177,7 @@
               <strong>{{ taskSummary.invalid }}</strong>
             </div>
             <div class="metric-card">
-              <span>本页累计失败</span>
+              <span>本页连续失败合计</span>
               <strong>{{ taskSummary.failed }}</strong>
             </div>
           </div>
@@ -188,11 +189,11 @@
                 <p>从 app/jobs 目录扫描任务代码，运行配置和调度策略由前端维护。</p>
               </div>
               <div class="filter-actions">
-                <button class="btn" type="button" :disabled="tasks.loading" @click="reloadTasks(false)">
+                <button v-if="canManage" class="btn" type="button" :disabled="tasks.loading" @click="reloadTasks(false)">
                   <span class="btn-icon">+</span>
                   同步任务
                 </button>
-                <button class="btn danger" type="button" :disabled="tasks.loading" @click="reloadTasks(true)">
+                <button v-if="canManage" class="btn danger" type="button" :disabled="tasks.loading" @click="reloadTasks(true)">
                   <span class="btn-icon">!</span>
                   全量重载
                 </button>
@@ -214,24 +215,36 @@
                   <option v-for="group in tasks.groups" :key="group" :value="group">{{ group }}</option>
                 </select>
               </div>
+              <div class="form-row"><label for="task-status">任务状态</label><select id="task-status" v-model="tasks.params.status" class="select"><option value="">全部状态</option><option value="active">有活动实例</option><option value="failed">最近结果异常</option><option value="invalid">配置异常</option><option value="enabled">调度已启用</option></select></div>
+              <div class="form-row"><label for="task-owner">负责人</label><input id="task-owner" v-model.trim="tasks.params.owner" class="input" placeholder="负责人关键字"></div>
               <div class="filter-actions">
                 <button class="btn primary" type="submit">
                   <span class="btn-icon">?</span>
                   搜索
                 </button>
                 <button class="btn" type="button" @click="resetTaskFilters">清空</button>
+                <label class="checkbox-row"><input v-model="onlyFavorites" type="checkbox" @change="loadTasks(true)">仅看收藏</label>
               </div>
             </form>
-            <div v-if="tasks.loading" class="loading-bar"></div>
+            <div class="batch-toolbar"><span class="selection-count">已选择 <strong>{{ selectedTasks.length }}</strong> 个任务</span><div class="filter-actions"><button v-if="canOperate" class="btn" :disabled="!selectedTasks.length || batchBusy" @click="batchTaskAction('pause')">批量暂停调度</button><button v-if="canOperate" class="btn" :disabled="!selectedTasks.length || batchBusy" @click="batchTaskAction('start')">批量启用调度</button><button class="btn" :disabled="!selectedTasks.length" @click="selectedTasks = []">取消选择</button></div></div>
+            <LoadingStatus :active="tasks.loading" label="正在更新任务列表…" />
             <div v-if="tasks.error" class="error-state">{{ tasks.error }}</div>
-            <div v-else-if="!tasks.items.length && !tasks.loading" class="empty-state">
-              <strong>没有匹配的任务</strong>
-              <span>可以清空筛选条件，或点击“同步任务”同步 app/jobs 目录。</span>
+            <div v-if="!tasks.items.length && !tasks.error" class="empty-state">
+              <strong>{{ tasks.loading ? '正在读取任务' : '没有匹配的任务' }}</strong>
+              <span>{{ tasks.loading ? '正在更新结果，请稍候。' : '可以清空筛选条件，或点击“同步任务”同步 app/jobs 目录。' }}</span>
             </div>
             <TaskTable
-              v-else
+              v-else-if="tasks.items.length"
               :rows="tasks.items"
               :busy="busy"
+              :pending-actions="pendingActions"
+              :can-operate="canOperate"
+              :can-manage="canManage"
+              :favorites="favorites"
+              :selected="selectedTasks"
+              @favorite="toggleFavorite"
+              @select="toggleSelected"
+              @detail="detailPid = $event.id"
               @action="editTask"
               @pause="pauseTask"
               @call="handleCallTask"
@@ -253,10 +266,19 @@
             <div class="panel-head">
               <div>
                 <h2>调度日志</h2>
-                <p>查看任务脚本每次执行的开始时间、结束时间、耗时与输出摘要。</p>
+                <p>默认查看最近 7 天。历史记录可按任务和日期查询，每次日期范围不超过 93 天。</p>
               </div>
             </div>
-            <form class="filter-grid logs" @submit.prevent="loadTaskLogs(true)">
+            <div v-if="matrixLogRange.length" class="inline-note">来自执行矩阵：{{ matrixLogRange[0] }} — {{ matrixLogRange[1] }}。搜索或清空可恢复按日期查询。</div>
+            <form class="filter-grid logs" @submit.prevent="searchTaskLogs">
+              <div class="form-row">
+                <label for="task-log-scope">查询范围</label>
+                <select id="task-log-scope" v-model="taskLogs.params.scope" class="select">
+                  <option value="online">近期记录</option>
+                  <option value="archive">归档记录</option>
+                  <option value="all">近期与归档</option>
+                </select>
+              </div>
               <div class="form-row">
                 <label for="task-log-id">任务 ID</label>
                 <input id="task-log-id" v-model.trim="taskLogs.params.taskid" class="input" list="task-id-options" placeholder="PID">
@@ -270,15 +292,20 @@
                   <option value="">全部状态</option>
                   <option value="成功">成功</option>
                   <option value="失败">失败</option>
+                  <option value="已停止">已停止</option>
+                  <option value="重启中断">重启中断</option>
+                  <option value="超时/终止">超时/终止</option>
+                  <option value="并发跳过">并发跳过</option>
+                  <option value="错过调度">错过调度</option>
                 </select>
               </div>
               <div class="form-row">
                 <label for="task-log-start">开始日期</label>
-                <input id="task-log-start" v-model="taskLogs.params.startDate" class="input" type="date">
+                <input id="task-log-start" v-model="taskLogs.params.startDate" class="input" type="date" required>
               </div>
               <div class="form-row">
                 <label for="task-log-end">结束日期</label>
-                <input id="task-log-end" v-model="taskLogs.params.endDate" class="input" type="date">
+                <input id="task-log-end" v-model="taskLogs.params.endDate" class="input" type="date" required>
               </div>
               <div class="filter-actions">
                 <button class="btn primary" type="submit">
@@ -288,7 +315,7 @@
                 <button class="btn" type="button" @click="resetTaskLogFilters">清空</button>
               </div>
             </form>
-            <div v-if="taskLogs.loading" class="loading-bar"></div>
+            <LoadingStatus :active="taskLogs.loading" label="正在更新调度日志…" />
             <LogTable
               kind="task"
               :rows="taskLogs.rows"
@@ -300,12 +327,16 @@
               :page="taskLogs.params.currentPage"
               :page-size="taskLogs.params.pagesize"
               :total="taskLogs.total"
+              :exact="false"
+              :has-more="taskLogs.hasMore"
+              :busy="taskLogs.loading"
               @page="setTaskLogPage"
               @page-size="setTaskLogPageSize"
             />
           </section>
         </template>
 
+        <template v-else-if="view === 'admin' && canManage"><AdminPanel /></template>
         <template v-else>
           <section class="panel">
             <div class="panel-head">
@@ -338,7 +369,7 @@
                 <button class="btn" type="button" @click="resetSystemLogFilters">清空</button>
               </div>
             </form>
-            <div v-if="systemLogs.loading" class="loading-bar"></div>
+            <LoadingStatus :active="systemLogs.loading" label="正在更新系统日志…" />
             <LogTable
               kind="system"
               :rows="systemLogs.rows"
@@ -350,6 +381,8 @@
               :page="systemLogs.params.currentPage"
               :page-size="systemLogs.params.pagesize"
               :total="systemLogs.total"
+              :exact="false"
+              :has-more="systemLogs.hasMore"
               @page="setSystemLogPage"
               @page-size="setSystemLogPageSize"
             />
@@ -385,6 +418,8 @@
   </div>
 
   <ConfirmDialog :model-value="confirmState" @resolve="resolveConfirm" />
+  <TaskDetailDialog :pid="detailPid" :can-manage="canManage" @close="detailPid = ''" @execution="openExecution" @confirm-restore="confirmRestore" />
+  <ExecutionDialog :run-id="executionRunId" :can-operate="canOperate" :retrying="retryingExecution" @retry="retryExecution" @close="executionRunId = ''" />
   <ScheduleDialog
     :open="scheduleDialog.open"
     :loading="scheduleDialog.loading"
@@ -397,19 +432,33 @@
     :schedule="scheduleDialog.data"
     @close="closeScheduleDialog"
     @save="saveSchedule"
+    @reload="openScheduleDialog(scheduleDialog.task)"
     @preview="previewSchedule"
   />
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import BrandLogo from './components/BrandLogo.vue';
+import UserMenu from './components/UserMenu.vue';
+import LoadingStatus from './components/LoadingStatus.vue';
 import { api, clearToken, getToken, setToken } from './api';
+import { scheduleRequest } from './scheduleForm';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import CpuTimelineChart from './components/CpuTimelineChart.vue';
 import LogTable from './components/LogTable.vue';
 import Pagination from './components/Pagination.vue';
 import ScheduleDialog from './components/ScheduleDialog.vue';
+import { useTaskWorkspace } from './composables/useTaskWorkspace';
+import { useLogWorkspace, recentLogDates } from './composables/useLogWorkspace';
+import { useDashboardWorkspace } from './composables/useDashboardWorkspace';
 import TaskTable from './components/TaskTable.vue';
+import TaskDetailDialog from './components/TaskDetailDialog.vue';
+import ExecutionDialog from './components/ExecutionDialog.vue';
+import AdminPanel from './components/AdminPanel.vue';
+import DashboardSummary from './components/DashboardSummary.vue';
+import ExecutionMatrix from './components/ExecutionMatrix.vue';
+import { canTrigger } from './executionLabels';
 import { useConfirm } from './composables/useConfirm';
 
 const navItems = [
@@ -438,6 +487,9 @@ const navItems = [
     description: '任务扫描、调度状态与运行控制。',
   },
   {
+    id: 'matrix', label:'执行矩阵', iconPaths:['M3 7l9-4 9 4-9 4z','M3 12l9 4 9-4','M3 17l9 4 9-4'], description:'按任务分类查看当日执行轨迹。',
+  },
+  {
     id: 'taskLogs',
     label: '调度日志',
     iconPaths: [
@@ -458,6 +510,7 @@ const navItems = [
     ],
     description: '调度器事件与系统异常记录。',
   },
+  { id:'admin', label:'账户与审计', iconPaths:['M4 6h16','M4 12h16','M4 18h16'], description:'账户权限与操作记录。' },
 ];
 
 const ready = ref(false);
@@ -467,19 +520,22 @@ const theme = ref(localStorage.getItem('workflow_scheduler_theme') || 'dark');
 const mobileNavOpen = ref(false);
 const loginLoading = ref(false);
 const busy = ref(false);
+const pendingActions = reactive({});
+const retryingExecution = ref(false);
+const detailPid = ref('');
+const executionRunId = ref('');
 const toasts = ref([]);
 const { confirmState, requestConfirm, resolveConfirm } = useConfirm();
 let eventSource = null;
+let livePollInFlight = false;
 let dashboardPollTimer = null;
 let dashboardPollInFlight = false;
 let liveRefreshInFlight = false;
 let scheduleLoadSeq = 0;
 let schedulePreviewSeq = 0;
-let liveReconnectTimer = null;
 let liveTaskSignature = '';
 let liveLogSignature = '';
 const DASHBOARD_POLL_MS = 5000;
-const LIVE_RECONNECT_MS = 3000;
 
 const backendStatus = reactive({
   checking: false,
@@ -498,91 +554,22 @@ const user = reactive({
   project: '',
   name: '',
   avatar: '',
+  roles: [],
 });
+const canManage = computed(() => user.roles.includes('admin'));
+const canOperate = computed(() => canManage.value || user.roles.includes('operator'));
+const visibleNavItems = computed(() => navItems.filter(item => item.id !== 'admin' || canManage.value));
 
-const tasks = reactive({
-  loading: false,
-  error: '',
-  items: [],
-  total: 0,
-  groups: [],
-  params: {
-    currentPage: 1,
-    pagesize: 10,
-    taskid: '',
-    taskname: '',
-    taskgroup: '',
-  },
-});
-
+const { tasks, favorites, onlyFavorites, selectedTasks, batchBusy, saveFilters, toggleFavorite, toggleSelected } = useTaskWorkspace(() => user.name);
 const liveState = reactive({
   connected: false,
   lastEvent: '',
 });
 
-const dashboard = reactive({
-  loading: false,
-  error: '',
-  summary: {
-    total: 0,
-    running: 0,
-    pending: 0,
-    paused: 0,
-    stopped: 0,
-    invalid: 0,
-    failed_jobs: 0,
-  },
-  scheduler: {
-    enabled: false,
-    control_url: '',
-    job_count: 0,
-  },
-  trend: [],
-  failure_rank: [],
-  recent_runs: [],
-  cpu_timeline: {
-    samples: [],
-    markers: [],
-    current: null,
-    current_memory: null,
-    sample_interval_seconds: 5,
-    retention_hours: 6,
-    warning: '',
-  },
-  warning: '',
-});
-
-const taskLogs = reactive({
-  loading: false,
-  error: '',
-  rows: [],
-  total: 0,
-  ids: [],
-  params: {
-    taskid: '',
-    taskstate: '',
-    startDate: '',
-    endDate: '',
-    currentPage: 1,
-    pagesize: 10,
-  },
-});
-
-const systemLogs = reactive({
-  loading: false,
-  error: '',
-  rows: [],
-  total: 0,
-  ids: [],
-  params: {
-    systemids: '',
-    startDate: '',
-    endDate: '',
-    currentPage: 1,
-    pagesize: 10,
-  },
-});
-
+const dashboard = useDashboardWorkspace();
+const { taskLogs, systemLogs } = useLogWorkspace();
+let taskLogRequestSerial = 0;
+const matrixLogRange = ref([]);
 const modal = reactive({
   open: false,
   title: '',
@@ -671,7 +658,7 @@ async function handleRequestFailure(error, options = {}) {
     return true;
   }
 
-  if (error?.code === 'NETWORK_ERROR' || error?.code === 'INVALID_JSON_RESPONSE' || String(error?.code || '').startsWith('HTTP_')) {
+  if (error?.code === 'NETWORK_ERROR' || error?.code === 'INVALID_JSON_RESPONSE' || String(error?.code || '').startsWith('HTTP_5')) {
     backendStatus.reachable = false;
     backendStatus.error = error.message;
     backendStatus.message = error.message;
@@ -753,15 +740,15 @@ async function copyModalContent() {
 }
 
 function canCallTask(row) {
-  return row.state !== 'invalid' && !row.pending;
+  return canTrigger(row);
 }
 
 function callTaskTitle(row) {
   if (row.state === 'invalid') {
     return '配置错误的任务不能手动触发';
   }
-  if (row.pending) {
-    return '任务正在运行，不能重复触发';
+  if (!canTrigger(row)) {
+    return '并发名额已满，请等待正在运行的实例结束';
   }
   if (row.state === 'pause') {
     return '暂停任务也可以手动执行一次';
@@ -785,6 +772,9 @@ async function loadUser() {
   user.project = data.project || '定时任务调度';
   user.name = data.name || 'Admin';
   user.avatar = data.avatar || '/static/img/head.gif';
+  user.roles = data.roles || [];
+  if (data.csrf_token) { setToken(data.csrf_token); token.value = data.csrf_token; }
+  if (view.value === 'admin' && !canManage.value) switchView('tasks');
 }
 
 async function loadDashboard(options = {}) {
@@ -793,13 +783,20 @@ async function loadDashboard(options = {}) {
   }
   dashboard.error = '';
   try {
-    const data = await api.dashboard();
+    const data = await api.dashboard(options.silent ? { after: dashboard.cpu_timeline.cursor || '' } : {});
+    dashboard.loaded = true;
     markBackendHealthy('后端连接正常');
     Object.assign(dashboard.summary, data.summary || {});
     Object.assign(dashboard.scheduler, data.scheduler || {});
     dashboard.trend = data.trend || [];
     dashboard.failure_rank = data.failure_rank || [];
     dashboard.recent_runs = data.recent_runs || [];
+    const incoming = data.cpu_timeline || {};
+    if (incoming.incremental) {
+      const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+      const merged = new Map([...dashboard.cpu_timeline.samples, ...(incoming.samples || [])].map(item => [item.time, item]));
+      incoming.samples = [...merged.values()].filter(item => new Date(item.time.replace(' ', 'T')).getTime() >= cutoff).sort((a,b) => a.time.localeCompare(b.time));
+    }
     Object.assign(dashboard.cpu_timeline, {
       samples: [],
       markers: [],
@@ -808,7 +805,7 @@ async function loadDashboard(options = {}) {
       sample_interval_seconds: 5,
       retention_hours: 6,
       warning: '',
-    }, data.cpu_timeline || {});
+    }, incoming);
     dashboard.warning = data.warning || '';
   } catch (error) {
     await handleRequestFailure(error, { state: dashboard, toastTitle: options.silent ? '' : '总览加载失败' });
@@ -830,8 +827,8 @@ async function handleLogin() {
   try {
     const data = await api.login(loginForm);
     markBackendHealthy('后端连接正常');
-    setToken(data.token);
-    token.value = data.token;
+    setToken(data.csrf_token);
+    token.value = data.csrf_token;
     await loadUser();
     await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
     startLiveEvents();
@@ -874,6 +871,8 @@ async function refreshActiveView() {
     await Promise.all([loadTasks(), loadGroups()]);
   } else if (view.value === 'taskLogs') {
     await Promise.all([loadTaskLogs(), loadTaskIds()]);
+  } else if (view.value === 'matrix') {
+    window.dispatchEvent(new Event('wfs:matrix-refresh'));
   } else {
     await Promise.all([loadSystemLogs(), loadSystemIds()]);
   }
@@ -888,7 +887,9 @@ async function loadGroups() {
   }
 }
 
+let taskRequestSerial = 0;
 async function loadTasks(resetPage = false, options = {}) {
+  const serial = ++taskRequestSerial;
   if (resetPage) {
     tasks.params.currentPage = 1;
   }
@@ -897,14 +898,17 @@ async function loadTasks(resetPage = false, options = {}) {
   }
   tasks.error = '';
   try {
-    const data = await api.taskState(tasks.params);
+    saveFilters();
+    if (onlyFavorites.value && !favorites.value.length) { tasks.items = []; tasks.total = 0; return; }
+    const data = await api.taskState({...tasks.params, ids:onlyFavorites.value ? favorites.value : []});
+    if (serial !== taskRequestSerial) return;
     markBackendHealthy('后端连接正常');
     tasks.items = data.items || [];
     tasks.total = data.total || 0;
   } catch (error) {
-    await handleRequestFailure(error, { state: tasks });
+    if (serial === taskRequestSerial) await handleRequestFailure(error, { state: tasks });
   } finally {
-    if (!options.silent) {
+    if (serial === taskRequestSerial && !options.silent) {
       tasks.loading = false;
     }
   }
@@ -914,6 +918,9 @@ function resetTaskFilters() {
   tasks.params.taskid = '';
   tasks.params.taskname = '';
   tasks.params.taskgroup = '';
+  tasks.params.status = '';
+  tasks.params.owner = '';
+  onlyFavorites.value = false;
   loadTasks(true);
 }
 
@@ -926,6 +933,25 @@ function setTaskPageSize(size) {
   tasks.params.pagesize = size;
   tasks.params.currentPage = 1;
   loadTasks();
+}
+
+async function batchTaskAction(action) {
+  if (batchBusy.value) return;
+  batchBusy.value = true;
+  try {
+    const ids = [...selectedTasks.value];
+    const { preview } = await api.batch({ids,action,preview:true});
+    const label = action === 'pause' ? '暂停调度' : '启用调度';
+    const confirmed = await requestConfirm({title:`批量${label}`,message:`将对 ${preview.length} 个任务${label}。`,
+      details:[...preview.map(item => `${item.name} (${item.pid}) · 活动 ${item.active}`),'正在执行的实例继续运行；本操作只改变后续调度。'],confirmText:label,danger:true});
+    if (!confirmed) return;
+    const data = await api.batch({ids,action,versions:Object.fromEntries(preview.map(item => [item.pid,item.version]))});
+    const failures = data.results.filter(item => !item.ok);
+    selectedTasks.value = failures.map(item => item.pid);
+    pushToast(failures.length ? 'error' : 'success','批量操作结果',failures.length ? failures.map(item => `${item.pid}：${item.message}`).join('；') : `${data.results.length} 个任务已${label}`);
+    await loadTasks();
+  } catch(error) { await handleRequestFailure(error,{toastTitle:'批量操作失败'}); }
+  finally { batchBusy.value = false; }
 }
 
 async function editTask(row, state) {
@@ -945,7 +971,7 @@ async function editTask(row, state) {
       return;
     }
   }
-  busy.value = true;
+  pendingActions[row.id] = state;
   try {
     const message = await api.editTask({
       id: row.id,
@@ -957,7 +983,7 @@ async function editTask(row, state) {
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '操作失败' });
   } finally {
-    busy.value = false;
+    delete pendingActions[row.id];
   }
 }
 
@@ -966,11 +992,12 @@ async function handleCallTask(row) {
     pushToast('error', '无法触发任务', callTaskTitle(row));
     return;
   }
-  busy.value = true;
+  pendingActions[row.id] = true;
   try {
     const message = await api.callTask({ pid: row.id });
     markBackendHealthy('后端连接正常');
-    pushToast('success', '任务已触发', message);
+    pushToast('success', '任务已排队', message.message || message);
+    if (message.run_id) openExecution(message.run_id);
     const refreshes = [loadTasks()];
     if (view.value === 'taskLogs' && taskLogs.params.currentPage === 1) {
       refreshes.push(loadTaskLogs(false, { silent: true }));
@@ -979,7 +1006,7 @@ async function handleCallTask(row) {
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '任务触发失败' });
   } finally {
-    busy.value = false;
+    delete pendingActions[row.id];
   }
 }
 
@@ -990,12 +1017,13 @@ async function pauseTask(row) {
       message: '暂停只会移除后续调度；如果要立即停止当前进程，请选择强制停止。',
       details: [
         '选择“强制停止”会终止当前进程。',
-        '选择“取消”后可以回到列表，仅执行普通暂停。',
+        '选择“仅暂停”会保留当前执行；关闭窗口或选择“取消”不会执行操作。',
       ],
       confirmText: '强制停止',
       cancelText: '仅暂停',
       danger: true,
     });
+    if (confirmed === null) return;
     if (confirmed) {
       editTask(row, 'kill');
       return;
@@ -1007,17 +1035,18 @@ async function pauseTask(row) {
 }
 
 async function openScheduleDialog(row) {
+  const keepData = scheduleDialog.open && scheduleDialog.task?.id === row.id && scheduleDialog.data;
   const seq = ++scheduleLoadSeq;
   schedulePreviewSeq += 1;
   scheduleDialog.open = true;
   scheduleDialog.loading = true;
   scheduleDialog.saving = false;
   scheduleDialog.error = '';
-  scheduleDialog.preview = [];
+  if (!keepData) scheduleDialog.preview = [];
   scheduleDialog.previewError = '';
   scheduleDialog.previewLoading = false;
   scheduleDialog.task = { ...row };
-  scheduleDialog.data = null;
+  if (!keepData) scheduleDialog.data = null;
   try {
     const data = await api.taskSchedule({
       pid: row.id,
@@ -1070,10 +1099,7 @@ async function previewSchedule(form) {
   scheduleDialog.previewLoading = true;
   scheduleDialog.previewError = '';
   try {
-    const data = await api.previewTaskSchedule({
-      pid: scheduleDialog.task.id,
-      ...form,
-    });
+    const data = await api.previewTaskSchedule(scheduleRequest(scheduleDialog.task.id, form));
     if (seq !== schedulePreviewSeq) {
       return;
     }
@@ -1092,17 +1118,14 @@ async function previewSchedule(form) {
 }
 
 async function saveSchedule(form) {
-  if (!scheduleDialog.task) {
+  if (!scheduleDialog.task || scheduleDialog.saving) {
     return;
   }
   const taskId = scheduleDialog.task.id;
   scheduleDialog.saving = true;
   scheduleDialog.error = '';
   try {
-    const data = await api.updateTaskSchedule({
-      pid: taskId,
-      ...form,
-    });
+    const data = await api.updateTaskSchedule(scheduleRequest(taskId, form));
     if (scheduleDialog.task?.id !== taskId) {
       return;
     }
@@ -1114,7 +1137,7 @@ async function saveSchedule(form) {
     scheduleDialog.preview = data.preview || [];
     scheduleDialog.previewError = data.preview_error || '';
     scheduleDialog.open = false;
-    pushToast('success', '任务配置已保存', `${taskId} 已刷新运行配置。`);
+    pushToast(data.application?.status === 'failed' ? 'error' : 'success', '任务配置已保存', data.application?.status === 'failed' ? `保存成功，但生效失败：${data.application.message}。请刷新任务重新应用。` : `${taskId} 已生效。`);
     await Promise.all([loadTasks(), loadDashboard({ silent: true })]);
   } catch (error) {
     scheduleDialog.error = error.message;
@@ -1168,14 +1191,14 @@ async function reloadTasks(fullReload) {
 
 async function handleUpdateCode() {
   const confirmed = await requestConfirm({
-    title: '更新服务器代码',
-    message: '该操作会把服务端代码切到配置分支的最新提交，并同步任务列表。',
+    title: '检查服务器版本',
+    message: '从远端读取最新提交，查看当前服务是否需要发布新版本。',
     details: [
-      '更新后如果包含后端代码变更，仍需要按部署流程重启服务。',
-      '新增任务会出现在列表里，被删除的任务会从列表和调度器中移除。',
+      '检查不会修改正在运行的代码或调度配置。',
+      '发现新版本后，请按部署流程发布并重启服务。',
     ],
-    confirmText: '更新代码',
-    danger: true,
+    confirmText: '检查更新',
+    danger: false,
   });
   if (!confirmed) {
     return;
@@ -1184,11 +1207,11 @@ async function handleUpdateCode() {
   try {
     const message = await api.updateCode();
     markBackendHealthy('后端连接正常');
-    showModal('代码更新结果', message);
-    pushToast('success', '代码更新完成', '已同步任务列表。');
+    showModal('版本检查结果', message);
+    pushToast('success', '版本检查完成', '请查看检查结果。');
     await Promise.all([loadTasks(), loadGroups(), loadDashboard({ silent: true })]);
   } catch (error) {
-    await handleRequestFailure(error, { toastTitle: '代码更新失败' });
+    await handleRequestFailure(error, { toastTitle: '检查更新失败' });
   } finally {
     busy.value = false;
   }
@@ -1196,9 +1219,11 @@ async function handleUpdateCode() {
 
 function taskLogQueryParams() {
   return {
+    scope: taskLogs.params.scope,
+    cursor: taskLogs.cursors[taskLogs.params.currentPage-1] || '',
     taskid: taskLogs.params.taskid,
     taskstate: taskLogs.params.taskstate,
-    datetimeval: buildDateRange(taskLogs.params),
+    datetimeval: matrixLogRange.value.length ? matrixLogRange.value : buildDateRange(taskLogs.params),
     currentPage: taskLogs.params.currentPage,
     pagesize: taskLogs.params.pagesize,
   };
@@ -1207,20 +1232,26 @@ function taskLogQueryParams() {
 async function loadTaskLogs(resetPage = false, options = {}) {
   if (resetPage) {
     taskLogs.params.currentPage = 1;
+    taskLogs.cursors = [''];
   }
+  const serial = ++taskLogRequestSerial;
   if (!options.silent) {
     taskLogs.loading = true;
   }
   taskLogs.error = '';
   try {
     const data = await api.taskLogs(taskLogQueryParams());
+    if (serial !== taskLogRequestSerial) return;
     markBackendHealthy('后端连接正常');
     taskLogs.rows = data.data || [];
     taskLogs.total = data.total || 0;
+    taskLogs.hasMore = Boolean(data.has_more);
+    taskLogs.nextCursor = data.next_cursor || '';
   } catch (error) {
+    if (serial !== taskLogRequestSerial) return;
     await handleRequestFailure(error, { state: taskLogs });
   } finally {
-    if (!options.silent) {
+    if (!options.silent && serial === taskLogRequestSerial) {
       taskLogs.loading = false;
     }
   }
@@ -1252,14 +1283,27 @@ async function loadTaskIds() {
 }
 
 function resetTaskLogFilters() {
+  matrixLogRange.value = [];
+  const dates = recentLogDates();
+  taskLogs.params.scope = 'online';
   taskLogs.params.taskid = '';
   taskLogs.params.taskstate = '';
-  taskLogs.params.startDate = '';
-  taskLogs.params.endDate = '';
+  taskLogs.params.startDate = dates.start;
+  taskLogs.params.endDate = dates.end;
+  loadTaskLogs(true);
+}
+
+function searchTaskLogs() {
+  matrixLogRange.value = [];
   loadTaskLogs(true);
 }
 
 function setTaskLogPage(page) {
+  if (taskLogs.loading) return;
+  if (page > taskLogs.params.currentPage) {
+    if (!taskLogs.nextCursor) return;
+    taskLogs.cursors[page-1] = taskLogs.nextCursor;
+  }
   taskLogs.params.currentPage = page;
   loadTaskLogs();
 }
@@ -1267,7 +1311,7 @@ function setTaskLogPage(page) {
 function setTaskLogPageSize(size) {
   taskLogs.params.pagesize = size;
   taskLogs.params.currentPage = 1;
-  loadTaskLogs();
+  loadTaskLogs(true);
 }
 
 function systemLogQueryParams() {
@@ -1290,6 +1334,7 @@ async function loadSystemLogs(resetPage = false) {
     markBackendHealthy('后端连接正常');
     systemLogs.rows = data.data || [];
     systemLogs.total = data.total || 0;
+    systemLogs.hasMore = Boolean(data.has_more);
   } catch (error) {
     await handleRequestFailure(error, { state: systemLogs });
   } finally {
@@ -1322,11 +1367,6 @@ function setSystemLogPageSize(size) {
   systemLogs.params.pagesize = size;
   systemLogs.params.currentPage = 1;
   loadSystemLogs();
-}
-
-function eventSourceUrl() {
-  const params = new URLSearchParams({ token: getToken() });
-  return `/api/taskinfo/events?${params.toString()}`;
 }
 
 function shouldPollDashboard() {
@@ -1363,35 +1403,32 @@ function stopDashboardPolling() {
   dashboardPollInFlight = false;
 }
 
-function startLiveEvents() {
-  if (!token.value || eventSource) {
+async function pollLiveEvents() {
+  if (!token.value || livePollInFlight || ['dashboard','matrix','admin'].includes(view.value) || document.visibilityState === 'hidden') {
     return;
   }
-  clearLiveReconnectTimer();
-  eventSource = new EventSource(eventSourceUrl());
-  eventSource.onopen = () => {
-    clearLiveReconnectTimer();
-    liveState.connected = true;
-    liveState.lastEvent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-    markBackendHealthy('后端连接正常');
-  };
-  eventSource.addEventListener('snapshot', handleLiveSnapshot);
-  eventSource.addEventListener('stream_error', handleLiveStreamError);
-  eventSource.onerror = () => {
+  livePollInFlight = true;
+  try {
+    const payload = await api.events();
+    handleLiveSnapshot({ data: JSON.stringify(payload) });
+  } catch (error) {
     liveState.connected = false;
     liveState.lastEvent = '正在重连';
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-    scheduleLiveReconnect();
-  };
+    handleRequestFailure(error);
+  } finally {
+    livePollInFlight = false;
+  }
+}
+
+function startLiveEvents() {
+  if (!token.value || eventSource) return;
+  eventSource = window.setInterval(pollLiveEvents, 5000);
+  pollLiveEvents();
 }
 
 function stopLiveEvents() {
-  clearLiveReconnectTimer();
   if (eventSource) {
-    eventSource.close();
+    window.clearInterval(eventSource);
     eventSource = null;
   }
   liveState.connected = false;
@@ -1400,23 +1437,6 @@ function stopLiveEvents() {
   liveLogSignature = '';
   liveRefreshInFlight = false;
   syncDashboardPolling();
-}
-
-function clearLiveReconnectTimer() {
-  if (liveReconnectTimer) {
-    window.clearTimeout(liveReconnectTimer);
-    liveReconnectTimer = null;
-  }
-}
-
-function scheduleLiveReconnect() {
-  if (!token.value || document.visibilityState === 'hidden' || liveReconnectTimer) {
-    return;
-  }
-  liveReconnectTimer = window.setTimeout(() => {
-    liveReconnectTimer = null;
-    startLiveEvents();
-  }, LIVE_RECONNECT_MS);
 }
 
 function applyTaskSnapshot(snapshotTasks = []) {
@@ -1428,6 +1448,8 @@ function applyTaskSnapshot(snapshotTasks = []) {
     }
     row.state = next.state;
     row.pending = next.pending;
+    row.running_instances = next.running_instances;
+    row.max_instances = next.max_instances;
     row.next_run_time = next.next_run_time;
   });
 }
@@ -1439,13 +1461,11 @@ async function refreshFromLiveSnapshot({ taskChanged, logsChanged }) {
   liveRefreshInFlight = true;
   try {
     const jobs = [];
-    if (view.value === 'dashboard' && (taskChanged || logsChanged)) {
-      jobs.push(loadDashboard({ silent: true }));
-    }
+
     if (view.value === 'tasks' && (taskChanged || logsChanged)) {
       jobs.push(loadTasks(false, { silent: true }));
     }
-    if (view.value === 'taskLogs' && logsChanged && taskLogs.params.currentPage === 1) {
+    if (view.value === 'taskLogs' && logsChanged && taskLogs.params.currentPage === 1 && !taskLogs.loading && taskLogs.params.scope !== 'archive' && taskLogs.params.endDate === recentLogDates().end) {
       jobs.push(loadTaskLogs(false, { silent: true }));
     }
     if (jobs.length) {
@@ -1476,19 +1496,6 @@ function handleLiveSnapshot(event) {
 
   applyTaskSnapshot(payload.tasks || []);
   refreshFromLiveSnapshot({ taskChanged, logsChanged });
-}
-
-function handleLiveStreamError(event) {
-  let payload = {};
-  try {
-    payload = JSON.parse(event.data || '{}');
-  } catch (error) {
-    payload = { message: event.data || '实时事件流返回异常' };
-  }
-  liveState.connected = true;
-  liveState.lastEvent = payload.message || '事件流异常';
-  backendStatus.reachable = true;
-  backendStatus.error = '';
 }
 
 function handleVisibilityChange() {
@@ -1537,6 +1544,37 @@ window.addEventListener('hashchange', () => {
   }
 });
 
+function openExecution(runId) { detailPid.value = ''; executionRunId.value = runId; }
+function openMatrixLogs(record) {
+  taskLogs.params.taskid = record.pid;
+  taskLogs.params.scope = 'online';
+  taskLogs.params.startDate = record.start_time.slice(0,10);
+  taskLogs.params.endDate = record.end_time.slice(0,10);
+  taskLogs.params.taskstate = '';
+  matrixLogRange.value = [record.query_start, record.query_end];
+  switchView('taskLogs');
+  loadTaskLogs(true);
+}
+async function retryExecution(record) {
+  if (retryingExecution.value) return;
+  const confirmed = await requestConfirm({title:'再次执行任务',message:`手动执行 ${record.pid}，会生成新的执行记录。`,details:['请先确认上次执行是否已写入业务数据；系统不会自动重试或补跑重启前的执行。'],confirmText:'再执行一次',danger:true});
+  if (!confirmed) return;
+  retryingExecution.value = true;
+  try { const result = await api.callTask({pid:record.pid}); openExecution(result.run_id); await loadTasks(); }
+  catch (error) { await handleRequestFailure(error,{toastTitle:'再次执行失败'}); }
+  finally { retryingExecution.value = false; }
+}
+function showFilteredTasks(status) { tasks.params.status = status; switchView('tasks'); loadTasks(true); }
+async function confirmRestore(payload) {
+  const confirmed = await requestConfirm({title:'恢复调度配置',message:`将 ${payload.pid} 恢复为历史版本 ${payload.restore_version}，并生成新版本。`,details:['会沿用所选版本的调度启用状态；正在执行的实例继续运行。'],confirmText:'恢复配置',danger:true});
+  if (!confirmed) return;
+  try {
+    const result = await api.restore({pid:payload.pid,version:payload.version,restore_version:payload.restore_version});
+    pushToast(result.application?.status === 'failed' ? 'error' : 'success','配置已恢复',result.application?.message || '已生成新版本并应用调度。');
+    payload.done(); loadTasks();
+  } catch (error) { await handleRequestFailure(error,{toastTitle:'恢复配置失败'}); }
+}
+
 onMounted(async () => {
   applyTheme();
   document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -1547,10 +1585,10 @@ onMounted(async () => {
   const reachable = await checkBackend({ silent: true });
   ready.value = true;
 
-  if (!reachable || !token.value) {
+  if (!reachable) {
     return;
   }
-
+  const hadToken = Boolean(token.value);
   try {
     await loadUser();
     await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
@@ -1559,7 +1597,7 @@ onMounted(async () => {
   } catch (error) {
     clearToken();
     token.value = '';
-    pushToast('error', '会话已失效', error.message);
+    if (hadToken || !isAuthError(error)) pushToast('error', '登录状态检查失败', error.message);
   }
 });
 

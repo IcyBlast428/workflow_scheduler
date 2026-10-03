@@ -11,9 +11,9 @@ BASE_DIR = pathlib.Path(__file__).resolve().parents[1]  # 项目根路径
 # CONFIG_DIR = os.path.join(BASE_DIR, 'config')
 CONFIG_DIR = BASE_DIR/("config")
 
-ROOT_LOG_DIR = str(BASE_DIR.parent / 'logs')
+ROOT_LOG_DIR = os.environ.get('WFS_LOG_DIR', str(BASE_DIR.parent / 'logs'))
 
-DATA_DIR = str(BASE_DIR.parent / 'data')
+DATA_DIR = os.environ.get('WFS_DATA_DIR', str(BASE_DIR.parent / 'data'))
 
 
 # 加密
@@ -84,14 +84,56 @@ class RunningState:
     def __init__(self):
         self._peddings = []
         self._lock = threading.Lock()
+        self._cancelled = set()
 
     def is_running(self, pid):
         with self._lock:
             for p in self._peddings:
-                process_id = p.get(pid)
-                if process_id:
+                if pid in p:
                     return True
             return False
+
+    def count(self, pid=None):
+        with self._lock:
+            return sum(pid is None or pid in item for item in self._peddings)
+
+    def claim(self, pid, limit=1):
+        with self._lock:
+            if len(self._peddings) >= int(os.environ.get('WFS_MAX_ACTIVE_RUNS', '20')):
+                return None
+            if sum(pid in item for item in self._peddings) >= limit:
+                return None
+            reservation = {pid: None}
+            self._peddings.append(reservation)
+            return reservation
+
+    def capacity_reason(self, pid, limit=1):
+        with self._lock:
+            if len(self._peddings) >= int(os.environ.get('WFS_MAX_ACTIVE_RUNS','20')):
+                return '全局执行名额已满，本次调度跳过。'
+            if sum(pid in item for item in self._peddings) >= int(limit):
+                return '此任务的并发名额已满，本次调度跳过。'
+            return '执行名额申请失败，本次调度跳过。'
+
+    def set_process(self, reservation, pid, process_id):
+        with self._lock:
+            if any(item is reservation for item in self._peddings):
+                reservation[pid] = process_id
+
+    def is_cancelled(self, reservation):
+        with self._lock:
+            return id(reservation) in self._cancelled
+
+    def cancel(self, pid):
+        with self._lock:
+            selected = [item for item in self._peddings if pid in item]
+            self._cancelled.update(id(item) for item in selected)
+            return [item[pid] for item in selected if item[pid]]
+
+    def cancel_all(self):
+        with self._lock:
+            self._cancelled.update(id(item) for item in self._peddings)
+            return [value for item in self._peddings for value in item.values() if value]
 
     def get(self, pid):
         with self._lock:
@@ -108,12 +150,12 @@ class RunningState:
 
     def remove(self, obj):
         with self._lock:
-            while obj in self._peddings:
-                self._peddings.remove(obj)
+            self._peddings = [item for item in self._peddings if item is not obj]
+            self._cancelled.discard(id(obj))
 
     def __contains__(self, item):
         with self._lock:
-            return item in self._peddings
+            return any(obj is item for obj in self._peddings)
 
 
 class IgnoredTask:

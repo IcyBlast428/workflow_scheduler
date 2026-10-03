@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { mergeMatrixSnapshot, matrixQuery, readPreference, writePreference } from '../src/workspacePreferences.js';
+const store=new Map();globalThis.localStorage={getItem:key=>store.get(key),setItem:(key,value)=>store.set(key,value)};
+writePreference('alice',{favorites:['one']});writePreference('bob',{favorites:['two']});
+assert.deepEqual(readPreference('alice',{}).favorites,['one']);
+store.set('broken','{');assert.deepEqual(readPreference('broken',{}),{});
+const old={date:'2026-10-03',records:[{key:'one',count:1},{key:'two',count:2}]};
+const incoming={date:old.date,incremental:true,records:[{key:'two',count:3},{key:'three',count:1}],removed:['one']};
+assert.deepEqual(mergeMatrixSnapshot(old,incoming).records,[{key:'two',count:3},{key:'three',count:1}]);
+const nextDay={date:'2026-10-04',incremental:false,records:[]};assert.equal(mergeMatrixSnapshot(old,nextDay),nextDay);
+assert.equal('date' in matrixQuery(true,'2026-10-03','old'),false);
+assert.equal(matrixQuery(false,'2026-10-03').date,'2026-10-03');
+console.log('Workspace preferences, delta reconciliation and midnight follow checks passed');

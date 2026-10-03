@@ -3,6 +3,7 @@ import http
 import base64
 import urllib
 import logging
+import os
 import pandas as pd
 from app.common.database import NewDB
 from app.common.nacos import Nacos
@@ -11,6 +12,11 @@ def send_sms(phone_list, msg_body):
     if len(phone_list) == 0 or len(msg_body) == 0:
         return
     try:
+        username = os.environ.get('WFS_SMS_USERNAME')
+        password = os.environ.get('WFS_SMS_PASSWORD')
+        if not username or not password:
+            raise RuntimeError('WFS_SMS_USERNAME and WFS_SMS_PASSWORD are required')
+        from xml.sax.saxutils import escape
         headers = {"Content-type": "application/x-www-form-urlencoded", "charset": "GBK", "Accept": "*/*"}
         phone_list = ';'.join(phone_list)
         msg_body = "【IMMP-WFS】" + msg_body
@@ -19,8 +25,8 @@ def send_sms(phone_list, msg_body):
         <request>
             <cmdid>1</cmdid>
             <head>
-                <user>POSTMAN</user>
-                <pwd>UMS</pwd>
+                <user>{escape(username)}</user>
+                <pwd>{escape(password)}</pwd>
                 <busstype>001</busstype>
                 <tempno>NONE</tempno>
                 <sendmode>1</sendmode>
@@ -52,17 +58,24 @@ def send_sms(phone_list, msg_body):
         </request>
         '''
         data = urllib.parse.urlencode({
-            "LoginUser": "POSTMAN",
-            "LoginPwd": base64.b64decode(b'VU1T').decode("utf-8"),
+            "LoginUser": username,
+            "LoginPwd": password,
             "cmdID": 1,
             "Content": request_body.encode("GBK")
         })
-        host = "umsp-app-it-no.icbc"
-        http_client = http.client.HTTPConnection(host, 9080)
+        host = os.environ.get('WFS_SMS_HOST', 'umsp-app-it-no.icbc')
+        http_client = http.client.HTTPConnection(host, int(os.environ.get('WFS_SMS_PORT','9080')), timeout=10)
         url = "/umsWeb/send"
-        http_client.request('POST', url, data, headers)
+        try:
+            http_client.request('POST', url, data, headers)
+            response = http_client.getresponse()
+            response.read(64000)
+            return 200 <= response.status < 300
+        finally:
+            http_client.close()
     except Exception as e:
         logging.getLogger(__name__).warning(e)
+        return False
 
 '''
 nacos配置：

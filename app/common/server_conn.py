@@ -1,4 +1,4 @@
-# from app.common.pyDes import do_decrypt as _p
+import os
 
 
 class LinuxConfig:
@@ -6,14 +6,12 @@ class LinuxConfig:
         'ip': '76.13.45.52',
         'port': 22,
         'user': 'sysadmin',
-        # 'password': _p('d4a0d164b4f301417df3fb9b71a993c4'),
     }
     conn_info1 = {
         'ip': '76.125.2.104',
         'port': 21,
         'user': 'ftpuser',
-        # 'password': _p('3e335435a5f1afb4619c810122d5f709'),
-        'password': 'PWDxt1b123',
+        'password': os.environ.get('WFS_LEGACY_FTP_PASSWORD', ''),
     }
 
 

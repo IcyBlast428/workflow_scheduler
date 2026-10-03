@@ -14,6 +14,7 @@ export function useConfirm() {
   });
 
   function requestConfirm(options) {
+    if (pendingResolve) pendingResolve(null);
     Object.assign(confirmState, {
       open: true,
       title: options.title || '确认操作',

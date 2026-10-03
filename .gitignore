@@ -88,6 +88,11 @@ celerybeat-schedule
 
 # Environments
 .env
+.env.local
+.env.postgres.local
+.wfs-secrets/
+data/
+backups/
 .venv
 env/
 venv/
@@ -121,3 +126,5 @@ dmypy.json
 
 # Frontend dependencies
 node_modules/
+frontend/test-results/
+frontend/playwright-report/

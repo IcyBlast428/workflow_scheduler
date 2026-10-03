@@ -10,13 +10,14 @@
       </header>
 
       <div class="modal-body schedule-body">
-        <div v-if="loading" class="loading-bar"></div>
+        <LoadingStatus :active="loading || saving" :label="saving ? '正在保存配置…' : '正在读取配置…'" />
         <div v-if="error" class="inline-alert danger">
-          <strong>配置加载失败</strong>
+          <strong>{{ schedule ? '配置保存失败' : '配置加载失败' }}</strong>
           <span>{{ error }}</span>
+          <button class="btn" type="button" :disabled="saving || loading" @click="$emit('reload')" title="重新加载会重置未保存的修改">重新加载配置</button>
         </div>
 
-        <form v-else-if="!loading" class="schedule-form" @submit.prevent="submit">
+        <form v-if="schedule" class="schedule-form" @submit.prevent="submit" :aria-busy="loading || saving" :inert="loading">
           <div class="schedule-layout">
             <aside class="schedule-family-list">
               <button
@@ -64,6 +65,15 @@
                   </div>
                 </div>
               </div>
+
+              <details class="runtime-card"><summary>负责人、说明与资源限制</summary><div class="schedule-grid">
+                <div class="form-row"><label for="task-owner">负责人</label><input id="task-owner" v-model.trim="form.owner" class="input" maxlength="200"></div>
+                <div class="form-row"><label for="task-description">任务说明</label><textarea id="task-description" v-model="form.description" class="input" maxlength="10000" rows="3"></textarea></div>
+                <div class="form-row"><label for="task-memory">内存地址空间上限（MiB，0 不限）</label><input id="task-memory" v-model.number="form.memory_mb" class="input" type="number" min="0"></div>
+                <div class="form-row"><label for="task-cpu">进程 CPU 时间上限（秒，0 不限）</label><input id="task-cpu" v-model.number="form.cpu_seconds" class="input" type="number" min="0"></div>
+                <div class="form-row"><label for="task-file">单个输出文件上限（MiB，0 不限）</label><input id="task-file" v-model.number="form.file_mb" class="input" type="number" min="0"></div>
+                <div class="form-row"><label for="task-misfire">调度延迟容忍（秒）</label><input id="task-misfire" v-model.number="form.misfire_grace_seconds" class="input" type="number" min="1"></div>
+              </div><p class="hint">Linux 进程限制由操作系统执行。服务中断后的任务会标记为中断，确认业务数据后可手动补跑。</p></details>
 
               <div class="form-row">
                 <label for="schedule-type">策略类型</label>
@@ -211,6 +221,8 @@
 
 <script setup>
 import { computed, onUnmounted, reactive, watch } from 'vue';
+import { resetScheduleForm } from '../scheduleForm';
+import LoadingStatus from './LoadingStatus.vue';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -224,7 +236,7 @@ const props = defineProps({
   schedule: { type: Object, default: null },
 });
 
-const emit = defineEmits(['close', 'save', 'preview']);
+const emit = defineEmits(['close', 'save', 'preview', 'reload']);
 
 const familyOptions = [
   { id: 'interval', icon: 'I', label: '周期间隔', description: '按分钟或小时循环' },
@@ -310,7 +322,7 @@ const calendarDays = computed(() => {
 watch(
   () => props.schedule,
   (schedule) => {
-    Object.assign(form, defaultForm(), schedule?.form || {});
+    resetScheduleForm(form, defaultForm(), schedule?.form || {});
     form.schedule_family = familyForType(form.schedule_type);
     ensureOnceAtDateTime();
   },
@@ -352,6 +364,8 @@ function defaultForm() {
     main_file: 'main.py',
     max_instances: 1,
     timeout_seconds: 0,
+    version: 0,
+    owner: '', description: '', memory_mb: 0, cpu_seconds: 0, file_mb: 100, misfire_grace_seconds: 600,
     schedule_family: 'interval',
     schedule_type: 'every_minute',
     interval_minutes: 1,

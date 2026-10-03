@@ -11,3 +11,5 @@ def init_api(app):
     user_api(Api(app=app, prefix='/api/user'))
     # 调度主接口
     task_api(Api(app=app, prefix='/api/taskinfo'))
+    from app.api.operations import blueprint
+    app.register_blueprint(blueprint)

@@ -1,5 +1,6 @@
 import datetime
 import os
+from datetime import timedelta
 
 from configobj import ConfigObj
 
@@ -11,6 +12,8 @@ from app.loggings import get_local_ip
 
 
 def build_database_uri(environment):
+    if os.environ.get('WFS_LOCAL_DB_PATH'):
+        return 'sqlite:///' + os.path.abspath(os.environ['WFS_LOCAL_DB_PATH']).replace('\\', '/')
     cfg_file = os.path.join(CONFIG_DIR, 'database', 'system.ini')
     cfg_base = ConfigObj(cfg_file, encoding='utf-8')
     config = cfg_base.get(environment)
@@ -31,6 +34,12 @@ def build_database_uri(environment):
 class Config:
     APP_NAME = helpers.load_config('basic', 'app_name', '定时任务调度')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SECRET_KEY = os.environ.get('WFS_SECRET_KEY')
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Strict'
+    SESSION_COOKIE_SECURE = os.environ.get('WFS_COOKIE_SECURE', 'false').lower() in {'1', 'true', 'yes'}
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+    SESSION_REFRESH_EACH_REQUEST = False
     TIME_ZONE = 'Asia/ShangHai'
     USE_I18N = True
     USE_L10N = True
@@ -58,13 +67,11 @@ class Config:
 class ProductionConfig(Config):
     DEBUG = False
     TESTING = False
-    SQLALCHEMY_DATABASE_URI = build_database_uri('production')
 
 
 class DevelopmentConfig(Config):
     DEBUG = False
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = build_database_uri("development")
 
 
 env = {
@@ -103,9 +110,8 @@ def _resolve_project_path(path_value):
     return os.path.abspath(os.path.join(project_root, path_value))
 
 
-AUTH_ADMIN_USERNAME = _load_runtime_value('auth', 'admin_username', 'WFS_ADMIN_USERNAME', 'admin')
-AUTH_ADMIN_PASSWORD_CIPHER = _load_runtime_value('auth', 'admin_password_cipher', 'WFS_ADMIN_PASSWORD_CIPHER')
-AUTH_ADMIN_TOKEN = _load_runtime_value('auth', 'admin_token', 'WFS_ADMIN_TOKEN')
+AUTH_ADMIN_USERNAME = os.environ.get('WFS_ADMIN_USERNAME', 'admin')
+AUTH_ADMIN_PASSWORD_HASH = os.environ.get('WFS_ADMIN_PASSWORD_HASH', '')
 APP_AVATAR_URL = _load_runtime_value('runtime', 'avatar_url', 'WFS_AVATAR_URL', '/static/img/head.gif')
 CODE_UPDATE_PATH = _resolve_project_path(_load_runtime_value('runtime', 'repo_path', 'WFS_REPO_PATH', '.'))
 CODE_UPDATE_REMOTE = _load_runtime_value('runtime', 'code_remote', 'WFS_CODE_REMOTE', 'origin')

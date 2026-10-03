@@ -9,7 +9,7 @@
 # Homepage: http://twhiteman.netfirms.com/des.html
 #
 # This is a pure python implementation of the DES encryption algorithm.
-# It's pure python to avoid portability issues, since most DES 
+# It's pure python to avoid portability issues, since most DES
 # implementations are programmed in C (for performance reasons).
 #
 # Triple DES class is also implemented, utilizing the DES base. Triple DES
@@ -59,7 +59,7 @@ pad     -> Optional argument. Only when using padmode of PAD_NORMAL. For
 	   bytes of the unencrypted data block.
 padmode -> Optional argument, set the padding mode, must be one of PAD_NORMAL
 	   or PAD_PKCS5). Defaults to PAD_NORMAL.
-	  
+
 
 Example
 -------
@@ -839,21 +839,17 @@ class triple_des(_baseDes):
         return self._unpadData(data, pad, padmode)
 
 
-triple_inst = triple_des('ZX71:#AL9sd2=.qx', mode=ECB, padmode=PAD_PKCS5)
+def _legacy_cipher():
+    import os
+    key = os.environ.get('WFS_LEGACY_DES_KEY')
+    if not key:
+        raise RuntimeError('WFS_LEGACY_DES_KEY must be configured for legacy encrypted values')
+    return triple_des(key, mode=ECB, padmode=PAD_PKCS5)
 
 
 def do_encrypt(raw):
-    return triple_inst.encrypt(raw.encode('utf-8')).hex()
+    return _legacy_cipher().encrypt(raw.encode('utf-8')).hex()
 
 
 def do_decrypt(raw):
-    return triple_inst.decrypt(bytes.fromhex(raw)).decode('utf-8')
-
-
-if __name__ == '__main__':
-    raw = 'IMMP#123'
-    _hex = triple_inst.encrypt(raw.encode('utf-8')).hex()
-    print(_hex)
-
-    print(do_decrypt('3e335435a5f1afb4619c810122d5f709'))
-    print(do_decrypt('d4a0d164b4f301417df3fb9b71a993c4'))
+    return _legacy_cipher().decrypt(bytes.fromhex(raw)).decode('utf-8')

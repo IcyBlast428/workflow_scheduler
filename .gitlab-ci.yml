@@ -1,0 +1,34 @@
+stages:
+  - test
+
+backend-tests:
+  stage: test
+  image: python:3.12
+  script:
+    - python -m pip install -r requirements-linux-py312.lock
+    - python -m unittest discover -s tests -v
+
+frontend-build:
+  stage: test
+  image: node:24
+  script:
+    - cd frontend
+    - npm ci --no-audit --no-fund
+    - npm test
+    - npm run build
+
+browser-regression:
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.63.0-noble
+  script:
+    - python3 -m venv .ci-venv
+    - .ci-venv/bin/python -m pip install -r requirements-linux-py312.lock
+    - cd frontend
+    - npm ci --no-audit --no-fund
+    - npm test
+    - npm run build
+    - WFS_BROWSER_PYTHON=../.ci-venv/bin/python npm run test:e2e
+  artifacts:
+    when: on_failure
+    paths:
+      - frontend/test-results/

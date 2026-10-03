@@ -2,16 +2,7 @@
 import sys
 sys.path.append(".")
 import os
-from flask import Flask, send_from_directory
-from app.bootstrap import global_vars
-from flask_compress import Compress
 from app.bootstrap.global_vars import BASE_DIR, CONFIG_DIR
-from app.extensions import ext_init
-from app.loggings import init_log
-from app.middleware import init_middleware
-from app.settings import env, FLASK_ENV
-from app.urls import init_api
-from app.bootstrap.global_vars import error_msg
 
 
 def create_app():
@@ -20,6 +11,14 @@ def create_app():
     :param env_name: 使用的环境名称
     :return: app实例
     '''
+    from flask import Flask, send_from_directory
+    from flask_compress import Compress
+    from app.extensions import ext_init
+    from app.loggings import init_log
+    from app.middleware import init_middleware
+    from app.settings import env, FLASK_ENV
+    from app.urls import init_api
+    from app.bootstrap.global_vars import error_msg
     print(" * current platform: {}".format("Windows" if os.name == "nt" else "Linux"))
     current_env = os.environ.setdefault('WFS_ENV', FLASK_ENV)
 
@@ -31,6 +30,8 @@ def create_app():
     app.config['COMPRESS_REGISTER'] = True  # 为true时对所有返回的数据进行压缩，不希望如此可将它设为False
     Compress(app)
     app.config.from_object(env.get(current_env))
+    if not app.config['SECRET_KEY']:
+        raise RuntimeError('WFS_SECRET_KEY must be configured')
     # 日志初始化
     init_log()
     # 中间件/拦截器

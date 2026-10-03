@@ -1,10 +1,10 @@
 <template>
   <div v-if="error" class="error-state">{{ error }}</div>
-  <div v-else-if="!rows.length && !loading" class="empty-state">
-    <strong>没有匹配的日志</strong>
-    <span>调整筛选条件，或等待下一次任务执行后再查看。</span>
+  <div v-if="!rows.length && !error" class="empty-state">
+    <strong>{{ loading ? '正在读取日志' : '没有匹配的日志' }}</strong>
+    <span>{{ loading ? '正在更新结果，请稍候。' : '调整筛选条件，或等待下一次任务执行后再查看。' }}</span>
   </div>
-  <div v-else class="table-wrap">
+  <div v-else-if="rows.length" class="table-wrap">
     <table>
       <thead>
         <tr v-if="kind === 'task'">
@@ -32,7 +32,7 @@
             <td>{{ row.name }}</td>
             <td class="mono">{{ row.group_name || '-' }}</td>
             <td class="mono">{{ row.folder_name || '-' }}</td>
-            <td><span class="tag" :class="row.state === '成功' ? 'success' : 'danger'">{{ row.state }}</span></td>
+            <td><span class="tag" :class="statusClass(row.state)">{{ row.state }}</span></td>
             <td>{{ row.times || '-' }}</td>
             <td class="nowrap">{{ row.starttime || '-' }}</td>
             <td class="nowrap">{{ row.datetime || '-' }}</td>
@@ -52,6 +52,7 @@
 </template>
 
 <script setup>
+import { statusClass } from '../executionLabels';
 defineProps({
   kind: { type: String, required: true },
   rows: { type: Array, required: true },

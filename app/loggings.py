@@ -1,11 +1,8 @@
 # setup logging
 import logging
-import os
 import socket
 from logging import Formatter
-from logging.handlers import RotatingFileHandler
 
-from app.bootstrap.global_vars import ROOT_LOG_DIR
 from app.bootstrap.helpers import load_config
 
 
@@ -16,15 +13,13 @@ def get_local_ip():
 
 
 def init_log():
-    if not os.path.exists(ROOT_LOG_DIR):
-        os.makedirs(ROOT_LOG_DIR)
-
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
-
-    rfh = RotatingFileHandler(os.path.join(ROOT_LOG_DIR, 'app.log'),
-                            maxBytes=1024 * 10,
-                            backupCount=5, encoding='utf8')
+    if any(getattr(handler, '_wfs_handler', False) for handler in root_logger.handlers):
+        return
+    # Gunicorn/systemd capture stderr; avoid rotating one shared file in several workers.
+    rfh = logging.StreamHandler()
+    rfh._wfs_handler = True
 
     app_id = load_config('basic', 'app_id')
     formatter = Formatter(

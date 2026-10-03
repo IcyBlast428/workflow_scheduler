@@ -4,22 +4,22 @@ import logging
 import os
 import random
 import re
-import signal
-import subprocess
-import sys
+import threading
+from functools import wraps
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_MAX_INSTANCES
 from configobj import ConfigObj
-import pandas as pd
+
 from app.bootstrap.global_vars import runnings, TASK_DIR, uuidhex, ignores,CONFIG_DIR
 from app.bootstrap.task_loader import discover_task_specs
-from app.bootstrap.schedule_config import SCHEDULER_TZ, apply_persisted_schedule, build_scheduler_trigger
+from app.bootstrap.schedule_config import SCHEDULER_TZ, apply_persisted_schedule, build_scheduler_trigger, record_application
 from app.extensions import scheduler
-from app.common.mail import send_mail
-from app.common.sms import send_sms
+from app.bootstrap.execution import execute_py, kill_process
 from app.bootstrap.database import GaussDB
 from app.settings import FLASK_ENV
-from app.bootstrap.system_metrics import record_task_end, record_task_start
+from app.bootstrap.operations import create_run, update_run, now, start_operations, mark_ready, audit
+from app.bootstrap.operations import save_history
+from app.bootstrap.execution_state import SKIPPED, MISSED
 
 if FLASK_ENV == 'development':
     dev_ini = os.path.join(CONFIG_DIR, 'development.ini')
@@ -31,9 +31,27 @@ if FLASK_ENV == 'development':
 
 # 项目重启时 interval 任务可能同时进入下一次运行，这里只给首轮注册加内存态错峰。
 INTERVAL_START_STAGGER_MAX_SECONDS = 300
+_manual_reservations = {}
+_manual_lock = threading.Lock()
+_configuration_lock = threading.RLock()
+
+
+def serialized_configuration(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _configuration_lock:
+            return function(*args, **kwargs)
+    return wrapped
+
+
+def execute_manual(*args, manual_job_id, run_id=None, limits=None, scheduled_time=None):
+    with _manual_lock:
+        _manual_reservations.pop(manual_job_id, None)
+    return execute_py(*args, run_id=run_id, limits=limits,scheduled_time=scheduled_time)
 
 
 def getReceiverList(receiver_str, send_type, connection) -> list:
+    import pandas as pd
     cnname_list = []
     grpname_list = []
     individual_receiver_list = []
@@ -55,235 +73,19 @@ def getReceiverList(receiver_str, send_type, connection) -> list:
     return receiver_list
 
 
-def kill_process(pid):
-    if not pid:
-        return
-    try:
-        if os.name == 'nt':
-            os.kill(pid, signal.SIGTERM)
-        else:
-            # Linux 下任务以独立进程组启动，超时或强停时可以一起清理子进程。
-            os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    except Exception:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
-
-
-def _task_dir_parts(dir_name='', group_name='', folder_name=''):
-    if group_name or folder_name:
-        return group_name or '', folder_name or ''
-    normalized_dir = str(dir_name or '').strip('/')
-    if not normalized_dir:
-        return '', ''
-    parts = normalized_dir.split('/', 1)
-    return (parts + [''])[:2]
-
-
-def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_name='', folder_name='', python_executable=''):
-    '''
-    执行py文件 并记录到日志中
-    :param task_name:
-    :param dir_name:
-    :param path: 文件相对路径
-    :param PID: task的唯一id
-    :return: 执行不返回
-    '''
-    start_time = datetime.datetime.now()
-    event_group_name, event_folder_name = _task_dir_parts(dir_name, group_name, folder_name)
-    # 先记录内存中的开始事件，总览页可以立刻看到正在运行的任务色块。
-    record_task_start(PID, task_name, event_group_name, event_folder_name, start_time)
-    dic = {}
-    output = ''
-    output_simple = ''
-    state = 1
-    try:
-        popen_kwargs = {}
-        if os.name == 'nt':
-            popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
-        else:
-            popen_kwargs['start_new_session'] = True
-
-        # 每个任务可以使用自己的 .venv；没有独立环境时回退到启动平台的 Python。
-        executable = python_executable or sys.executable
-        cmd = subprocess.Popen(
-            [str(executable), str(path)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=False,
-            **popen_kwargs
-        )
-        dic[PID] = cmd.pid
-        runnings.append(dic)
-        try:
-            stdout, err = cmd.communicate(timeout=timeout_seconds or None)
-        except subprocess.TimeoutExpired:
-            # 超时后先温和终止进程组，仍不退出再强制 kill，避免任务残留。
-            kill_process(cmd.pid)
-            try:
-                stdout, err = cmd.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                cmd.kill()
-                stdout, err = cmd.communicate()
-            state = -9
-            output += 'Task exceeded TIMEOUT_SECONDS={} and was terminated.\n'.format(timeout_seconds)
-        output += stdout.decode("utf-8", errors="replace")
-        output += err.decode("utf-8", errors="replace")
-        # 监听进程状态
-        if state != -9:
-            state = cmd.returncode
-    except Exception as err:
-        state = 1
-        output += f'{err}'
-        if dic.get(PID):
-            try:
-                kill_process(dic.get(PID))
-            except ProcessLookupError:
-                # 此进程并没有开始就中断了
-                pass
-    finally:
-        end_time = datetime.datetime.now()
-        # 任务结束后补齐内存事件的 end_time，避免总览页显示无限延伸的运行块。
-        record_task_end(PID, start_time, end_time)
-        output_encode = output.encode('utf-8')
-        output_size = len(output_encode) // 1000
-        if output_size >= 64:
-            # 数据库存储完整大日志不划算，超过阈值时截断并提示任务侧落文件。
-            output = output_encode[:1000 * 63].decode('utf-8')
-            warning = '\nThe log size exceed the limit, please consider saving the output as a file.'
-            output += warning
-        if state in ["-9", -9]:
-            output = "管理员介入kill了此进程"
-        
-        wfs_obj = GaussDB()
-        wfs_connection = wfs_obj.get_connection()
-        # 成功任务last_sms_alarm置空，failed_time置0
-        if state == 0 and FLASK_ENV == 'production':
-            wfs_obj.execute_sql(
-                sql="update wfs_job_stats set last_sms_alarm = NULL, failed_times = 0 where pid = ?",
-                params=(PID,)
-            )
-        # 失败任务进行提示
-        if state != 0 and FLASK_ENV == 'production':
-            failed_job_df = pd.read_sql_query(
-                sql="select * from wfs_job_stats where pid = ?",
-                con=wfs_connection,
-                params=(PID,),
-            )
-            wfs_obj.execute_sql(
-                sql="update wfs_job_stats set failed_times = failed_times + 1 where pid = ?",
-                params=(PID,)
-            )
-            # 任务失败短信提示
-            if (sms_receiver_str := failed_job_df["sms_receiver"].values.tolist()[0]) and (failed_job_df["last_sms_alarm"].values[0] == None):
-                sms_receiver_list = getReceiverList(receiver_str = sms_receiver_str, send_type = "telephone", connection = wfs_connection)
-                logging.getLogger(__name__).info(f"sms_receiver_list: {sms_receiver_list}")
-                # output_simple为简化版错误信息，供任务出错时短信提示使用
-                logging.getLogger(__name__).info(f"output: {output}")
-                output_replaced = output.replace("\n", "")
-                logging.getLogger(__name__).info(f"output: {output_replaced}")
-                output_simple = re.search(r".+\.py\",? ?(?P<errmsg>.+)$", output_replaced).group("errmsg")
-                # 发送短信
-                send_sms(sms_receiver_list, f"WFS任务: {PID}执行失败。\n{output_simple}")
-                # 更新last_sms_alarm时间
-                wfs_obj.execute_sql(
-                    sql="update wfs_job_stats set last_sms_alarm = NOW() where pid = ?",
-                    params=(PID,)
-                )
-            # 任务失败邮件提示
-            if email_receiver_str := failed_job_df["email_receiver"].values.tolist()[0]:
-                email_receiver_list = getReceiverList(receiver_str = email_receiver_str, send_type = "email", connection = wfs_connection)
-                logging.getLogger(__name__).info(f"email_receiver_list: {email_receiver_list}")
-                body = "PID: " + PID + "<br/><br/>"
-                body += output.replace("'", "\\'")
-                send_mail(to_receivers = email_receiver_list, subject = "WFS任务:" + task_name + " 执行失败，请检查", body = body)
-        
-        # 写入运行历史，CPU/内存图中的历史任务色块也依赖这张表。
-        try:
-            tasklog = output.replace("'", "\\'")
-            run_history_sql = '''
-            INSERT INTO wfs_run_history(
-                    id,
-                    pid,
-                    taskname,
-                    dirname,
-                    group_name,
-                    folder_name,
-                    state,
-                    tasklog,
-                    start_time,
-                    end_time
-                )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            '''
-            group_name, folder_name = _task_dir_parts(dir_name, group_name, folder_name)
-            wfs_obj.execute_sql(
-                sql=run_history_sql,
-                params=(
-                    uuidhex(),
-                    PID,
-                    task_name,
-                    dir_name,
-                    group_name,
-                    folder_name,
-                    state,
-                    tasklog,
-                    start_time,
-                    end_time,
-                )
-            )
-            job_stats_sql = "update wfs_job_stats set last_status = ? where pid = ?"
-            wfs_obj.execute_sql(sql=job_stats_sql, params=(state, PID))
-        except Exception as e:
-            if PID == 'table_sync_policy':
-                app_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                log_path = os.path.join(app_path, 'jobs', 'databaseSync', 'table_sync_policy', 'log.txt')
-                with open(log_path, 'r', encoding='utf-8') as f:
-                    output = f.read()
-                    output_size = sys.getsizeof(output) // 1000
-                    if output_size >= 64:
-                        output = output[:1000 * 50]
-                        warning = '\nThe log size exceed the limit, please consider saving the output as a file.'
-                        output += warning
-                    output += '以上日志为从文件中读取'
-                    output += str(e)
-            group_name, folder_name = _task_dir_parts(dir_name, group_name, folder_name)
-            sql = r"""INSERT INTO wfs_run_history(id,pid,taskname,dirname,state,tasklog,start_time,end_time) VALUES 
-            ('{}','{}','{}','{}','{}','{}','{}','{}')""".format(uuidhex(), PID, task_name, dir_name, state,
-                                                                output.replace("'", "\\'"), start_time,
-                                                                end_time)
-            wfs_obj.execute_sql(sql, params=None)
-        wfs_obj.close()
-
-        # finally:
-        #     sql = ''
-        #     Connection.exec_sql(sql)
-        #     pass
-
-        # 执行状态改变
-        if dic in runnings:
-            try:
-                pass
-            except ProcessLookupError:
-                # 到了此处是此进程真的结束了
-                pass
-            except PermissionError:
-                # print("访问进程失败,权限不足,拒绝访问")
-                pass
-            finally:
-                runnings.remove(dic)
-
-
 # 监听系统日志
 def my_listener(event):
     # 获取错误码
     warning_code = event.code
     # 任务id  pid
     job_id = event.job_id
+    with _manual_lock:
+        pending = _manual_reservations.pop(job_id, None)
+    if pending is not None:
+        reservation, run_id = pending
+        runnings.remove(reservation)
+        result = update_run(run_id, status='missed', state=MISSED, end_time=now(), reason='手动执行错过调度窗口，未启动。')
+        save_history(result)
     # 报警信息
     warning_log = ""
     # 获取队列中的任务
@@ -302,6 +104,18 @@ def my_listener(event):
         warning_log = "APScheduler EVENT_JOB_ERROR"
     else:
         warning_log = "APScheduler报错码:{}".format(warning_code)
+
+    if pending is None and warning_code in (EVENT_JOB_MAX_INSTANCES,EVENT_JOB_MISSED):
+        times = getattr(event,'scheduled_run_times',None) or [getattr(event,'scheduled_run_time',None)]
+        spec = next((spec for spec in discover_task_specs() if spec['pid']==job_id),None)
+        if spec:
+            for planned in times:
+                run_id = create_run(job_id,job_name,group_name=spec['group_name'],folder_name=spec['folder_name'],dir_name=spec['dir_name'],
+                                    scheduled_time=planned.astimezone().replace(tzinfo=None).isoformat(' ') if planned else '')
+                skipped = warning_code==EVENT_JOB_MAX_INSTANCES
+                record = update_run(run_id,status='skipped' if skipped else 'missed',state=SKIPPED if skipped else MISSED,end_time=now(),
+                                    reason='此任务的并发名额已满，本次调度跳过。' if skipped else '错过允许的调度窗口，本次未执行。')
+                save_history(record)
 
     sql = '''INSERT INTO wfs_schedule_history(id,pid,taskname,system_info,datetime_info)
              VALUES (?,?,?,?,?)'''
@@ -359,6 +173,8 @@ def _ensure_listener_registered():
 
 
 def _should_process_in_dev(pid):
+    if os.environ.get('WFS_DEV_RUN_ALL', '').lower() in {'1', 'true', 'yes'}:
+        return True
     if FLASK_ENV != 'development' or dev_run_all != 'false':
         return True
     if isinstance(dev_run_job_pid, list):
@@ -369,111 +185,25 @@ def _should_process_in_dev(pid):
 
 
 def _sync_job_stats(job_list, prune_missing=True):
-    # 每次扫描后把文件系统中的任务清单同步到统计表，前端列表以这张表为基础展示状态。
-    current_job_df = pd.DataFrame(job_list, columns=["pid", "group_name", "folder_name", "task_name", "scheduling_stat"])
-    with GaussDB() as wfs_obj:
-        wfs_connection = wfs_obj.get_connection()
-        current_job_in_database_df = pd.read_sql_query("select * from wfs_job_stats", wfs_connection)
+    with GaussDB() as db:
+        existing = {row[0] for row in db.execute_query_sql('SELECT pid FROM wfs_job_stats')}
+        current = {row[0] for row in job_list}
+        db.begin_transaction()
+        try:
+            if prune_missing:
+                for pid in existing - current:
+                    db.execute_sql('DELETE FROM wfs_job_stats WHERE pid=?', params=(pid,))
+            for pid, group, folder, name, enabled in job_list:
+                if pid in existing:
+                    db.execute_sql('UPDATE wfs_job_stats SET group_name=?,folder_name=?,task_name=?,scheduling_stat=? WHERE pid=?', params=(group,folder,name,enabled,pid))
+                else:
+                    db.execute_sql('INSERT INTO wfs_job_stats(pid,group_name,folder_name,task_name,scheduling_stat,failed_times) VALUES(?,?,?,?,?,0)', params=(pid,group,folder,name,enabled))
+            db.set_commit()
+        except Exception:
+            db.set_rollback()
+            raise
 
-        current_pids = set(current_job_df["pid"].tolist()) if not current_job_df.empty else set()
-        database_pids = set(current_job_in_database_df["pid"].tolist()) if not current_job_in_database_df.empty else set()
-
-        if prune_missing:
-            for removed_pid in sorted(database_pids - current_pids):
-                wfs_obj.execute_sql(
-                    sql="delete from wfs_job_stats where pid = ?",
-                    params=(removed_pid,)
-                )
-                logging.getLogger(__name__).info("remove_job: %s", removed_pid)
-
-        if current_job_df.empty:
-            return
-
-        add_job_df = current_job_df[~current_job_df["pid"].isin(current_job_in_database_df["pid"])]
-        for _, row in add_job_df.iterrows():
-            try:
-                add_job_sql = """
-                INSERT INTO wfs_job_stats (
-                        pid,
-                        group_name,
-                        folder_name,
-                        task_name,
-                        scheduling_stat,
-                        sms_receiver,
-                        email_receiver,
-                        last_status,
-                        last_sms_alarm,
-                        failed_times
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?);
-                """
-                wfs_obj.execute_sql(
-                    sql=add_job_sql,
-                    params=(
-                        row['pid'],
-                        row['group_name'],
-                        row['folder_name'],
-                        row['task_name'],
-                        row['scheduling_stat'],
-                        None,
-                        None,
-                        None,
-                        None,
-                        0,
-                    )
-                )
-            except Exception:
-                add_job_sql = """
-                INSERT INTO wfs_job_stats (
-                        pid,
-                        task_name,
-                        scheduling_stat,
-                        sms_receiver,
-                        email_receiver,
-                        last_status,
-                        last_sms_alarm,
-                        failed_times
-                    ) VALUES (?,?,?,?,?,?,?,?);
-                """
-                wfs_obj.execute_sql(
-                    sql=add_job_sql,
-                    params=(
-                        row['pid'],
-                        row['task_name'],
-                        row['scheduling_stat'],
-                        None,
-                        None,
-                        None,
-                        None,
-                        0,
-                    )
-                )
-            logging.getLogger(__name__).info("add_job: %s", row['pid'])
-
-        existing_job_df = current_job_df[current_job_df["pid"].isin(current_job_in_database_df["pid"])]
-        for _, row in existing_job_df.iterrows():
-            try:
-                wfs_obj.execute_sql(
-                    sql="update wfs_job_stats set group_name = ?, folder_name = ?, task_name = ?, scheduling_stat = ? where pid = ?",
-                    params=(
-                        row['group_name'],
-                        row['folder_name'],
-                        row['task_name'],
-                        row['scheduling_stat'],
-                        row['pid'],
-                    )
-                )
-            except Exception:
-                wfs_obj.execute_sql(
-                    sql="update wfs_job_stats set task_name = ?, scheduling_stat = ? where pid = ?",
-                    params=(
-                        row['task_name'],
-                        row['scheduling_stat'],
-                        row['pid'],
-                    )
-                )
-
-
-def call_task_once(pid):
+def call_task_once(pid, actor='admin'):
     for spec in discover_task_specs(TASK_DIR):
         if spec.get('pid') != pid:
             continue
@@ -481,29 +211,49 @@ def call_task_once(pid):
             raise ValueError('invalid task config for {}: {}'.format(pid, spec.get('error')))
         if spec.get('main_file_error'):
             raise ValueError('task entry file is invalid for {}: {}'.format(pid, spec.get('main_file_error')))
-        if runnings.is_running(pid):
-            raise ValueError('task is already running')
-        scheduler.add_job(
-            func=execute_py,
-            trigger='date',
-            run_date=datetime.datetime.now() + datetime.timedelta(seconds=1),
-            args=[
-                str(spec.get('main_file_path')),
-                pid,
-                spec.get('task_name'),
-                spec.get('dir_name'),
-                spec.get('timeout_seconds') or 0,
-                spec.get('group_name') or '',
-                spec.get('folder_name') or '',
-                spec.get('python_executable') or '',
-            ],
-            id='manual_{}_{}'.format(pid, uuidhex()),
-            name='Manual run: {}'.format(spec.get('task_name') or pid),
-            replace_existing=False,
-            max_instances=1,
-            misfire_grace_time=60,
-        )
-        return
+        reservation = runnings.claim(pid, spec.get('max_instances') or 1)
+        if reservation is None:
+            raise ValueError('task concurrency limit reached')
+        manual_job_id = 'manual_{}_{}'.format(pid, uuidhex())
+        try:
+            run_id = create_run(pid, spec.get('task_name') or spec.get('folder_name'), source='manual', actor=actor,
+                                dir_name=spec.get('dir_name'), group_name=spec.get('group_name'), folder_name=spec.get('folder_name'))
+        except Exception:
+            runnings.remove(reservation)
+            raise
+        with _manual_lock:
+            _manual_reservations[manual_job_id] = (reservation, run_id)
+        try:
+            scheduler.add_job(
+                func=execute_manual,
+                trigger='date',
+                run_date=datetime.datetime.now(),
+                args=[
+                    str(spec.get('main_file_path')),
+                    pid,
+                    spec.get('task_name'),
+                    spec.get('dir_name'),
+                    spec.get('timeout_seconds') or 0,
+                    spec.get('group_name') or '',
+                    spec.get('folder_name') or '',
+                    spec.get('python_executable') or '',
+                    spec.get('max_instances') or 1,
+                    reservation,
+                ],
+                id=manual_job_id,
+                kwargs={'manual_job_id': manual_job_id, 'run_id': run_id, 'limits': spec.get('schedule_form') or {}},
+                name='Manual run: {}'.format(spec.get('task_name') or pid),
+                replace_existing=False,
+                max_instances=1,
+                misfire_grace_time=60,
+            )
+        except Exception:
+            with _manual_lock:
+                _manual_reservations.pop(manual_job_id, None)
+            runnings.remove(reservation)
+            update_run(run_id, status='interrupted', state=-1, end_time=now(), reason='Could not enqueue execution.')
+            raise
+        return run_id
     raise ValueError('task not found: {}'.format(pid))
 
 
@@ -546,12 +296,19 @@ def _stagger_interval_rules(pid, rules, enabled=True):
     return next_rules
 
 
+@serialized_configuration
 def aps_start(task_pid=None, action='refresh'):
     """
     扫描任务目录、合并数据库配置，并把可运行任务注册到 APScheduler。
     :param task_pid: 全任务扫描为 None，否则只处理指定 PID
     :param action: refresh/start/reload 等任务控制动作
     """
+    if task_pid is None:
+        start_operations()
+        from app.bootstrap.system_metrics import cpu_monitor_snapshot
+        cpu_monitor_snapshot()
+    from app.bootstrap.task_loader import invalidate_task_cache
+    invalidate_task_cache()
     job_list = []
     matched_target = task_pid is None
     discovered_pids = set()
@@ -570,19 +327,24 @@ def aps_start(task_pid=None, action='refresh'):
 
         if not pid:
             continue
-        if not _should_process_in_dev(pid):
+        if task_pid is None and not _should_process_in_dev(pid):
             continue
 
         if spec.get('error'):
             message = 'invalid task config for {}: {}'.format(pid, spec.get('error'))
             logging.getLogger(__name__).warning(message)
             _remove_scheduler_job(pid)
+            if spec.get('config_record'):
+                record_application(pid, spec['config_record'].get('version',1), 'failed', message)
             if task_pid == pid:
                 raise ValueError(message)
             continue
 
         # 读取前端持久化的调度策略，覆盖任务目录中的默认推断。
         spec = apply_persisted_schedule(spec)
+        version = (spec.get('config_record') or {}).get('version',0)
+        if spec.get('schedule_enabled') and pid in ignores:
+            ignores.remove(pid)
 
         job_list.append([
             pid,
@@ -594,11 +356,14 @@ def aps_start(task_pid=None, action='refresh'):
 
         if pid in ignores:
             _remove_scheduler_job(pid)
+            if spec.get('schedule_configured'):
+                record_application(pid, version, 'applied')
             continue
 
         if spec.get('main_file_error'):
             logging.getLogger(__name__).warning('invalid task entry for %s: %s', pid, spec.get('main_file_error'))
             _remove_scheduler_job(pid)
+            record_application(pid, version, 'failed', spec.get('main_file_error'))
             if task_pid == pid:
                 raise ValueError('task entry file is invalid for {}: {}'.format(pid, spec.get('main_file_error')))
             continue
@@ -612,8 +377,10 @@ def aps_start(task_pid=None, action='refresh'):
         should_start = spec.get('start_enabled') or action == 'start'
         if not should_start:
             _remove_scheduler_job(pid)
+            record_application(pid, version, 'applied')
             continue
         if scheduler.get_job(pid):
+            record_application(pid, version, 'applied')
             continue
 
         try:
@@ -639,18 +406,22 @@ def aps_start(task_pid=None, action='refresh'):
                     spec.get('group_name') or '',
                     spec.get('folder_name') or '',
                     spec.get('python_executable') or '',
+                    spec.get('max_instances') or 1,
                 ],
                 name=spec.get('task_name') or pid,
+                kwargs={'limits': spec.get('schedule_form') or {}},
                 replace_existing=True,
                 max_instances=spec.get('max_instances') or 1,
                 coalesce=True,
                 id=pid,
-                misfire_grace_time=600,
+                misfire_grace_time=int((spec.get('schedule_form') or {}).get('misfire_grace_seconds', 600)),
             )
             scheduler.resume_job(pid)
+            record_application(pid, version, 'applied')
         except Exception as exc:
             logging.getLogger(__name__).warning('failed to register job %s: %s', pid, exc)
             _remove_scheduler_job(pid)
+            record_application(pid, version, 'failed', str(exc))
             if task_pid == pid:
                 raise
 
@@ -668,4 +439,6 @@ def aps_start(task_pid=None, action='refresh'):
     logging.getLogger(__name__).info("lens(job_list):" + str(len(job_list)))
     # 单任务刷新只同步当前 PID，不能用局部 job_list 删除其他任务的统计行。
     _sync_job_stats(job_list, prune_missing=(task_pid is None))
+    if task_pid is None:
+        mark_ready()
     logging.getLogger(__name__).info('end to run aps_start pid={} action={}'.format(task_pid, action))

@@ -374,14 +374,13 @@ def schedule_to_form(trigger, rules, schedule_type=None, saved_form=None, spec=N
 
 
 def _load_schedule_record(pid):
-    try:
-        from app.bootstrap.database import GaussDB
-        with GaussDB() as db:
-            rows = db.execute_query_sql(
+    from app.bootstrap.database import GaussDB
+    with GaussDB() as db:
+        rows = db.execute_query_sql(
                 """
                 SELECT pid, group_name, folder_name, task_name, main_file, enabled,
                        max_instances, timeout_seconds, trigger_type, schedule_type,
-                       schedule_json, trigger_json, updated_at
+                       schedule_json, trigger_json, updated_at, version, updated_by
                 FROM wfs_task_config
                 WHERE pid = ?
                 ORDER BY updated_at DESC
@@ -389,10 +388,8 @@ def _load_schedule_record(pid):
                 """,
                 params=(pid,),
                 return_json=True,
-            )
-        return rows[0] if rows else None
-    except Exception:
-        return None
+        )
+    return rows[0] if rows else None
 
 
 def _record_belongs_to_spec(record, spec):
@@ -412,8 +409,17 @@ def _save_schedule_record(spec, trigger, rules, schedule_type, form):
     from app.bootstrap.database import GaussDB
 
     task_name, main_file, max_instances, timeout_seconds = _normalize_task_config(spec, form)
+    for field in ('memory_mb','cpu_seconds','file_mb'):
+        if field in form:
+            form[field] = _as_int(form[field], field, 0)
+    if 'misfire_grace_seconds' in form:
+        form['misfire_grace_seconds'] = _as_int(form['misfire_grace_seconds'], 'misfire_grace_seconds', 1)
+    if len(str(form.get('owner',''))) > 200 or len(str(form.get('description',''))) > 10000:
+        raise ValueError('负责人或说明过长。')
     enabled = 'true' if _as_bool(form.get('enabled'), default=True) else 'false'
     saved_form = dict(form or {})
+    saved_form.pop('pid', None)
+    saved_form.pop('updated_by', None)
     saved_form.update({
         'enabled': enabled == 'true',
         'task_name': task_name,
@@ -437,7 +443,20 @@ def _save_schedule_record(spec, trigger, rules, schedule_type, form):
         datetime.datetime.now(),
     )
     with GaussDB() as db:
+        db.begin_transaction()
         try:
+            query = 'SELECT version FROM wfs_task_config WHERE pid=?'
+            if not db._local_sqlite:
+                query += ' FOR UPDATE'
+            previous = db.execute_query_sql(query, params=(spec.get('pid'),))
+            old_version = int(previous[0][0] or 1) if previous else 0
+            expected = int(form.get('version', old_version))
+            if expected != old_version:
+                raise ValueError('配置已被其他操作修改，请重新打开配置后保存。')
+            version = old_version + 1
+            if previous and not db.execute_query_sql('SELECT 1 FROM wfs_config_versions WHERE pid=? AND version=?', params=(spec.get('pid'),old_version)):
+                old_payload = db.execute_query_sql('SELECT schedule_json FROM wfs_task_config WHERE pid=?', params=(spec.get('pid'),))[0][0]
+                db.execute_sql('INSERT INTO wfs_config_versions(pid,version,changed_at,changed_by,payload) VALUES(?,?,?,?,?)',params=(spec.get('pid'),old_version,datetime.datetime.now(),'migration-baseline',old_payload))
             # 旧版本如果没有主键约束，可能留下同 PID 多行。保存时先清理再插入，
             # 让数据库重新回到“一个 PID 一条配置”的模型。
             db.execute_sql(
@@ -449,13 +468,19 @@ def _save_schedule_record(spec, trigger, rules, schedule_type, form):
                 INSERT INTO wfs_task_config (
                     pid, group_name, folder_name, task_name, main_file, enabled,
                     max_instances, timeout_seconds, trigger_type, schedule_type,
-                    schedule_json, trigger_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    schedule_json, trigger_json, updated_at, version, updated_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                params=payload,
+                params=payload + (version, form.get('updated_by', 'system')),
             )
+            db.execute_sql('INSERT INTO wfs_config_versions(pid,version,changed_at,changed_by,payload) VALUES(?,?,?,?,?)',
+                           params=(spec.get('pid'), version, datetime.datetime.now(), form.get('updated_by','system'), _json_dumps(saved_form)))
+            db.set_commit()
         except Exception as exc:
-            raise RuntimeError('wfs_task_config schema is outdated, please run the latest ddl.sql: {}'.format(exc))
+            db.set_rollback()
+            raise RuntimeError('配置保存失败：{}'.format(exc))
+    from app.bootstrap.task_loader import invalidate_task_cache
+    invalidate_task_cache()
 
 
 def _record_schedule(spec, record):
@@ -472,8 +497,15 @@ def _record_schedule(spec, record):
         'timeout_seconds': record.get('timeout_seconds') or spec.get('timeout_seconds'),
     })
     form = schedule_to_form(trigger, rules, schedule_type=schedule_type, saved_form=saved_form, spec=spec_for_form, enabled=enabled)
+    # Historical JSON may contain request identity from older clients.
+    form.pop('pid', None)
+    form.pop('updated_by', None)
+    form['version'] = int(record.get('version') or 1)
     return {
         'pid': spec.get('pid'),
+        'version': form['version'],
+        'updated_by': record.get('updated_by') or '',
+        'updated_at': str(record.get('updated_at') or ''),
         'group_name': spec.get('group_name') or record.get('group_name') or '',
         'folder_name': spec.get('folder_name') or record.get('folder_name') or '',
         'task_name': record.get('task_name') or spec.get('task_name') or '',
@@ -492,6 +524,7 @@ def _record_schedule(spec, record):
 
 def _unconfigured_schedule(spec):
     form = schedule_to_form('', {}, spec=spec, enabled=False)
+    form['version'] = 0
     return {
         'pid': spec.get('pid'),
         'group_name': spec.get('group_name') or '',
@@ -516,6 +549,12 @@ def load_schedule(pid, group_name=None, folder_name=None):
     if record and not _record_belongs_to_spec(record, spec):
         record = None
     data = _record_schedule(spec, record) if record else _unconfigured_schedule(spec)
+    from app.bootstrap.database import GaussDB
+    with GaussDB() as db:
+        rows = db.execute_query_sql('SELECT version,status,message FROM wfs_config_application WHERE pid=?', params=(pid,), return_json=True)
+    data['application'] = rows[0] if rows else {'status':'unconfigured' if not record else 'pending','message':''}
+    if record and data['application'].get('version') != data['version']:
+        data['application'] = {'status':'pending','message':'配置已保存，等待调度器应用。'}
     try:
         if data['configured']:
             data['preview'] = preview_schedule(trigger=data['trigger'], rules=data['rules'])
@@ -541,7 +580,7 @@ def save_schedule(pid, form):
     return load_schedule(spec.get('pid'))
 
 
-def set_schedule_enabled(pid, enabled, group_name=None, folder_name=None):
+def set_schedule_enabled(pid, enabled, group_name=None, folder_name=None, actor='system'):
     spec = resolve_task_spec(pid=pid)
 
     record = _load_schedule_record(spec.get('pid'))
@@ -552,23 +591,19 @@ def set_schedule_enabled(pid, enabled, group_name=None, folder_name=None):
 
     saved_form = _json_loads(record.get('schedule_json'), {})
     saved_form['enabled'] = bool(enabled)
-    enabled_text = 'true' if enabled else 'false'
+    saved_form.update(version=int(record.get('version') or 1), updated_by=actor)
+    return save_schedule(pid, saved_form)
 
+
+def record_application(pid, version, status, message=''):
     from app.bootstrap.database import GaussDB
     with GaussDB() as db:
-        db.execute_sql(
-            """
-            UPDATE wfs_task_config
-            SET enabled = ?, schedule_json = ?, group_name = ?, folder_name = ?, updated_at = ?
-            WHERE pid = ?
-            """,
-            params=(
-                enabled_text,
-                _json_dumps(saved_form),
-                spec.get('group_name') or '',
-                spec.get('folder_name') or '',
-                datetime.datetime.now(),
-                spec.get('pid'),
-            ),
-        )
-    return load_schedule(spec.get('pid'))
+        db.begin_transaction()
+        try:
+            db.execute_sql('DELETE FROM wfs_config_application WHERE pid=?', params=(pid,))
+            db.execute_sql('INSERT INTO wfs_config_application(pid,version,status,message,updated_at) VALUES(?,?,?,?,?)',
+                           params=(pid, version, status, message, datetime.datetime.now()))
+            db.set_commit()
+        except Exception:
+            db.set_rollback()
+            raise

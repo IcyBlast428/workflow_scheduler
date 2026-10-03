@@ -1,0 +1,2 @@
+-- The existing ddl.sql is the initial schema. This migration records that
+-- the four required tables are present before later migrations are applied.

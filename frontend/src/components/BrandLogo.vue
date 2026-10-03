@@ -1,0 +1,14 @@
+<template>
+  <div class="brand-mark graphic-brand" role="img" aria-label="任务调度：时钟与任务节点">
+    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <rect width="48" height="48" rx="12" fill="#0f766e" />
+      <path d="M33 16a13 13 0 1 0 1 17" stroke="#99f6e4" stroke-width="2.5" stroke-linecap="round" />
+      <path d="M22 14v10l-6 4" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M29 13h10v11h-5v10" stroke="#5eead4" stroke-width="2" stroke-linejoin="round" />
+      <rect x="25" y="9" width="8" height="8" rx="2" fill="white" />
+      <rect x="35" y="20" width="8" height="8" rx="2" fill="#5eead4" />
+      <rect x="30" y="31" width="10" height="10" rx="3" fill="white" />
+      <path d="m32.5 36 1.6 1.6 3.3-3.5" stroke="#0f766e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  </div>
+</template>

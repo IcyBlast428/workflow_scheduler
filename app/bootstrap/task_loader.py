@@ -1,6 +1,9 @@
 import json
 import re
 from pathlib import Path
+import threading
+import time
+import copy
 
 from app.bootstrap.global_vars import TASK_DIR
 
@@ -132,7 +135,7 @@ def _load_task_config_records():
                     """
                     SELECT pid, group_name, folder_name, task_name, main_file, enabled,
                            max_instances, timeout_seconds, trigger_type, schedule_type,
-                           schedule_json, trigger_json, updated_at
+                           schedule_json, trigger_json, updated_at, version, updated_by
                     FROM wfs_task_config
                     ORDER BY updated_at DESC
                     """,
@@ -150,8 +153,8 @@ def _load_task_config_records():
                     return_json=True,
                 )
         return rows
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RuntimeError('failed to load task configuration from database') from exc
 
 
 def build_task_pid(group_name, folder_name):
@@ -199,7 +202,19 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None):
     group_dir = task_dir.parent
     inferred_main_file = infer_main_file(task_dir)
     python_executable, python_source = resolve_python_executable(group_dir, task_dir)
+    identity_error = ''
+    manifest = task_dir / '.wfs-task.json'
     pid = build_task_pid(group_name, folder_name)
+    if manifest.exists():
+        try:
+            if manifest.is_symlink() or manifest.stat().st_size > 4096:
+                raise ValueError('invalid identity manifest')
+            identity = json.loads(manifest.read_text(encoding='utf-8'))
+            pid = identity['task_id']
+            if not isinstance(pid,str) or len(pid)>200 or not PID_PATTERN.fullmatch(pid):
+                raise ValueError('invalid stable task ID')
+        except (OSError,ValueError,KeyError,TypeError) as exc:
+            identity_error = '任务标识文件无效：'+str(exc)
     max_instances = 1
     timeout_seconds = 0
 
@@ -230,7 +245,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None):
         'main_file_options': list_python_entry_files(task_dir),
         'python_executable': python_executable,
         'python_source': python_source,
-        'error': None,
+        'error': identity_error or None,
         'main_file_error': '',
         'config_record': None,
     }
@@ -256,7 +271,27 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None):
     return spec
 
 
+_cache = {}
+_cache_lock = threading.RLock()
+
+
+def invalidate_task_cache():
+    with _cache_lock:
+        _cache.clear()
+
+
 def discover_task_specs(task_root=TASK_DIR):
+    key = str(task_root)
+    with _cache_lock:
+        cached = _cache.get(key)
+        if cached and time.monotonic() - cached[0] < 3:
+            return copy.deepcopy(cached[1])
+        specs = _discover_task_specs(task_root)
+        _cache[key] = (time.monotonic(), specs)
+        return copy.deepcopy(specs)
+
+
+def _discover_task_specs(task_root=TASK_DIR):
     specs = []
     records_by_pid = _record_maps()
     for group_name, folder_name, task_dir in iter_task_directories(task_root):

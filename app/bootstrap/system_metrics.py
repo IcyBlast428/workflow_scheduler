@@ -3,6 +3,9 @@ import datetime
 import os
 import threading
 import time
+import json
+from pathlib import Path
+from app.bootstrap.global_vars import DATA_DIR
 
 
 CPU_SAMPLE_INTERVAL_SECONDS = 5
@@ -21,17 +24,23 @@ class _CpuMonitor:
         self._started = False
         self._last_times = None
         self._warning = ''
+        self._path = Path(DATA_DIR) / 'metrics.json'
 
     def start(self):
         with self._lock:
             if self._started:
                 return
+            if self._path.exists():
+                try:
+                    self._samples = [dict(item, time_obj=datetime.datetime.fromisoformat(item['time'])) for item in json.loads(self._path.read_text())]
+                except (OSError, ValueError, TypeError, KeyError):
+                    self._warning = 'Historical resource metrics could not be loaded'
             self._started = True
         # daemon 线程随进程退出，不阻塞 Web/Scheduler 停止。
         thread = threading.Thread(target=self._run, name='wfs-cpu-monitor', daemon=True)
         thread.start()
 
-    def snapshot(self, hours=6):
+    def snapshot(self, hours=6, after=''):
         # API 被访问时懒启动采样线程，避免仅导入模块就产生后台线程。
         self.start()
         since = datetime.datetime.now() - datetime.timedelta(hours=hours)
@@ -39,15 +48,18 @@ class _CpuMonitor:
             samples = [
                 dict(item)
                 for item in self._samples
-                if item['time_obj'] >= since
+                if item['time_obj'] >= since and (not after or item['time'] > after)
             ]
             warning = self._warning
+            latest = self._samples[-1] if self._samples else {}
         for item in samples:
             item.pop('time_obj', None)
         return {
             'samples': samples,
-            'current': samples[-1]['cpu'] if samples else None,
-            'current_memory': samples[-1].get('memory') if samples else None,
+            'current': latest.get('cpu'),
+            'current_memory': latest.get('memory'),
+            'cursor': latest.get('time',''),
+            'incremental': bool(after),
             'sample_interval_seconds': self.interval,
             'retention_hours': hours,
             'warning': warning,
@@ -96,6 +108,11 @@ class _CpuMonitor:
             self._samples.append(sample)
             self._samples = [item for item in self._samples if item['time_obj'] >= cutoff]
             self._warning = ''
+            retained = [{key:value for key,value in item.items() if key != 'time_obj'} for item in self._samples]
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(retained), encoding='utf-8')
+        temporary.replace(self._path)
 
 
 def _read_cpu_times():
@@ -255,8 +272,8 @@ _cpu_monitor = _CpuMonitor()
 _task_starts = _TaskStartEvents()
 
 
-def cpu_monitor_snapshot(hours=6):
-    return _cpu_monitor.snapshot(hours=hours)
+def cpu_monitor_snapshot(hours=6, after=''):
+    return _cpu_monitor.snapshot(hours=hours, after=after)
 
 
 def record_task_start(pid, task_name='', group_name='', folder_name='', start_time=None):

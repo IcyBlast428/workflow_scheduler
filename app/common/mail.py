@@ -19,8 +19,8 @@ def _format_addr(s):
     return formataddr((Header(name, 'utf-8').encode(), addr))
 
 def send_mail(to_receivers, subject, body, attachments_files=[], cc_receivers=[], image_files=[], sender_name="运维服务平台-WFS"):
-    mail_server = smtplib.SMTP('mails.icbc', 25)
-    sender_addr = 'immp@dc.icbc.com.cn'
+    mail_server = smtplib.SMTP(os.environ.get('WFS_SMTP_HOST', 'mails.icbc'), int(os.environ.get('WFS_SMTP_PORT', '25')), timeout=10)
+    sender_addr = os.environ.get('WFS_SMTP_SENDER', 'immp@dc.icbc.com.cn')
     msg = MIMEMultipart()
     msg['Subject'] = subject
     msg['From'] = _format_addr(sender_name + '<' + sender_addr + '>')

@@ -1,0 +1,244 @@
+import { test, expect } from '@playwright/test';
+
+test('login, new-tab session, dismiss pause, execution, download and history', async ({ page, context }) => {
+  await page.goto('/');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  const other = await context.newPage();
+  await other.goto('/#tasks');
+  await expect(other.locator('.app-shell')).toBeVisible();
+  await other.close();
+  await page.goto('/#tasks');
+  const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
+  await row.getByRole('button',{name:'启动',exact:true}).click();
+  await expect(row).toContainText('调度已启用');
+  await row.getByRole('button',{name:'触发',exact:true}).click();
+  await expect(page.locator('.execution-modal')).toBeVisible();
+  await expect(page.locator('.execution-output')).toContainText('浏览器回归开始');
+  await page.locator('.execution-modal').getByTitle('关闭').click();
+  await row.getByRole('button',{name:'暂停',exact:true}).click();
+  await expect(page.locator('.confirm-modal')).toBeVisible();
+  await page.locator('.confirm-modal').getByTitle('关闭').click();
+  await expect(row).toContainText('调度已启用');
+  await row.getByRole('button',{name:'暂停',exact:true}).click();
+  await page.locator('.confirm-modal').getByRole('button',{name:'仅暂停',exact:true}).click();
+  await expect(row).toContainText('已暂停');
+  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await page.getByRole('button',{name:'执行记录',exact:true}).click();
+  await page.getByRole('button',{name:'查看执行',exact:true}).first().click();
+  await expect(page.locator('.execution-output')).toContainText('浏览器回归完成',{timeout:20000});
+  await expect(page.locator('.execution-meta')).toContainText('成功');
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('link',{name:'下载保留日志'}).click();
+  const download = await downloadEvent;
+  expect(await download.failure()).toBeNull();
+  await page.locator('.execution-modal').getByTitle('关闭').click();
+  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await page.getByRole('button',{name:'配置历史',exact:true}).click();
+  await expect(page.getByRole('button',{name:'恢复此配置'}).first()).toBeVisible();
+  await page.getByRole('button',{name:'恢复此配置'}).first().click();
+  await expect(page.locator('.confirm-modal')).toBeVisible();
+  await page.locator('.confirm-modal').getByRole('button',{name:'恢复配置',exact:true}).click();
+  await expect(page.locator('.confirm-modal')).not.toBeVisible();
+  await expect(page.getByText('配置已恢复',{exact:true})).toBeVisible();
+});
+
+test('mobile navigation stays usable without body overflow', async ({ page }) => {
+  await page.setViewportSize({width:390,height:844});
+  await page.addInitScript(() => localStorage.setItem('workflow_scheduler_theme','light'));
+  let releaseBundle;
+  const bundleGate = new Promise(resolve => { releaseBundle = resolve; });
+  await page.route('**/static/*.js',async route => {
+    const response = await route.fetch(); await bundleGate; await route.fulfill({response});
+  });
+  await page.goto('/',{waitUntil:'commit'});
+  await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+  releaseBundle();
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  await page.getByTitle('菜单').first().click();
+  await page.getByRole('button',{name:'任务列表',exact:true}).click();
+  await expect(page.locator('.task-table')).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow).toBe(false);
+});
+
+test('favorites persist and batch controls preview effects before applying', async ({page}) => {
+  await page.goto('/#tasks');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  const row=page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
+  await expect(row).toBeVisible();
+  await row.getByRole('button',{name:'收藏任务 acceptance__slow',exact:true}).click();
+  await page.getByLabel('仅看收藏').check();
+  await page.reload();
+  await expect(page.getByLabel('仅看收藏')).toBeChecked();
+  await expect(row.getByRole('button',{name:'取消收藏任务 acceptance__slow',exact:true})).toBeVisible();
+  await row.getByRole('checkbox',{name:'选择任务 acceptance__slow'}).check();
+  await page.getByRole('button',{name:'批量启用调度',exact:true}).click();
+  await expect(page.locator('.confirm-modal')).toContainText('正在执行的实例继续运行');
+  await page.locator('.confirm-modal').getByRole('button',{name:'启用调度',exact:true}).click();
+  await expect(row).toContainText('调度已启用');
+  await row.getByRole('checkbox',{name:'选择任务 acceptance__slow'}).check();
+  await page.getByRole('button',{name:'批量暂停调度',exact:true}).click();
+  await page.locator('.confirm-modal').getByRole('button',{name:'暂停调度',exact:true}).click();
+  await expect(row).toContainText('已暂停');
+});
+
+test('matrix filters survive reload and historical mode pauses polling', async ({page}) => {
+  await page.goto('/#matrix');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await expect(page.locator('.matrix-summary')).toBeVisible();
+  await page.getByLabel('分类',{exact:true}).selectOption('acceptance');
+  await page.getByLabel('时间',{exact:true}).selectOption('60');
+  await page.getByLabel('仅看异常').check();
+  await page.reload();
+  await expect(page.getByLabel('仅看异常')).toBeChecked();
+  await expect(page.getByLabel('时间',{exact:true})).toHaveValue('60');
+  await expect(page.locator('.matrix-summary')).toBeVisible();
+  await page.getByLabel('实时跟随今天').uncheck();
+  await expect(page.locator('.matrix-summary')).toContainText('自动刷新已暂停');
+  await page.clock.install();
+  let requests=0;page.on('request',request=>{if(request.url().includes('/api/taskinfo/matrix')) requests++;});
+  await page.clock.fastForward(35000);
+  expect(requests).toBe(0);
+  await page.getByRole('button',{name:'恢复全景',exact:true}).click();
+});
+
+test('detail tabs retain code state and slow refresh keeps content and geometry', async ({page}) => {
+  await page.goto('/#tasks');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
+  await row.getByRole('button',{name:'详情',exact:true}).click();
+  const dialog = page.locator('.task-detail-modal');
+  await expect(dialog.getByRole('button',{name:'刷新详情',exact:true})).toBeEnabled();
+  const initialBox = await dialog.boundingBox();
+  let sourceRequests = 0;
+  page.on('request',request => { if (request.url().includes('/api/taskinfo/source')) sourceRequests++; });
+  await dialog.getByRole('button',{name:'查看代码',exact:true}).click();
+  const code = dialog.locator('.source-code');
+  await expect(code).toContainText('print');
+  const originalNode = await code.elementHandle();
+  await dialog.getByLabel('自动换行').check();
+  await dialog.getByLabel('搜索文件内容').fill('print');
+  const requestsBeforeSwitch = sourceRequests;
+  for (const name of ['执行记录','配置历史','操作记录','说明与配置','查看代码']) {
+    await dialog.getByRole('button',{name,exact:true}).click();
+    const box = await dialog.boundingBox();
+    expect(box.y).toBe(initialBox.y);
+    expect(box.height).toBe(initialBox.height);
+  }
+  expect(await originalNode.evaluate(node => node.isConnected)).toBe(true);
+  expect(sourceRequests).toBe(requestsBeforeSwitch);
+  await expect(dialog.getByLabel('自动换行')).toBeChecked();
+  await expect(dialog.getByLabel('搜索文件内容')).toHaveValue('print');
+  const originalContent = await code.innerText();
+  let releaseFile;
+  const fileGate = new Promise(resolve => { releaseFile = resolve; });
+  await page.route('**/api/taskinfo/source?**',async route => {
+    const response = await route.fetch();
+    await fileGate;
+    await route.fulfill({response});
+  });
+  await dialog.getByRole('button',{name:'刷新当前文件',exact:true}).click();
+  await expect(dialog.locator('.source-preview')).toHaveAttribute('aria-busy','true');
+  await expect(code).toHaveText(originalContent, {useInnerText:true});
+  await expect(dialog.locator('.task-detail-body > .loading-status')).toHaveClass(/is-loading/);
+  expect(await originalNode.evaluate(node => node.isConnected)).toBe(true);
+  releaseFile();
+  await expect(dialog.locator('.source-preview')).toHaveAttribute('aria-busy','false');
+  await expect(dialog.getByLabel('搜索文件内容')).toHaveValue('print');
+  await page.unroute('**/api/taskinfo/source?**');
+
+  let releaseDetail;
+  const detailGate = new Promise(resolve => { releaseDetail = resolve; });
+  await page.route('**/api/taskinfo/detail?**',async route => {
+    const response = await route.fetch(); await detailGate; await route.fulfill({response});
+  });
+  const toolbarBefore = await dialog.locator('.detail-toolbar').boundingBox();
+  await dialog.getByRole('button',{name:'刷新详情',exact:true}).click();
+  await expect(dialog.getByRole('button',{name:'刷新中…',exact:true})).toBeDisabled();
+  await expect(dialog.locator('.task-detail-body > .loading-status')).toHaveClass(/is-loading/);
+  expect(await dialog.locator('.detail-toolbar').boundingBox()).toEqual(toolbarBefore);
+  await expect(code).toBeVisible();
+  const feedback = await dialog.locator('.task-detail-body > .loading-status .loading-bar').boundingBox();
+  expect(feedback.y - toolbarBefore.y - toolbarBefore.height).toBeGreaterThanOrEqual(12);
+  releaseDetail();
+  await expect(dialog.getByRole('button',{name:'刷新详情',exact:true})).toBeEnabled();
+});
+
+test('account dropdown supports keyboard, outside dismissal and logout on mobile', async ({page}) => {
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  const trigger = page.getByRole('button',{name:'admin 账户菜单'});
+  await expect(trigger).toBeVisible();
+  await trigger.press('ArrowDown');
+  const exit = page.getByRole('menuitem',{name:'退出登录'});
+  await expect(exit).toBeFocused();
+  await exit.press('Escape');
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute('aria-expanded','false');
+  await trigger.click();
+  await expect(exit).toBeVisible();
+  const box = await page.locator('.user-dropdown').boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  await page.locator('.brand').click();
+  await expect(exit).not.toBeVisible();
+  await trigger.click();
+  await exit.click();
+  await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
+});
+
+test('failed list refresh retains rows and configuration reload keeps its form visible', async ({page}) => {
+  await page.goto('/#tasks');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
+  await expect(row).toBeVisible();
+  await page.route('**/api/taskinfo/state?**',route => route.fulfill({status:503,json:{code:50000,message:'测试刷新暂时不可用'}}));
+  await page.getByRole('button',{name:'搜索',exact:false}).click();
+  await expect(page.locator('.error-state')).toContainText('测试刷新暂时不可用');
+  await expect(row).toBeVisible();
+  await page.unroute('**/api/taskinfo/state?**');
+  await row.getByRole('button',{name:'配置',exact:true}).click();
+  const dialog = page.locator('.schedule-modal');
+  await expect(dialog.locator('.schedule-form')).toBeVisible();
+  const input = dialog.getByLabel('任务名称',{exact:true});
+  await input.fill('刷新保留检查');
+  let releaseReload;
+  const reloadGate = new Promise(resolve => { releaseReload = resolve; });
+  await page.route('**/api/taskinfo/schedule**',async route => {
+    if (route.request().method() === 'PUT') return route.fulfill({status:409,json:{code:50000,message:'测试配置冲突'}});
+    if (route.request().method() === 'GET') {
+      const response = await route.fetch(); await reloadGate; return route.fulfill({response});
+    }
+    await route.continue();
+  });
+  await dialog.getByRole('button',{name:'保存配置',exact:true}).click();
+  await expect(dialog).toContainText('测试配置冲突');
+  await dialog.getByRole('button',{name:'重新加载配置',exact:true}).click();
+  await expect(dialog.locator('.schedule-form')).toBeVisible();
+  await expect(input).toHaveValue('刷新保留检查');
+  await expect(dialog.locator('.schedule-form')).toHaveAttribute('inert','');
+  await expect(dialog.locator('.loading-status')).toHaveClass(/is-loading/);
+  const modalBox = await dialog.boundingBox();
+  const footerBox = await dialog.locator('.schedule-footer').boundingBox();
+  expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(modalBox.y + modalBox.height);
+  releaseReload();
+  await expect(dialog.locator('.schedule-form')).not.toHaveAttribute('inert','');
+  await expect(input).not.toHaveValue('刷新保留检查');
+});

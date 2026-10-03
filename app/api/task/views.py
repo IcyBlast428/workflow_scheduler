@@ -1,22 +1,24 @@
 import os
 import subprocess
 import datetime
-import hashlib
-import json
 import time
+import threading
 from urllib.parse import urljoin
 
 import requests
-from flask import Response, request, stream_with_context
+from flask import request, g
 from flask_restful import Resource
 
 from app.bootstrap.core import aps_start, call_task_once, kill_process
 from app.bootstrap.database import GaussDB
-from app.bootstrap.global_vars import TASK_DIR, error_msg, ignores, runnings, success_msg
+from app.bootstrap.global_vars import BASE_DIR, TASK_DIR, error_msg, ignores, runnings, success_msg
 from app.bootstrap.schedule_config import load_schedule, preview_schedule, resolve_task_spec, save_schedule, set_schedule_enabled
 from app.bootstrap.system_metrics import cpu_monitor_snapshot, recent_task_starts
 from app.bootstrap.task_loader import discover_task_specs
 from app.extensions import scheduler
+from app.bootstrap.execution_state import FAILURE_SQL, NON_FAILURE, is_failure
+from app.bootstrap.run_summary import coverage
+from app.bootstrap.snapshot_cache import cached
 from app.settings import (
     CODE_UPDATE_BRANCH,
     CODE_UPDATE_PATH,
@@ -66,7 +68,10 @@ def _build_task_log_filters(pid=None, taskstate=None, datetimeval=None):
     if taskstate in ("成功", "鎴愬姛"):
         clauses.append("state = 0")
     elif taskstate in ("失败", "澶辫触"):
-        clauses.append("state <> 0")
+        clauses.append(FAILURE_SQL)
+    elif taskstate in ('已停止','重启中断','超时/终止','并发跳过','错过调度'):
+        clauses.append('state = ?')
+        params.append({'已停止':-15,'重启中断':-1,'超时/终止':-9,'并发跳过':-10001,'错过调度':-10002}[taskstate])
     if datetimeval and len(datetimeval) >= 2:
         clauses.append("end_time >= ?")
         clauses.append("end_time <= ?")
@@ -91,12 +96,19 @@ def _scheduler_control_enabled():
     return (not WFS_ENABLE_SCHEDULER) and bool(WFS_SCHEDULER_CONTROL_URL)
 
 
-def _proxy_scheduler_resource(resource_path):
-    url = urljoin(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/', resource_path.lstrip('/'))
+def _internal_auth_headers():
     headers = {}
-    token = request.headers.get('X-Token')
-    if token:
-        headers['X-Token'] = token
+    if request.headers.get('Cookie'):
+        headers['Cookie'] = request.headers['Cookie']
+    if request.headers.get('X-CSRF-Token'):
+        headers['X-CSRF-Token'] = request.headers['X-CSRF-Token']
+    return headers
+
+
+def _proxy_scheduler_resource(resource_path):
+    g.audit_forwarded = True
+    url = urljoin(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/', resource_path.lstrip('/'))
+    headers = _internal_auth_headers()
     try:
         response = requests.request(
             method=request.method,
@@ -117,10 +129,7 @@ def _proxy_scheduler_resource(resource_path):
 
 def _scheduler_json(resource_path, params=None, timeout=10):
     url = urljoin(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/', resource_path.lstrip('/'))
-    headers = {}
-    token = request.headers.get('X-Token') or request.args.get('token')
-    if token:
-        headers['X-Token'] = token
+    headers = _internal_auth_headers()
     response = requests.get(url, headers=headers, params=params or {}, timeout=timeout)
     response.raise_for_status()
     payload = response.json()
@@ -136,53 +145,53 @@ def _run_git_command(args):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    stdout, stderr = proc.communicate()
+    try:
+        stdout, stderr = proc.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return 124, '', 'git command timed out'
     output = stdout.decode('utf-8', errors='ignore')
     error_output = stderr.decode('utf-8', errors='ignore')
     return proc.returncode, output, error_output
 
 
 def _update_code_to_configured_branch():
-    """把生产工作树切到配置的远端分支，避免把当前分支内容混进部署目录。"""
-    target_ref = '{}/{}'.format(CODE_UPDATE_REMOTE, CODE_UPDATE_BRANCH)
-    fetch_refspec = '+refs/heads/{}:refs/remotes/{}'.format(CODE_UPDATE_BRANCH, target_ref)
-    commands = [
-        ['fetch', '--prune', CODE_UPDATE_REMOTE, fetch_refspec],
-        ['checkout', '-B', CODE_UPDATE_BRANCH, target_ref],
-        ['reset', '--hard', target_ref],
-    ]
-    outputs = [
-        'target branch: {}'.format(target_ref),
-        'repo path: {}'.format(CODE_UPDATE_PATH),
-    ]
-    for command in commands:
-        returncode, stdout, stderr = _run_git_command(command)
-        outputs.append('$ git {}'.format(' '.join(command)))
-        if stdout:
-            outputs.append(stdout.rstrip())
-        if stderr:
-            outputs.append(stderr.rstrip())
-        if returncode != 0:
-            return False, '\n'.join(outputs)
-    return True, '\n'.join(outputs)
+    """检查远端版本；运行中的工作树只能通过部署流程更新。"""
+    revision = BASE_DIR.parent / '.release-revision'
+    if revision.is_file():
+        current = revision.read_text(encoding='utf-8').strip()
+    else:
+        code, current, error = _run_git_command(['rev-parse', 'HEAD'])
+        if code:
+            return False, error
+    code, remote, error = _run_git_command(['ls-remote', '--heads', CODE_UPDATE_REMOTE, 'refs/heads/{}'.format(CODE_UPDATE_BRANCH)])
+    if code:
+        return False, error
+    if not remote.strip():
+        return False, 'configured remote branch does not exist'
+    available = remote.split()[0]
+    if current.strip() == available.strip():
+        return True, '当前已是最新版本：{}'.format(current.strip()[:12])
+    return True, '发现新版本：{}。请通过部署流程发布并重启服务；当前版本：{}。'.format(
+        available.strip()[:12], current.strip()[:12]
+    )
 
 
-def _sync_tasks_after_code_update():
-    if _scheduler_control_enabled():
-        url = urljoin(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/', 'api/taskinfo/overloading')
-        headers = {}
-        token = request.headers.get('X-Token') or request.args.get('token')
-        if token:
-            headers['X-Token'] = token
-        response = requests.post(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get('code') != 20000:
-            raise RuntimeError(payload.get('message') or 'scheduler sync failed')
-        return str(payload.get('data') or payload.get('message') or 'tasks synchronized')
+_failure_totals_cache = {}
+_failure_totals_expiry = 0
+_failure_totals_lock = threading.Lock()
 
-    aps_start()
-    return 'tasks synchronized'
+
+def _failure_totals():
+    global _failure_totals_cache, _failure_totals_expiry
+    with _failure_totals_lock:
+        if time.monotonic() >= _failure_totals_expiry:
+            from app.bootstrap.failure_totals import load_totals
+            rows = load_totals()
+            _failure_totals_cache = {row[0]: int(row[1]) for row in rows}
+            _failure_totals_expiry = time.monotonic()+60
+        return dict(_failure_totals_cache)
 
 
 def _load_job_stats():
@@ -190,11 +199,15 @@ def _load_job_stats():
         with GaussDB() as db:
             rows = db.execute_query_sql(
                 """
-                SELECT pid, group_name, folder_name, last_status, failed_times, last_sms_alarm
-                FROM wfs_job_stats
+                SELECT s.pid, s.group_name, s.folder_name, s.last_status, s.failed_times, s.last_sms_alarm,
+                       0 AS total_failures
+                FROM wfs_job_stats s
                 """,
                 return_json=True,
             )
+        totals = _failure_totals()
+        for row in rows:
+            row['total_failures'] = totals.get(row['pid'],0)
         return {row['pid']: row for row in rows}
     except Exception:
         return {}
@@ -214,85 +227,38 @@ def _empty_dashboard_trend():
 
 
 def _load_recent_run_stats():
+    return cached('recent-statistics',10,_recent_run_stats,mutable=False)
+
+
+def _recent_run_stats():
     trend = _empty_dashboard_trend()
     trend_by_hour = {item['hour']: item for item in trend}
-    failures = {}
-    recent_runs = []
-    since = datetime.datetime.now() - datetime.timedelta(hours=RECENT_HOURS)
+    since = datetime.datetime.now().replace(minute=0,second=0,microsecond=0)-datetime.timedelta(hours=RECENT_HOURS-1)
     try:
         with GaussDB() as db:
-            try:
-                rows = db.execute_query_sql(
-                    """
-                    SELECT pid, taskname, state, start_time, end_time, group_name, folder_name
-                    FROM wfs_run_history
-                    WHERE end_time >= ?
-                    ORDER BY end_time DESC
-                    LIMIT 1000
-                    """,
-                    return_json=True,
-                    params=(since,),
-                )
-            except Exception as err:
-                if 'group_name' not in str(err).lower() and 'folder_name' not in str(err).lower():
-                    raise
-                rows = db.execute_query_sql(
-                    """
-                    SELECT pid, taskname, state, start_time, end_time, '' AS group_name, '' AS folder_name
-                    FROM wfs_run_history
-                    WHERE end_time >= ?
-                    ORDER BY end_time DESC
-                    LIMIT 1000
-                    """,
-                    return_json=True,
-                    params=(since,),
-                )
-    except Exception as exc:
-        return {
-            'trend': trend,
-            'failure_rank': [],
-            'recent_runs': [],
-            'error': str(exc),
-        }
-
-    for row in rows:
-        end_time = row.get('end_time')
-        if hasattr(end_time, 'strftime'):
-            hour_key = end_time.replace(minute=0, second=0, microsecond=0).strftime('%m-%d %H:00')
-        else:
-            hour_key = str(end_time)[:13] + ':00'
-        if hour_key in trend_by_hour:
-            if row.get('state') == 0:
-                trend_by_hour[hour_key]['success'] += 1
+            complete = coverage(db)['complete']
+            if complete:
+                rows = db.execute_query_sql('SELECT bucket,status,SUM(executions) FROM wfs_run_summary WHERE bucket>=? GROUP BY bucket,status',params=(since,))
+                rank = db.execute_query_sql("SELECT pid,SUM(executions) FROM wfs_run_summary WHERE bucket>=? AND status IN ('failed','timed_out') GROUP BY pid ORDER BY SUM(executions) DESC LIMIT 8",params=(since,))
             else:
-                trend_by_hour[hour_key]['failed'] += 1
-
-        if row.get('state') != 0:
-            pid = row.get('pid')
-            item = failures.setdefault(pid, {
-                'id': pid,
-                'name': row.get('taskname') or pid,
-                'count': 0,
-            })
-            item['count'] += 1
-
-    for row in rows[:8]:
-        recent_runs.append({
-            'id': row.get('pid'),
-            'name': row.get('taskname') or row.get('pid'),
-            'state': row.get('state'),
-            'group_name': row.get('group_name') or '',
-            'folder_name': row.get('folder_name') or '',
-            'start_time': str(row.get('start_time') or ''),
-            'end_time': str(row.get('end_time') or ''),
-        })
-
-    return {
-        'trend': trend,
-        'failure_rank': sorted(failures.values(), key=lambda item: item['count'], reverse=True)[:8],
-        'recent_runs': recent_runs,
-        'error': '',
-    }
+                # Exact, log-text-free fallback during bounded historical backfill.
+                hour = "strftime('%Y-%m-%d %H:00:00',end_time)" if db._local_sqlite else "date_trunc('hour',end_time)"
+                raw = db.execute_query_sql(f'SELECT {hour},state,COUNT(*) FROM wfs_run_history WHERE end_time>=? GROUP BY {hour},state',params=(since,))
+                from app.bootstrap.execution_state import state_status
+                rows = [(bucket,state_status(state),count) for bucket,state,count in raw]
+                rank = db.execute_query_sql(f'SELECT pid,COUNT(*) FROM wfs_run_history WHERE end_time>=? AND {FAILURE_SQL} GROUP BY pid ORDER BY COUNT(*) DESC LIMIT 8',params=(since,))
+            latest = db.execute_query_sql('SELECT pid,taskname,state,start_time,end_time,group_name,folder_name FROM wfs_run_history ORDER BY end_time DESC,id DESC LIMIT 8',return_json=True)
+        for bucket,status,count in rows:
+            key = datetime.datetime.fromisoformat(str(bucket)).strftime('%m-%d %H:00')
+            if key in trend_by_hour:
+                target = 'success' if status=='success' else 'failed' if status in ('failed','timed_out') else status
+                trend_by_hour[key][target] = trend_by_hour[key].get(target,0)+int(count)
+        names = {spec['pid']:spec.get('task_name') or spec['folder_name'] for spec in discover_task_specs()}
+        return {'trend':trend,'failure_rank':[{'id':pid,'name':names.get(pid,pid),'count':int(count)} for pid,count in rank],
+                'recent_runs':[dict(row,id=row['pid'],name=row['taskname'] or row['pid'],start_time=str(row['start_time']),end_time=str(row['end_time'])) for row in latest],
+                'error':'' if complete else '历史统计正在后台补算；当前使用完整原始记录计算。'}
+    except Exception as exc:
+        return {'trend':trend,'failure_rank':[],'recent_runs':[],'error':str(exc)}
 
 
 def _format_datetime_value(value):
@@ -442,14 +408,16 @@ def _latest_log_marker():
     try:
         with GaussDB() as db:
             rows = db.execute_query_sql(
-                "SELECT max(end_time), count(*) FROM wfs_run_history",
+                "SELECT end_time,id FROM wfs_run_history ORDER BY end_time DESC,id DESC LIMIT 1",
                 return_json=False,
             )
-        if not rows:
-            return {'latest_end_time': '', 'count': 0}
+            if not rows:
+                return {'latest_end_time': '', 'count': 0}
+            count = db.execute_query_sql('SELECT COUNT(*) FROM wfs_run_history WHERE end_time=?', params=(rows[0][0],))[0][0]
         return {
             'latest_end_time': str(rows[0][0] or ''),
-            'count': int(rows[0][1] or 0),
+            'latest_id': rows[0][1],
+            'count': int(count),
         }
     except Exception as exc:
         return {'latest_end_time': '', 'count': 0, 'error': str(exc)}
@@ -479,6 +447,8 @@ def _event_snapshot():
             'id': pid,
             'state': state,
             'pending': runnings.is_running(pid),
+            'running_instances': runnings.count(pid),
+            'max_instances': spec.get('max_instances') or 1,
             'next_run_time': next_run_time,
             'schedule_configured': spec.get('schedule_configured'),
             'schedule_enabled': spec.get('schedule_enabled'),
@@ -494,75 +464,14 @@ def _event_snapshot():
     }
 
 
-def _sse_headers():
-    return {
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
-        'Content-Encoding': 'identity',
-        'X-Accel-Buffering': 'no',
-    }
-
-
-def _snapshot_digest(snapshot):
-    comparable = dict(snapshot)
-    comparable.pop('server_time', None)
-    text = json.dumps(comparable, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha1(text.encode('utf-8')).hexdigest()
-
-
-def _sse_event(event_name, payload):
-    data = json.dumps(payload, ensure_ascii=False, default=str)
-    return 'event: {}\ndata: {}\n\n'.format(event_name, data)
-
-
-def _proxy_scheduler_events():
-    url = urljoin(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/', 'api/taskinfo/events')
-    headers = {}
-    token = request.headers.get('X-Token') or request.args.get('token')
-    if token:
-        headers['X-Token'] = token
-    params = dict(request.args)
-    params.pop('token', None)
-
-    def generate():
-        try:
-            with requests.get(url, headers=headers, params=params, stream=True, timeout=(5, None)) as response:
-                response.raise_for_status()
-                for line in response.iter_lines(decode_unicode=True):
-                    yield '{}\n'.format(line or '')
-        except requests.RequestException as exc:
-            yield _sse_event('stream_error', {'message': 'scheduler event stream unavailable: {}'.format(exc)})
-
-    return Response(stream_with_context(generate()), mimetype='text/event-stream', headers=_sse_headers())
-
-
 class Events(Resource):
     def get(self):
         if _scheduler_control_enabled():
-            return _proxy_scheduler_events()
-
-        def generate():
-            last_digest = ''
-            last_heartbeat = 0
-            while True:
-                try:
-                    snapshot = _event_snapshot()
-                    digest = _snapshot_digest(snapshot)
-                    if digest != last_digest:
-                        last_digest = digest
-                        snapshot['digest'] = digest
-                        yield _sse_event('snapshot', snapshot)
-                    elif time.time() - last_heartbeat >= 15:
-                        last_heartbeat = time.time()
-                        yield ': keepalive {}\n\n'.format(datetime.datetime.now().isoformat())
-                    time.sleep(2)
-                except GeneratorExit:
-                    break
-                except Exception as exc:
-                    yield _sse_event('stream_error', {'message': str(exc)})
-                    time.sleep(5)
-
-        return Response(stream_with_context(generate()), mimetype='text/event-stream', headers=_sse_headers())
+            return _proxy_scheduler_resource('/api/taskinfo/events')
+        try:
+            return success_msg(_event_snapshot())
+        except Exception as exc:
+            return error_msg(str(exc)), 503
 
 
 class Dashboard(Resource):
@@ -595,11 +504,11 @@ class Dashboard(Resource):
                 counters['stopped'] += 1
             if runnings.is_running(pid):
                 counters['pending'] += 1
-            if (job_stats.get(pid) or {}).get('last_status') not in (None, 0):
+            if is_failure((job_stats.get(pid) or {}).get('last_status')):
                 counters['failed_jobs'] += 1
 
         recent = _load_recent_run_stats()
-        cpu_metrics = cpu_monitor_snapshot(hours=CPU_TIMELINE_HOURS)
+        cpu_metrics = cpu_monitor_snapshot(hours=CPU_TIMELINE_HOURS, after=request.args.get('after','')[:19])
         data = {
             'scheduler': {
                 'enabled': WFS_ENABLE_SCHEDULER,
@@ -612,6 +521,8 @@ class Dashboard(Resource):
             'recent_runs': recent['recent_runs'],
             'cpu_timeline': {
                 'samples': cpu_metrics['samples'],
+                'cursor': cpu_metrics['cursor'],
+                'incremental': cpu_metrics['incremental'],
                 'markers': _load_task_start_markers(CPU_TIMELINE_HOURS),
                 'current': cpu_metrics['current'],
                 'current_memory': cpu_metrics['current_memory'],
@@ -633,9 +544,13 @@ class State(Resource):
         taskgroup = request.args.get("taskgroup")
         taskname = request.args.get("taskname")
         taskid = request.args.get("taskid")
+        owner = request.args.get("owner")
+        selected_ids = set(request.args.getlist("ids[]"))
 
         state_list = []
         job_stats = _load_job_stats()
+        with GaussDB() as db:
+            applications = {row['pid']: row for row in db.execute_query_sql('SELECT pid,version,status,message FROM wfs_config_application', return_json=True)}
         for spec in discover_task_specs(TASK_DIR):
             if taskgroup and taskgroup != spec.get('group_name'):
                 continue
@@ -647,6 +562,10 @@ class State(Resource):
             if taskid and taskid not in display_pid:
                 continue
 
+            if selected_ids and display_pid not in selected_ids:
+                continue
+            if owner and owner.lower() not in str((spec.get('schedule_form') or {}).get('owner','')).lower():
+                continue
             stats = job_stats.get(display_pid) or {}
             task_state = {
                 'id': display_pid,
@@ -662,6 +581,11 @@ class State(Resource):
                 'last_status': stats.get('last_status'),
                 'failed_times': stats.get('failed_times') or 0,
                 'last_sms_alarm': str(stats.get('last_sms_alarm') or ''),
+                'max_instances': spec.get('max_instances') or 1,
+                'running_instances': runnings.count(display_pid),
+                'total_failures': stats.get('total_failures') or 0,
+                'owner': (spec.get('schedule_form') or {}).get('owner',''),
+                'application': applications.get(display_pid,{}),
             }
 
             if spec.get('error') or spec.get('main_file_error'):
@@ -680,6 +604,15 @@ class State(Resource):
                 task_state['pending'] = runnings.is_running(pid)
                 if pid in ignores:
                     task_state['state'] = 'pause'
+            status_filter = request.args.get('status')
+            if status_filter == 'active' and not task_state['pending']:
+                continue
+            if status_filter == 'failed' and not is_failure(task_state['last_status']):
+                continue
+            if status_filter == 'invalid' and task_state['state'] != 'invalid':
+                continue
+            if status_filter == 'enabled' and task_state['state'] != 'true':
+                continue
             state_list.append(task_state)
 
         start = (current_page - 1) * pagesize
@@ -724,11 +657,14 @@ class Schedule(Resource):
         if not pid:
             return error_msg('missing task pid')
         try:
+            payload['updated_by'] = g.identity['username']
+            if 'version' not in payload:
+                return error_msg('缺少配置版本，请重新打开配置。'), 409
             data = save_schedule(pid, payload)
             if data.get('pid') != pid:
                 return error_msg('schedule save pid mismatch: request {}, response {}'.format(pid, data.get('pid')))
-            aps_start(task_pid=data.get('pid') or pid, action='refresh')
-            return success_msg(data)
+            from app.api.operations import _apply
+            return success_msg(_apply(pid, data))
         except Exception as exc:
             return error_msg(str(exc))
 
@@ -745,22 +681,21 @@ class Action(Resource):
             spec = resolve_task_spec(pid=pid)
             pid = spec.get('pid')
             if state == "pause":
+                set_schedule_enabled(pid, False, actor=g.identity['username'])
                 ignores.add(pid)
                 if scheduler.get_job(pid):
                     scheduler.remove_job(pid)
-                set_schedule_enabled(pid, False)
                 msg = 'task paused'
             elif state == "kill":
+                set_schedule_enabled(pid, False, actor=g.identity['username'])
                 ignores.add(pid)
                 if scheduler.get_job(pid):
                     scheduler.remove_job(pid)
                 self.kill(pid)
-                set_schedule_enabled(pid, False)
                 msg = 'task stopped'
             elif state == "start":
+                set_schedule_enabled(pid, True, actor=g.identity['username'])
                 ignores.remove(pid)
-                self.kill(pid)
-                set_schedule_enabled(pid, True)
                 aps_start(task_pid=pid, action='start')
                 msg = 'task started'
             elif state == 'refresh':
@@ -769,20 +704,20 @@ class Action(Resource):
                 msg = 'task refreshed'
             else:
                 return error_msg('unsupported state action')
+            from app.bootstrap.schedule_config import record_application
+            saved = load_schedule(pid)
+            record_application(pid, saved.get('version',0), 'applied')
             return success_msg(msg)
         except Exception as exc:
+            if pid and state in ('start', 'refresh'):
+                from app.bootstrap.schedule_config import record_application
+                saved = load_schedule(pid)
+                record_application(pid, saved.get('version',0), 'failed', str(exc))
             return error_msg(str(exc))
 
     def kill(self, pid):
-        process = runnings.get(pid)
-        if process:
-            cmd_pid = process.get(pid)
-            if cmd_pid:
-                try:
-                    runnings.remove(process)
-                    kill_process(cmd_pid)
-                except Exception:
-                    pass
+        for process_id in runnings.cancel(pid):
+            kill_process(process_id)
 
 
 class TaskLogs(Resource):
@@ -806,37 +741,25 @@ class TaskLogs(Resource):
         taskstate = request.args.get("taskstate")
         datetimeval = request.args.getlist("datetimeval[]")
         try:
-            clauses, params = _build_task_log_filters(pid=pid, taskstate=taskstate, datetimeval=datetimeval)
-            where_sql = ''
-            if clauses:
-                where_sql = ' AND ' + ' AND '.join(clauses)
-
-            sql = '''SELECT id, pid, taskname, dirname, group_name, folder_name,
-CASE WHEN state = 0 THEN '成功' ELSE '失败' END state, end_time, start_time, extract(epoch from (end_time - start_time))::bigint times
-FROM wfs_run_history
-WHERE 1=1{} ORDER BY end_time DESC LIMIT ? OFFSET ?'''.format(where_sql)
-            limit = pagesize + 1
-            offset = (current_page - 1) * pagesize
-            with GaussDB() as db:
-                try:
-                    rows = db.execute_query_sql(sql=sql, return_json=False, params=tuple(params + [limit, offset]))
-                except Exception as err:
-                    if 'group_name' not in str(err).lower() and 'folder_name' not in str(err).lower():
-                        raise
-                    legacy_sql = '''SELECT id, pid, taskname, dirname, '' AS group_name, '' AS folder_name,
-CASE WHEN state = 0 THEN '成功' ELSE '失败' END state, end_time, start_time, extract(epoch from (end_time - start_time))::bigint times
-FROM wfs_run_history
-WHERE 1=1{} ORDER BY end_time DESC LIMIT ? OFFSET ?'''.format(where_sql)
-                    rows = db.execute_query_sql(sql=legacy_sql, return_json=False, params=tuple(params + [limit, offset]))
-            has_more = len(rows) > pagesize
-            val = rows[:pagesize]
+            from app.bootstrap.history import date_range, page
+            dates = date_range(datetimeval)
+            scope = request.args.get('scope', 'online')
+            cursor = request.args.get('cursor', '')
+            if current_page > 1 and not cursor:
+                raise ValueError('请通过下一页继续查询，或重新搜索。')
+            clauses, params = _build_task_log_filters(pid=pid, taskstate=taskstate, datetimeval=dates)
+            val, has_more, next_cursor = page(clauses, params, pagesize, scope, cursor, [pid,taskstate,dates,scope,pagesize])
             data = {
                 "total": _approx_total(current_page, pagesize, len(val), has_more),
                 "has_more": has_more,
                 "total_exact": False,
+                "next_cursor": next_cursor,
+                "date_range": [str(value) for value in dates],
                 "data": list(map(self.todict, val)),
             }
             return success_msg(data)
+        except ValueError as err:
+            return error_msg(str(err)), 400
         except Exception as err:
             return error_msg(str(err))
 
@@ -904,16 +827,18 @@ class Reload(Resource):
         refresh = request.args.get("refresh")
         if refresh:
             try:
-                scheduler.remove_all_jobs()
+                for job in scheduler.get_jobs():
+                    if not str(job.id).startswith('manual_'):
+                        scheduler.remove_job(job.id)
                 aps_start()
             except Exception as exc:
-                return success_msg('tasks reload warning: ' + str(exc))
+                return error_msg('tasks reload failed: ' + str(exc))
             return success_msg('tasks reloaded')
 
         try:
             aps_start()
         except Exception as exc:
-            return success_msg('tasks reload warning: ' + str(exc))
+            return error_msg('tasks reload failed: ' + str(exc))
         return success_msg('new tasks loaded')
 
 
@@ -922,13 +847,8 @@ class Code(Resource):
         try:
             ok, message = _update_code_to_configured_branch()
             if ok:
-                try:
-                    sync_message = _sync_tasks_after_code_update()
-                    message += '\n\nsync result:\n{}'.format(sync_message)
-                except Exception as sync_exc:
-                    message += '\n\nsync warning:\n{}'.format(sync_exc)
-                return success_msg('code update succeeded\n' + message)
-            return error_msg('code update failed\n' + message)
+                return success_msg(message)
+            return error_msg('检查更新失败：' + message)
         except Exception as exp:
             return error_msg('code update exception: ' + str(exp))
 
@@ -955,6 +875,8 @@ class TaskLogDetail(Resource):
                 sql = "SELECT tasklog FROM wfs_run_history WHERE id=? AND end_time=? LIMIT 1"
                 with GaussDB() as db:
                     res = db.execute_query_sql(sql=sql, return_json=False, params=(log_id, end_time))
+                    if not res:
+                        res = db.execute_query_sql(sql=sql.replace('wfs_run_history', 'wfs_run_history_archive'), return_json=False, params=(log_id,end_time))
             elif pid:
                 sql = "SELECT tasklog FROM wfs_run_history WHERE pid=? ORDER BY end_time DESC LIMIT 1"
                 with GaussDB() as db:
@@ -967,7 +889,7 @@ class TaskLogDetail(Resource):
 
 
 class CallTask(Resource):
-    def get(self):
+    def post(self):
         if _scheduler_control_enabled():
             return _proxy_scheduler_resource('/api/taskinfo/call_task')
 
@@ -975,7 +897,7 @@ class CallTask(Resource):
             pid = request.args.get('pid')
             if not pid:
                 return error_msg('missing task pid')
-            call_task_once(pid)
+            run_id = call_task_once(pid, actor=g.identity['username'])
         except Exception as exc:
             return error_msg('Task call failed: ' + str(exc))
-        return success_msg('Task call succeeded')
+        return success_msg({'message':'任务已排队', 'run_id':run_id})
