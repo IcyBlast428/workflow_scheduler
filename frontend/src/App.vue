@@ -18,11 +18,19 @@
   </div>
 
   <main v-else-if="!token" class="login-screen">
+    <LoginBackdrop />
     <section class="login-panel">
       <div class="login-brief">
-        <BrandLogo />
+        <div class="login-brand-row"><BrandLogo /><span>WORKFLOW SCHEDULER</span></div>
         <h1>定时任务调度</h1>
         <p>面向内网运维任务的调度控制台，集中管理任务扫描、暂停启动、运行日志与系统异常记录。</p>
+        <div class="login-workflow" aria-hidden="true">
+          <div class="login-workflow-line" />
+          <div class="login-workflow-step"><span><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="9" y="14" width="6" height="6" rx="1.5"/><path d="M7 10v2h10v-2M12 12v2"/></svg></span><strong>编排</strong><small>组织任务</small></div>
+          <div class="login-workflow-step"><span><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l-3 2"/></svg></span><strong>调度</strong><small>按时触发</small></div>
+          <div class="login-workflow-step"><span><svg viewBox="0 0 24 24" fill="none"><path d="m7 12 3 3 7-7"/><rect x="4" y="4" width="16" height="16" rx="4"/></svg></span><strong>执行</strong><small>记录结果</small></div>
+        </div>
+        <p class="login-tagline">让每一次执行，都有迹可循。</p>
       </div>
       <form class="login-form" @submit.prevent="handleLogin">
         <div class="login-form-head">
@@ -30,6 +38,7 @@
             <h2>登录控制台</h2>
             <p class="hint">使用已分配的账户登录。</p>
           </div>
+          <button class="btn icon-only login-theme" type="button" :aria-label="theme === 'dark' ? '切换到浅色' : '切换到深色'" :title="theme === 'dark' ? '切换到浅色' : '切换到深色'" @click="toggleTheme">{{ theme === 'dark' ? '☼' : '☾' }}</button>
         </div>
         <div
           v-if="backendStatus.error"
@@ -442,6 +451,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import BrandLogo from './components/BrandLogo.vue';
+import LoginBackdrop from './components/LoginBackdrop.vue';
 import UserMenu from './components/UserMenu.vue';
 import LoadingStatus from './components/LoadingStatus.vue';
 import { api, clearToken, getToken, setToken } from './api';
