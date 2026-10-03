@@ -17,9 +17,9 @@
     </div>
   </div>
 
-  <main v-else-if="!token" class="login-screen">
-    <LoginBackdrop />
-    <section class="login-panel">
+  <main v-else-if="!token" class="login-screen" :style="{ '--login-radius': `${LOGIN_CORNER_RADIUS}px` }">
+    <LoginBackdrop @scene-change="loginVisual = $event" />
+    <LiquidGlassPanel :snapshot="loginVisual">
       <div class="login-brief">
         <div class="login-brand-row"><BrandLogo /><span>WORKFLOW SCHEDULER</span></div>
         <h1>定时任务调度</h1>
@@ -65,7 +65,7 @@
           {{ loginLoading ? '登录中...' : '登录' }}
         </button>
       </form>
-    </section>
+    </LiquidGlassPanel>
   </main>
 
   <div v-else class="app-shell">
@@ -449,9 +449,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
 import BrandLogo from './components/BrandLogo.vue';
 import LoginBackdrop from './components/LoginBackdrop.vue';
+import LiquidGlassPanel from './components/LiquidGlassPanel.vue';
+import { LOGIN_CORNER_RADIUS } from './loginBackdropScene';
 import UserMenu from './components/UserMenu.vue';
 import LoadingStatus from './components/LoadingStatus.vue';
 import { api, clearToken, getToken, setToken } from './api';
@@ -473,6 +475,7 @@ import DashboardSummary from './components/DashboardSummary.vue';
 import ExecutionMatrix from './components/ExecutionMatrix.vue';
 import { canTrigger } from './executionLabels';
 import { useConfirm } from './composables/useConfirm';
+const loginVisual = shallowRef(null);
 
 const navItems = [
   {
