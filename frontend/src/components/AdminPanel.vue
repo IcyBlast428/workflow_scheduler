@@ -19,6 +19,7 @@
         <div class="table-wrap"><table class="runtime-metrics"><thead><tr><th>接口 / 数据库操作</th><th>P95</th><th>最大耗时</th></tr></thead><tbody><tr v-for="(metric,name) in runtime.metrics || {}" :key="name"><td class="mono">{{ name }}</td><td>{{ metric.p95_ms }} ms</td><td>{{ metric.max_ms }} ms</td></tr></tbody></table><p v-if="!Object.keys(runtime.metrics || {}).length" class="table-empty-note">暂无采样记录。</p></div>
       </details>
     </section>
+    <VersionStorage />
     <section class="admin-section" aria-labelledby="accounts-heading">
     <div class="section-heading"><h3 id="accounts-heading">账户管理</h3><p>填写账户信息，或从列表中选择已有账户。</p></div>
     <form class="filter-grid account-form" @submit.prevent="save">
@@ -38,6 +39,7 @@ import { ref, reactive, onMounted } from 'vue';
 import { api } from '../api';
 import { actionLabel } from '../executionLabels';
 import LoadingStatus from './LoadingStatus.vue';
+import VersionStorage from './VersionStorage.vue';
 const accounts = ref([]), records = ref([]), error = ref(''), message = ref(''), saving = ref(false);
 const runtime = ref({});
 const loading = ref(false);

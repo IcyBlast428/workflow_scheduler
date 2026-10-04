@@ -1,5 +1,42 @@
 import { test, expect } from '@playwright/test';
 
+test('dialogs keep focus, protect unsaved edits and restore task deep links', async ({page}) => {
+  await page.goto('/#tasks');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
+  const more = row.getByRole('button',{name:'更多',exact:true});
+  await more.click();
+  await page.locator('.action-menu').getByRole('button',{name:'配置',exact:true}).click();
+  const schedule = page.getByRole('dialog',{name:/任务配置/});
+  await expect(schedule).toBeFocused();
+  await schedule.press('Shift+Tab');
+  await expect(schedule.getByRole('button',{name:'保存配置',exact:true})).toBeFocused();
+  await schedule.getByLabel('任务名称',{exact:true}).fill('未保存检查');
+  await schedule.getByRole('button',{name:'取消',exact:true}).click();
+  const confirm = page.getByRole('dialog',{name:'放弃未保存的配置？'});
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button',{name:'继续编辑'}).click();
+  await expect(schedule.getByLabel('任务名称',{exact:true})).toHaveValue('未保存检查');
+  await expect(schedule.getByRole('button',{name:'取消',exact:true})).toBeFocused();
+  await schedule.press('Escape');
+  await confirm.getByRole('button',{name:'放弃修改'}).click();
+  await expect(schedule).not.toBeVisible();
+  await expect(more).toBeFocused();
+  await expect(page.locator('.app-shell')).not.toHaveAttribute('inert','');
+  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await expect(page).toHaveURL(/pid=acceptance__slow/);
+  await page.reload();
+  const detail = page.getByRole('dialog',{name:/任务详情/});
+  await expect(detail).toBeVisible();
+  await detail.getByRole('tab',{name:'说明与配置',exact:true}).press('ArrowRight');
+  await expect(detail.getByRole('tab',{name:'执行流程',exact:true})).toHaveAttribute('aria-selected','true');
+  await detail.press('Escape');
+  await expect(detail).not.toBeVisible();
+  await expect(page).not.toHaveURL(/pid=/);
+});
+
 test('login, new-tab session, dismiss pause, execution, download and history', async ({ page, context }) => {
   await page.goto('/');
   await page.getByLabel('用户名').fill('admin');
@@ -12,21 +49,24 @@ test('login, new-tab session, dismiss pause, execution, download and history', a
   await other.close();
   await page.goto('/#tasks');
   const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
-  await row.getByRole('button',{name:'启动',exact:true}).click();
+  await row.getByRole('button',{name:'更多',exact:true}).click();
+  await page.locator('.action-menu').getByRole('button',{name:'启动',exact:true}).click();
   await expect(row).toContainText('调度已启用');
   await row.getByRole('button',{name:'触发',exact:true}).click();
   await expect(page.locator('.execution-modal')).toBeVisible();
   await expect(page.locator('.execution-output')).toContainText('浏览器回归开始');
   await page.locator('.execution-modal').getByTitle('关闭').click();
-  await row.getByRole('button',{name:'暂停',exact:true}).click();
+  await row.getByRole('button',{name:'更多',exact:true}).click();
+  await page.locator('.action-menu').getByRole('button',{name:'暂停',exact:true}).click();
   await expect(page.locator('.confirm-modal')).toBeVisible();
   await page.locator('.confirm-modal').getByTitle('关闭').click();
   await expect(row).toContainText('调度已启用');
-  await row.getByRole('button',{name:'暂停',exact:true}).click();
+  await row.getByRole('button',{name:'更多',exact:true}).click();
+  await page.locator('.action-menu').getByRole('button',{name:'暂停',exact:true}).click();
   await page.locator('.confirm-modal').getByRole('button',{name:'仅暂停',exact:true}).click();
   await expect(row).toContainText('已暂停');
   await row.getByRole('button',{name:'详情',exact:true}).click();
-  await page.getByRole('button',{name:'执行记录',exact:true}).click();
+  await page.getByRole('tab',{name:'执行记录',exact:true}).click();
   await page.getByRole('button',{name:'查看执行',exact:true}).first().click();
   await expect(page.locator('.execution-output')).toContainText('浏览器回归完成',{timeout:20000});
   await expect(page.locator('.execution-meta')).toContainText('成功');
@@ -36,7 +76,7 @@ test('login, new-tab session, dismiss pause, execution, download and history', a
   expect(await download.failure()).toBeNull();
   await page.locator('.execution-modal').getByTitle('关闭').click();
   await row.getByRole('button',{name:'详情',exact:true}).click();
-  await page.getByRole('button',{name:'配置历史',exact:true}).click();
+  await page.getByRole('tab',{name:'配置历史',exact:true}).click();
   await expect(page.getByRole('button',{name:'恢复此配置'}).first()).toBeVisible();
   await page.getByRole('button',{name:'恢复此配置'}).first().click();
   await expect(page.locator('.confirm-modal')).toBeVisible();
@@ -124,7 +164,7 @@ test('detail tabs retain code state and slow refresh keeps content and geometry'
   const initialBox = await dialog.boundingBox();
   let sourceRequests = 0;
   page.on('request',request => { if (request.url().includes('/api/taskinfo/source')) sourceRequests++; });
-  await dialog.getByRole('button',{name:'查看代码',exact:true}).click();
+  await dialog.getByRole('tab',{name:'查看代码',exact:true}).click();
   const code = dialog.locator('.source-code');
   await expect(code).toContainText('print');
   const originalNode = await code.elementHandle();
@@ -132,7 +172,7 @@ test('detail tabs retain code state and slow refresh keeps content and geometry'
   await dialog.getByLabel('搜索文件内容').fill('print');
   const requestsBeforeSwitch = sourceRequests;
   for (const name of ['执行记录','配置历史','操作记录','说明与配置','查看代码']) {
-    await dialog.getByRole('button',{name,exact:true}).click();
+    await dialog.getByRole('tab',{name,exact:true}).click();
     const box = await dialog.boundingBox();
     expect(box.y).toBe(initialBox.y);
     expect(box.height).toBe(initialBox.height);
@@ -214,7 +254,8 @@ test('failed list refresh retains rows and configuration reload keeps its form v
   await expect(page.locator('.error-state')).toContainText('测试刷新暂时不可用');
   await expect(row).toBeVisible();
   await page.unroute('**/api/taskinfo/state?**');
-  await row.getByRole('button',{name:'配置',exact:true}).click();
+  await row.getByRole('button',{name:'更多',exact:true}).click();
+  await page.locator('.action-menu').getByRole('button',{name:'配置',exact:true}).click();
   const dialog = page.locator('.schedule-modal');
   await expect(dialog.locator('.schedule-form')).toBeVisible();
   const input = dialog.getByLabel('任务名称',{exact:true});

@@ -1,3 +1,4 @@
+from app.bootstrap.timebase import business_time
 """Attach the exact fire time while retaining APScheduler's runner semantics."""
 import copy
 from apscheduler.executors.pool import ThreadPoolExecutor
@@ -9,7 +10,7 @@ def run_with_times(job, run_times, logger_name):
     for run_time in run_times:
         invocation = copy.copy(job)
         if job.func.__name__ in ('execute_py','execute_manual'):
-            invocation.kwargs = dict(job.kwargs,scheduled_time=run_time.astimezone().replace(tzinfo=None).isoformat(' '))
+            invocation.kwargs = dict(job.kwargs,scheduled_time=business_time(run_time).isoformat(' '))
         events.extend(run_job(invocation,job._jobstore_alias,[run_time],logger_name))
     return events
 

@@ -1,4 +1,7 @@
+from app.bootstrap.timebase import business_time
 """Bounded, log-text-free day snapshots for the task execution matrix."""
+from app.bootstrap.timebase import business_now
+
 import datetime as dt
 import json
 import math
@@ -19,7 +22,7 @@ def timestamp(value):
 
 
 def snapshot(date=None):
-    now = dt.datetime.now()
+    now = business_now()
     try:
         day = dt.date.fromisoformat(date) if date else now.date()
     except (TypeError, ValueError):
@@ -35,7 +38,7 @@ def snapshot(date=None):
         paused = spec['pid'] in ignores
         next_time = getattr(job, 'next_run_time', None) if not paused and not invalid else None
         if next_time and next_time.tzinfo:
-            next_time = next_time.astimezone().replace(tzinfo=None)
+            next_time = business_time(next_time)
         tasks.append({'pid':spec['pid'], 'name':spec.get('task_name') or spec.get('folder_name') or spec['pid'],
                       'group':spec.get('group_name') or '未分组', 'invalid':invalid,
                       'configured':bool(spec.get('schedule_configured')),

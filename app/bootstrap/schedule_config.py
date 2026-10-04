@@ -1,4 +1,6 @@
 import datetime
+from app.bootstrap.timebase import business_now
+
 import json
 
 from apscheduler.triggers.combining import OrTrigger
@@ -12,7 +14,8 @@ from app.bootstrap.task_loader import discover_task_specs, resolve_main_file
 
 
 WEEKDAY_OPTIONS = {'*', 'mon-fri', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'}
-SCHEDULER_TZ = pytz_timezone('Asia/Shanghai')
+from app.bootstrap.timebase import BUSINESS_TZ
+SCHEDULER_TZ = BUSINESS_TZ
 PREVIEW_LIMIT = 16
 
 
@@ -450,7 +453,7 @@ def _save_schedule_record(spec, trigger, rules, schedule_type, form):
         schedule_type,
         _json_dumps(saved_form),
         _json_dumps(rules),
-        datetime.datetime.now(),
+        business_now(),
     )
     with GaussDB() as db:
         db.begin_transaction()
@@ -466,7 +469,7 @@ def _save_schedule_record(spec, trigger, rules, schedule_type, form):
             version = old_version + 1
             if previous and not db.execute_query_sql('SELECT 1 FROM wfs_config_versions WHERE pid=? AND version=?', params=(spec.get('pid'),old_version)):
                 old_payload = db.execute_query_sql('SELECT schedule_json FROM wfs_task_config WHERE pid=?', params=(spec.get('pid'),))[0][0]
-                db.execute_sql('INSERT INTO wfs_config_versions(pid,version,changed_at,changed_by,payload) VALUES(?,?,?,?,?)',params=(spec.get('pid'),old_version,datetime.datetime.now(),'migration-baseline',old_payload))
+                db.execute_sql('INSERT INTO wfs_config_versions(pid,version,changed_at,changed_by,payload) VALUES(?,?,?,?,?)',params=(spec.get('pid'),old_version,business_now(),'migration-baseline',old_payload))
             # 旧版本如果没有主键约束，可能留下同 PID 多行。保存时先清理再插入，
             # 让数据库重新回到“一个 PID 一条配置”的模型。
             db.execute_sql(
@@ -484,7 +487,7 @@ def _save_schedule_record(spec, trigger, rules, schedule_type, form):
                 params=payload + (version, form.get('updated_by', 'system')),
             )
             db.execute_sql('INSERT INTO wfs_config_versions(pid,version,changed_at,changed_by,payload) VALUES(?,?,?,?,?)',
-                           params=(spec.get('pid'), version, datetime.datetime.now(), form.get('updated_by','system'), _json_dumps(saved_form)))
+                           params=(spec.get('pid'), version, business_now(), form.get('updated_by','system'), _json_dumps(saved_form)))
             db.set_commit()
         except Exception as exc:
             db.set_rollback()
@@ -612,7 +615,7 @@ def record_application(pid, version, status, message=''):
         try:
             db.execute_sql('DELETE FROM wfs_config_application WHERE pid=?', params=(pid,))
             db.execute_sql('INSERT INTO wfs_config_application(pid,version,status,message,updated_at) VALUES(?,?,?,?,?)',
-                           params=(pid, version, status, message, datetime.datetime.now()))
+                           params=(pid, version, status, message, business_now()))
             db.set_commit()
         except Exception:
             db.set_rollback()

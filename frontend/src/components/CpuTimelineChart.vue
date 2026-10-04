@@ -101,6 +101,7 @@
 </template>
 
 <script setup>
+import { timestamp, BUSINESS_TIMEZONE } from '../timebase';
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 
 const props = defineProps({
@@ -375,7 +376,7 @@ function parseTime(value) {
   if (!text) {
     return NaN;
   }
-  return new Date(text.replace(' ', 'T')).getTime();
+  return timestamp(text);
 }
 
 function formatFullTime(time) {
@@ -387,6 +388,7 @@ function formatFullTime(time) {
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
+    timeZone: BUSINESS_TIMEZONE,
   }).format(new Date(time));
 }
 
@@ -394,7 +396,7 @@ function formatTick(time, span) {
   const options = span > 12 * 60 * 60 * 1000
     ? { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
     : { hour: '2-digit', minute: '2-digit', hour12: false };
-  return new Intl.DateTimeFormat('zh-CN', options).format(new Date(time));
+  return new Intl.DateTimeFormat('zh-CN', {...options,timeZone:BUSINESS_TIMEZONE}).format(new Date(time));
 }
 
 function formatDuration(start, end) {

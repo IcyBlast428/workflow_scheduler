@@ -1,4 +1,7 @@
+from app.bootstrap.timebase import business_time
 # -*- coding=utf-8 -*-
+from app.bootstrap.timebase import business_now
+
 import datetime
 import logging
 import os
@@ -111,7 +114,7 @@ def my_listener(event):
         if spec:
             for planned in times:
                 run_id = create_run(job_id,job_name,group_name=spec['group_name'],folder_name=spec['folder_name'],dir_name=spec['dir_name'],
-                                    scheduled_time=planned.astimezone().replace(tzinfo=None).isoformat(' ') if planned else '')
+                                    scheduled_time=business_time(planned).isoformat(' ') if planned else '')
                 skipped = warning_code==EVENT_JOB_MAX_INSTANCES
                 record = update_run(run_id,status='skipped' if skipped else 'missed',state=SKIPPED if skipped else MISSED,end_time=now(),
                                     reason='此任务的并发名额已满，本次调度跳过。' if skipped else '错过允许的调度窗口，本次未执行。')
@@ -127,7 +130,7 @@ def my_listener(event):
                 job_id,
                 job_name,
                 warning_log,
-                datetime.datetime.now(),
+                business_now(),
             )
         )
 
@@ -153,7 +156,7 @@ def parse_rules(rules, trigger=None):
             except ValueError:
                 if 'date' in config_name:
                     configtime = datetime.datetime.strptime(v, '%Y-%m-%d %H:%M:%S')
-                    if configtime < datetime.datetime.now():
+                    if configtime < business_now():
                         raise Exception('开始日期必须大于当前时间')
                 new_rules[config_name] = v
     return new_rules
@@ -232,7 +235,7 @@ def call_task_once(pid, actor='admin'):
             scheduler.add_job(
                 func=execute_manual,
                 trigger='date',
-                run_date=datetime.datetime.now(),
+                run_date=business_now(),
                 args=[
                     str(spec.get('main_file_path')),
                     pid,

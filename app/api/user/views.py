@@ -1,5 +1,7 @@
 import secrets
 
+from app.bootstrap.timebase import business_now
+
 from flask import current_app, request, session
 from flask_restful import Resource
 from werkzeug.security import check_password_hash
@@ -71,6 +73,7 @@ class health(Resource):
     def get(self):
         return success_msg({
             'status': 'ok',
+            'timezone': 'Asia/Shanghai',
             'project': current_app.config.get('APP_NAME'),
         })
 
@@ -96,13 +99,13 @@ class ready(Resource):
                 state = service_state()
                 if not scheduler.running or not state['ready'] or not state['heartbeat']:
                     raise RuntimeError('scheduler initialization incomplete')
-                if (datetime.datetime.now() - datetime.datetime.fromisoformat(state['heartbeat'])).total_seconds() > 120:
+                if (business_now() - datetime.datetime.fromisoformat(state['heartbeat'])).total_seconds() > 120:
                     raise RuntimeError('scheduler heartbeat stale')
             elif WFS_SCHEDULER_CONTROL_URL:
                 response = requests.get(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/api/user/ready', timeout=5)
                 if response.status_code != 200:
                     raise RuntimeError('scheduler not ready')
-            return success_msg({'ready':True, 'database':True, 'scheduler':True})
+            return success_msg({'ready':True, 'database':True, 'scheduler':bool(WFS_ENABLE_SCHEDULER or WFS_SCHEDULER_CONTROL_URL), 'timezone':'Asia/Shanghai'})
         except Exception as exc:
             current_app.logger.warning('readiness unavailable: %s', exc)
             return error_msg('服务尚未就绪，请查看运行日志。'), 503

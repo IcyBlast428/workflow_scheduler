@@ -1,8 +1,9 @@
 <template>
   <section ref="pageElement" class="matrix-page">
     <div class="matrix-toolbar">
-      <div><h2>任务执行矩阵</h2><p>分类固定位置 · 高度表示完成时间 · 执行中位于当前平面</p></div>
+      <div><h2>任务执行矩阵</h2><p>{{ displayMode === '2d' ? '按任务与小时查看执行分布 · 同一时段异常优先显示' : '分类固定位置 · 高度表示完成时间 · 执行中位于当前平面' }}</p></div>
       <div class="matrix-filters">
+        <label class="matrix-filter-field">视图 <select class="select" v-model="displayMode" aria-label="矩阵视图" @change="savePreferences()"><option value="3d">三维矩阵</option><option value="2d">二维时间图</option></select></label>
         <label class="checkbox-row"><input type="checkbox" v-model="live" @change="changeMode">实时跟随今天</label>
         <label class="matrix-filter-field">日期 <input class="input" type="date" v-model="date" :max="data?.server_time.slice(0,10)" :min="minDate" @change="changeDate"></label>
         <label class="matrix-filter-field">分类 <select class="select" aria-label="分类" v-model="category"><option value="">全部分类</option><option v-for="group in allGroups" :key="group" :value="group">{{ group }}</option></select></label>
@@ -24,7 +25,8 @@
       </div>
       <div class="matrix-notice" v-if="data.aggregated">当日记录较多，按 {{ data.bucket_minutes }} 分钟合并为 {{ data.records.length }} 片；同一时间段出现失败即标红。可点击查看次数和原始日志。</div>
       <div class="matrix-notice" v-for="warning in data.warnings" :key="warning">{{ warning }}</div>
-      <div class="matrix-surface">
+      <MatrixHeatmap v-if="displayMode === '2d'" :data="visibleData" @task="$emit('task',$event)" @select="selectedPid=$event.pid; selectedKey=$event.key || ''" />
+      <div v-show="displayMode === '3d'" class="matrix-surface">
         <div v-glass class="matrix-legend glass-surface glass-floating"><span v-for="item in legend" :key="item[0]"><i :class="item[0]"></i>{{ item[1] }}</span></div>
         <canvas ref="canvas" aria-label="任务执行三维视图，可通过下方任务选择框查看任务及执行记录"></canvas>
         <div v-if="!data.tasks.length" class="matrix-empty">还没有可显示的任务</div>
@@ -59,6 +61,8 @@
 </template>
 
 <script setup>
+import { timestamp } from '../timebase';
+import MatrixHeatmap from './MatrixHeatmap.vue';
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
@@ -69,18 +73,19 @@ const props = defineProps({userKey:{type:String,default:''}});
 defineEmits(['task', 'execution', 'logs']);
 const canvas=ref(null),data=ref(null),date=ref(''),loading=ref(false),error=ref(''),selectedPid=ref(''),selectedKey=ref(''),focus=ref(false);
 const recordLimit=ref(200);
+const displayMode=ref('3d');
 const pageElement=ref(null),live=ref(true),category=ref(''),timeWindow=ref('day'),onlyAbnormal=ref(false);
 const preferenceKey=()=>`wfs:matrix:${props.userKey || 'anonymous'}`;
 let savedCamera;
-function restorePreferences(){const value=readPreference(preferenceKey(),{});category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.camera;scene?.setCamera(savedCamera);}
-function savePreferences(camera=scene?.getCamera()){writePreference(preferenceKey(),{category:category.value,timeWindow:timeWindow.value,onlyAbnormal:onlyAbnormal.value,camera});}
+function restorePreferences(){const value=readPreference(preferenceKey(),{});displayMode.value=value.displayMode==='2d'?'2d':'3d';category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.camera;scene?.setCamera(savedCamera);}
+function savePreferences(camera=scene?.getCamera()){writePreference(preferenceKey(),{displayMode:displayMode.value,category:category.value,timeWindow:timeWindow.value,onlyAbnormal:onlyAbnormal.value,camera});}
 let scene=null,timer=null,serial=0,disposed=false;
 const allGroups=computed(()=>[...new Set((data.value?.tasks || []).map(task=>task.group))]);
 const visibleData=computed(()=>{
   if(!data.value)return null;
   const tasks=data.value.tasks.filter(task=>!category.value||task.group===category.value),pids=new Set(tasks.map(task=>task.pid));
-  const end=data.value.date===data.value.server_time.slice(0,10)?Date.parse(data.value.server_time.replace(' ','T')):Date.parse(data.value.date+'T23:59:59');
-  const filter=record=>pids.has(record.pid)&&(!onlyAbnormal.value||['failed','timed_out','interrupted','skipped','missed','unknown'].includes(record.status))&&(timeWindow.value==='day'||Date.parse(record.time.replace(' ','T'))>=end-Number(timeWindow.value)*60000);
+  const end=data.value.date===data.value.server_time.slice(0,10)?timestamp(data.value.server_time):timestamp(data.value.date+'T23:59:59');
+  const filter=record=>pids.has(record.pid)&&(!onlyAbnormal.value||['failed','timed_out','interrupted','skipped','missed','unknown'].includes(record.status))&&(timeWindow.value==='day'||timestamp(record.time)>=end-Number(timeWindow.value)*60000);
   return {...data.value,tasks,records:data.value.records.filter(filter),active:data.value.active.filter(filter),pending:data.value.pending.filter(filter)};
 });
 const layout=computed(()=>layoutTasks(visibleData.value?.tasks || [])),groups=computed(()=>layout.value.groups);
@@ -132,6 +137,7 @@ onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEv
 .matrix-toolbar h2 { font-size: 16px; }
 .matrix-toolbar > div:first-child { min-width: 0; }
 .matrix-filters { gap: 12px 16px; }
+.matrix-filters label { white-space: nowrap; }
 .matrix-filter-field { color: var(--muted-strong); font-size: 13px; }
 .matrix-filter-field .select { width: auto; min-width: 136px; }
 .matrix-filter-field input { width: 164px; }

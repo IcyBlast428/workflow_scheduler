@@ -17,7 +17,7 @@ password = secrets.token_urlsafe(32)
 values = {key:os.environ[key] for key in ('WFS_SECRET_KEY','WFS_ADMIN_USERNAME','WFS_ADMIN_PASSWORD_HASH')}
 values.update({
     'WFS_ENV':'development', 'WFS_POSTGRES_TEST':'true', 'WFS_DEV_RUN_ALL':'true',
-    'WFS_DB_ID':'wfstest_wfs', 'WFS_DB_DRIVER':'PostgreSQL Unicode',
+    'WFS_DB_ID':'wfstest_wfs', 'WFS_DB_DRIVER':'PostgreSQL Unicode', 'WFS_DB_DIALECT':'postgresql',
     'WFS_DB_CONFIG_FILE':str(secret_dir/'postgres-test.ini'), 'WFS_DB_PASSWORD':password,
     'WFS_COOKIE_SECURE':'false', 'WFS_PYTHON':sys.executable,
     'WFS_DATA_DIR':str(ROOT/'data'/'postgres-test'),

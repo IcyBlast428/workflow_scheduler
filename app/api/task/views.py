@@ -1,4 +1,6 @@
 import os
+from app.bootstrap.timebase import business_now
+
 import subprocess
 import datetime
 import time
@@ -56,15 +58,20 @@ def _task_id_options():
         for spec in discover_task_specs(TASK_DIR)
         if spec.get('pid') or spec.get('folder_name')
     }
-    return [{"id": pid} for pid in sorted(ids)]
+    names = {spec['pid']:spec.get('task_name') or spec.get('folder_name') or spec['pid'] for spec in discover_task_specs(TASK_DIR)}
+    return [{"id": pid, "name": names.get(pid,pid)} for pid in sorted(ids)]
 
 
-def _build_task_log_filters(pid=None, taskstate=None, datetimeval=None):
+def _build_task_log_filters(pid=None, taskstate=None, datetimeval=None, taskname=None):
     clauses = []
     params = []
     if pid:
         clauses.append("pid = ?")
         params.append(pid)
+    if taskname:
+        clauses.append("LOWER(taskname) LIKE ? ESCAPE '!'")
+        escaped = taskname.lower().replace('!','!!').replace('%','!%').replace('_','!_')
+        params.append('%'+escaped+'%')
     if taskstate in ("成功", "鎴愬姛"):
         clauses.append("state = 0")
     elif taskstate in ("失败", "澶辫触"):
@@ -214,7 +221,7 @@ def _load_job_stats():
 
 
 def _empty_dashboard_trend():
-    now = datetime.datetime.now().replace(minute=0, second=0, microsecond=0)
+    now = business_now().replace(minute=0, second=0, microsecond=0)
     hours = [now - datetime.timedelta(hours=index) for index in range(RECENT_HOURS - 1, -1, -1)]
     return [
         {
@@ -233,7 +240,7 @@ def _load_recent_run_stats():
 def _recent_run_stats():
     trend = _empty_dashboard_trend()
     trend_by_hour = {item['hour']: item for item in trend}
-    since = datetime.datetime.now().replace(minute=0,second=0,microsecond=0)-datetime.timedelta(hours=RECENT_HOURS-1)
+    since = business_now().replace(minute=0,second=0,microsecond=0)-datetime.timedelta(hours=RECENT_HOURS-1)
     try:
         with GaussDB() as db:
             complete = coverage(db)['complete']
@@ -348,7 +355,7 @@ def _dedupe_task_markers(items):
 
 
 def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
-    since = datetime.datetime.now() - datetime.timedelta(hours=hours)
+    since = business_now() - datetime.timedelta(hours=hours)
     markers = []
     try:
         with GaussDB() as db:
@@ -454,7 +461,7 @@ def _event_snapshot():
             'schedule_enabled': spec.get('schedule_enabled'),
         })
     return {
-        'server_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'server_time': business_now().strftime('%Y-%m-%d %H:%M:%S'),
         'tasks': sorted(tasks, key=lambda item: item['id'] or ''),
         'logs': _latest_log_marker(),
         'scheduler': {
@@ -738,6 +745,7 @@ class TaskLogs(Resource):
     def post(self):
         current_page, pagesize = _get_page_args()
         pid = request.args.get("taskid")
+        taskname = (request.args.get("taskname") or "")[:200]
         taskstate = request.args.get("taskstate")
         datetimeval = request.args.getlist("datetimeval[]")
         try:
@@ -747,8 +755,8 @@ class TaskLogs(Resource):
             cursor = request.args.get('cursor', '')
             if current_page > 1 and not cursor:
                 raise ValueError('请通过下一页继续查询，或重新搜索。')
-            clauses, params = _build_task_log_filters(pid=pid, taskstate=taskstate, datetimeval=dates)
-            val, has_more, next_cursor = page(clauses, params, pagesize, scope, cursor, [pid,taskstate,dates,scope,pagesize])
+            clauses, params = _build_task_log_filters(pid=pid, taskstate=taskstate, datetimeval=dates, taskname=taskname)
+            val, has_more, next_cursor = page(clauses, params, pagesize, scope, cursor, [pid,taskname,taskstate,dates,scope,pagesize])
             data = {
                 "total": _approx_total(current_page, pagesize, len(val), has_more),
                 "has_more": has_more,

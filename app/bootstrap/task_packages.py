@@ -4,6 +4,8 @@ The database is the registry; disk holds releases, independently of platform Git
 Activation has a durable intent and a scheduler acknowledgement. An interrupted
 intent is conservatively rolled back during scheduler startup.
 """
+from app.bootstrap.timebase import business_now
+
 import ast
 import datetime as dt
 import difflib
@@ -296,7 +298,7 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note=''):
         manifest = _manifest(code)
         requirements = _requirements(code)
         selected = _entry(manifest, entry)
-        data = {'pid': record['pid'], 'version': version, 'created_at': str(dt.datetime.now()),
+        data = {'pid': record['pid'], 'version': version, 'created_at': str(business_now()),
                 'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '',
                 'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest),
                 'requirements': requirements, 'base_version': record.get('active_version'),
@@ -334,7 +336,7 @@ def stage(blob, fields, actor):
                 raise PackageError('该分类下已存在同名目录，请换一个目录名称。', 409)
             record = {'pid': 'task_' + uuid.uuid4().hex, 'group_name': group, 'folder_name': folder,
                       'task_name': name, 'active_version': None, 'deleted_at': None, 'origin': 'upload',
-                      'created_at': str(dt.datetime.now()), 'created_by': actor, 'revision': 0}
+                      'created_at': str(business_now()), 'created_by': actor, 'revision': 0}
             selected = fields.get('main_file', '')
         # Validate before creating the registry row: a rejected upload adds no task.
         data = _create(record, blob=blob, entry=selected, actor=actor, note=fields.get('note', ''))
@@ -361,7 +363,7 @@ def import_task(pid, actor):
             raise PackageError('任务不存在或入口配置无效。', 404)
         record = {'pid': pid, 'group_name': spec['group_name'], 'folder_name': spec['folder_name'],
                   'task_name': spec.get('task_name') or spec['folder_name'], 'active_version': None,
-                  'deleted_at': None, 'origin': 'git', 'created_at': str(dt.datetime.now()),
+                  'deleted_at': None, 'origin': 'git', 'created_at': str(business_now()),
                   'created_by': actor, 'revision': 0, 'legacy': True}
         data = _create(record, source=spec['task_dir'], entry=spec['main_file'], actor=actor, note='从现有任务导入初始版本')
         record = _write_task(record, expected=0)
@@ -415,6 +417,12 @@ def _prepare_worker(pid, version, token):
         data = release(pid, version)
         if data.get('prepare_token') != token:
             return
+        def stage(name):
+            if release(pid,version).get('prepare_token') != token:
+                raise PackageError('准备请求已过期，请刷新版本。',409)
+            data.update(prepare_stage=name,prepare_started_at=data.get('prepare_started_at') or business_now().isoformat(' '),stage_updated_at=business_now().isoformat(' '))
+            _write_release(data)
+        stage('校验文件')
         root = release_dir(pid, version)
         code = root / 'code'
         if _checksum(_manifest(code)) != data['checksum']:
@@ -422,6 +430,7 @@ def _prepare_worker(pid, version, token):
         # A process interrupted by restart cannot overwrite a newer attempt.
         env = root / ('environment-' + token)
         timeout = max(30, min(int(os.environ.get('WFS_PACKAGE_PREPARE_SECONDS', '300')), 1800))
+        stage('创建独立环境')
         _command([sys.executable, '-I', '-m', 'venv', str(env)], root, timeout)
         python = env / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         if data['requirements']:
@@ -433,7 +442,9 @@ def _prepare_worker(pid, version, token):
             for wheelhouse in wheels:
                 if wheelhouse.is_dir():
                     arguments += ['--find-links', str(wheelhouse)]
+            stage('安装离线依赖')
             _command(arguments + data['requirements'], root, timeout)
+            stage('校验依赖')
             _command([str(python), '-I', '-m', 'pip', 'check'], root, timeout)
         # Marker is outside user code; it follows nested entry files as well.
         marker = {'task_release': version, 'package_sha256': data['checksum'], 'pid': pid}
@@ -442,7 +453,7 @@ def _prepare_worker(pid, version, token):
             for path in code.rglob('*'):
                 path.chmod(0o555 if path.is_dir() else 0o444)
             code.chmod(0o555)
-        data.update(status='ready', message='语法与离线依赖检查通过；尚未执行业务代码。', python=env.name + '/' + ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))
+        data.update(status='ready', prepare_stage='环境检查通过', message='语法与离线依赖检查通过；尚未执行业务代码。', python=env.name + '/' + ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))
         if release(pid, version).get('prepare_token') == token:
             _write_release(data)
     except Exception as exc:
@@ -450,7 +461,7 @@ def _prepare_worker(pid, version, token):
         try:
             data = release(pid, version)
             if data.get('prepare_token') == token:
-                data.update(status='failed', message=str(exc) if isinstance(exc, PackageError) else '准备失败或超时，请检查本地依赖环境后重试。')
+                data.update(status='failed', prepare_stage='检查失败', message=str(exc) if isinstance(exc, PackageError) else '准备失败或超时，请检查本地依赖环境后重试。')
                 _write_release(data)
         except Exception:
             logger.exception('failed to save package preparation result')
@@ -494,7 +505,7 @@ def publish(pid, version, revision, actor, rollback=False):
         try:
             aps_start(task_pid=pid, action='refresh')
             record.pop('pending', None)
-            record['last_published_at'] = str(dt.datetime.now())
+            record['last_published_at'] = str(business_now())
             record['last_published_by'] = actor
             data.update(status='applied', message='调度器已确认此版本。', published_at=record['last_published_at'])
             try:
@@ -538,7 +549,7 @@ def recycle(pid, revision, actor, restore=False):
                 set_schedule_enabled(pid, False, actor=actor)
             if scheduler.get_job(pid):
                 scheduler.remove_job(pid)
-            record.update(deleted_at=str(dt.datetime.now()), deleted_by=actor)
+            record.update(deleted_at=str(business_now()), deleted_by=actor)
         else:
             record.update(deleted_at=None, restored_by=actor)
         record = _write_task(record, expected=revision)

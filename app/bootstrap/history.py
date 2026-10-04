@@ -1,4 +1,6 @@
 """Bounded history queries and verified, transactional archival."""
+from app.bootstrap.timebase import business_now
+
 import base64
 import datetime as dt
 import hashlib
@@ -14,7 +16,7 @@ end_time,start_time,extract(epoch from (end_time - start_time))::bigint"""
 
 
 def date_range(values):
-    today = dt.datetime.now().date()
+    today = business_now().date()
     if not values:
         return [dt.datetime.combine(today-dt.timedelta(days=6), dt.time()),
                 dt.datetime.combine(today, dt.time(23,59,59,999999))]
@@ -72,7 +74,7 @@ def archive_batch(cutoff, size=200):
     """Copy and compare every row before deleting it, in one transaction."""
     if not 1 <= size <= 1000:
         raise ValueError('batch size must be between 1 and 1000')
-    if cutoff.tzinfo or cutoff > dt.datetime.now()-dt.timedelta(days=90):
+    if cutoff.tzinfo or cutoff > business_now()-dt.timedelta(days=90):
         raise ValueError('retain at least 90 days online')
     with GaussDB() as db:
         db.begin_transaction()

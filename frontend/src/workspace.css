@@ -1,0 +1,63 @@
+/* Operational surfaces stay readable beneath the shared glass treatment. */
+.task-table th:first-child, .task-table .task-name-cell { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+.task-table th:last-child, .task-table .action-cell { position: sticky; right: 0; z-index: 2; background: var(--panel); box-shadow: -7px 0 12px -12px rgba(0,0,0,.7); }
+.task-table .task-actions { display: flex; gap: 6px; justify-content: flex-start; flex-wrap: nowrap; }
+.task-table .task-actions > .btn { min-width: 0; padding: 8px 10px; white-space: nowrap; }
+.task-name-link { background: none; border: 0; padding: 0; font: inherit; color: var(--ink); font-weight: 600; text-align: left; cursor: pointer; }
+.task-name-link:hover { text-decoration: underline; text-underline-offset: 4px; }
+.task-identity { align-items: center; gap: 7px; }
+.task-name-cell > .mono { padding-left: 28px; font-size: 11px; margin-top: 4px; }
+.action-menu { position: fixed; z-index: 90; display: grid; gap: 4px; width: 180px; max-height: calc(100dvh - 16px); overflow-y: auto; background-color: var(--panel); padding: 8px; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 35px rgba(0,0,0,.35); }
+.action-menu > button { text-align: left; justify-content: flex-start; border-color: transparent; }
+.action-menu > button:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.nav-tooltip { position: fixed; z-index: 600; pointer-events: none; transform: translateY(-50%); padding: 9px 12px; border-radius: 9px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 12px; }
+.log-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 var(--panel-padding) 14px; }
+.log-shortcuts > span { margin-right: auto; font-size: 12px; color: var(--muted); }
+.log-shortcuts .btn { padding: 6px 10px; font-size: 12px; }
+.attention-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; max-height: 360px; overflow-y: auto; }
+.attention-list > li { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.attention-list p { margin: 6px 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.attention-list .btn { flex-shrink: 0; }
+.attention-panel { margin-bottom: 16px; }
+.attention-panel .panel-body { gap: 14px; }
+.storage-keep { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.storage-keep .input { width: 90px; }
+.storage-table { max-height: 400px; margin-top: 18px; }
+.storage-table table { min-width: 620px; }
+.storage-table th { white-space: nowrap; }
+.heatmap-panel { display: grid; gap: 16px; }
+.heatmap-table table { min-width: 1060px; table-layout: fixed; border-collapse: separate; border-spacing: 2px; }
+.heatmap-table th:first-child { width: 180px; position: sticky; left: 0; background: var(--panel); z-index: 2; }
+.heatmap-table th, .heatmap-table td { padding: 3px; border: 0; font-size: 11px; }
+.heatmap-table .task-name-link { max-width: 174px; overflow-wrap: anywhere; }
+.heatmap-cell { display: block; width: 100%; min-height: 28px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-soft); color: #fff; font-size: 11px; cursor: pointer; }
+.heatmap-cell[data-status="success"] { background: #1c8261; }
+.heatmap-cell[data-status="failed"] { background: #b33850; }
+.heatmap-cell[data-status="running"] { background: #917722; }
+.heatmap-cell[data-status="cancelled"] { background: #526674; }
+.heatmap-cell:disabled { cursor: default; opacity: .4; }
+.heatmap-cell:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.modal:focus { outline: none; }
+.log-pre, .execution-output { background: var(--panel); }
+html[data-effects="low"] .glass-surface, html[data-effects="low"] .topbar,
+html[data-effects="low"] .metric-card, html[data-effects="low"] .sidebar,
+html[data-effects="low"] .nav-button, html[data-effects="low"] .user-chip,
+html[data-effects="low"] .graphic-brand, html[data-effects="low"] .liquid-glass {
+  --glass-pointer-glow: none; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; transition: none !important;
+}
+html[data-effects="low"] .glass-surface { background-color: var(--panel); }
+@media(max-width:760px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+  .summary-grid .metric-card { padding: 14px; min-height: 86px; }
+  .summary-grid .metric-card:first-child { grid-column: 1 / -1; }
+  .summary-grid .metric-card strong { font-size: 25px; }
+  .task-table { min-width: 790px; }
+  .task-table .col-group, .task-table .col-failed { display: none; }
+  .task-table tr > :nth-child(2), .task-table tr > :nth-child(6) { display: none; }
+  .task-table th:first-child, .task-table .task-name-cell { position: static; }
+  .task-table .col-name { width: 220px; }
+  .effects-toggle { font-size: 11px; padding: 6px 9px; }
+  .nav-tooltip { display: none; }
+  .attention-list > li { gap: 10px; }
+  .log-shortcuts { padding: 0 16px 14px; }
+}

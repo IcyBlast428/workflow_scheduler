@@ -60,6 +60,14 @@ def _split_db_id(db_id):
 class GaussDB:
     """WFS 平台本体使用的高斯数据库封装。"""
 
+    @property
+    def dialect(self):
+        if self._local_sqlite:
+            return 'SQLite'
+        if os.environ.get('WFS_DB_DIALECT') == 'postgresql' or (os.environ.get('WFS_POSTGRES_TEST') == 'true' and GAUSS_DRIVER.startswith('PostgreSQL')):
+            return 'PostgreSQL'
+        return 'GaussDB/DWS'
+
     def __init__(self, db_id=DEFAULT_DB_ID):
         self._local_sqlite = bool(os.environ.get('WFS_LOCAL_DB_PATH'))
         if self._local_sqlite:

@@ -87,6 +87,8 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  attention() { return request('/api/taskinfo/attention'); },
+  storage(keep) { return request('/api/admin/storage', {params:{keep},timeout:20000}); },
   packages(pid = '') { return request('/api/taskinfo/packages', { params: { pid } }); },
   packagePreview(pid, version, path) { return request('/api/taskinfo/packages/preview', { params: { pid, version, path } }); },
   uploadPackage(formData) { return request('/api/taskinfo/packages/upload', { method: 'POST', formData, timeout: 65000 }); },

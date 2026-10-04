@@ -11,6 +11,7 @@ await writeFile(mockPath, `export const requests=[];
 export const api={packages:pid=>new Promise((resolve,reject)=>requests.push({pid,resolve,reject})),
 packagePreview:async(pid,version)=>({release:{pid,version,main_file:'main.py',status:'ready'},changes:[]})};`);
 const compiled = compileScript(descriptor, {id:'package-regression'}).content
+  .replace("'../timebase'", "'../src/timebase.js'")
   .replace("'../api'", JSON.stringify(mockPath.href))
   .replace("import LoadingStatus from './LoadingStatus.vue';", 'const LoadingStatus = {};');
 await writeFile(compiledPath, compiled);

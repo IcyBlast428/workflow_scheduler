@@ -2,7 +2,6 @@
   <div class="table-wrap task-table-wrap">
     <table class="task-table">
       <colgroup>
-        <col class="col-id">
         <col class="col-name">
         <col class="col-group">
         <col class="col-status">
@@ -14,7 +13,6 @@
       </colgroup>
       <thead>
         <tr>
-          <th>PID</th>
           <th>任务名称</th>
           <th>组名</th>
           <th>状态</th>
@@ -27,9 +25,9 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="row.id">
-          <td :title="row.id"><div class="task-identity"><input type="checkbox" :aria-label="`选择任务 ${row.id}`" :checked="selected.includes(row.id)" @change="$emit('select',row.id)"><button class="btn icon-only favorite-button" :class="{ 'is-favorite': favorites.includes(row.id) }" :aria-label="`${favorites.includes(row.id) ? '取消收藏' : '收藏'}任务 ${row.id}`" @click="$emit('favorite',row.id)">{{ favorites.includes(row.id) ? '★' : '☆' }}</button><span class="mono cell-strong clip">{{ row.id }}</span></div></td>
-          <td>
-            <div class="cell-strong clip" :title="row.name">{{ row.name }}</div>
+          <td class="task-name-cell">
+            <div class="task-identity"><input type="checkbox" :aria-label="`选择任务 ${row.id}`" :checked="selected.includes(row.id)" @change="$emit('select',row.id)"><button class="btn icon-only favorite-button" :class="{ 'is-favorite': favorites.includes(row.id) }" :aria-label="`${favorites.includes(row.id) ? '取消收藏' : '收藏'}任务 ${row.id}`" @click="$emit('favorite',row.id)">{{ favorites.includes(row.id) ? '★' : '☆' }}</button><button class="task-name-link clip" :title="row.name" @click="$emit('detail',row)">{{ row.name }}</button></div>
+            <div class="mono muted clip" :title="row.id">{{ row.id }}</div>
             <div v-if="row.config_error" class="muted clip" :title="row.config_error">{{ row.config_error }}</div>
             <div v-else-if="!row.schedule_configured" class="muted clip">尚未配置调度策略</div>
             <small v-if="row.application?.status === 'failed'" class="cell-subtitle danger-text">配置生效失败：{{ row.application.message }}</small>
@@ -53,20 +51,16 @@
           <td class="action-cell">
             <div class="row-actions task-actions">
               <button class="btn" @click="$emit('detail', row)">详情</button>
-              <button v-if="canStart(row)" class="btn primary" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action', row, 'start')">启动</button>
-              <button v-else-if="row.state === 'true'" class="btn warning" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('pause', row)">暂停</button>
-              <button v-else class="btn placeholder" type="button" disabled aria-hidden="true">启动</button>
-
-              <button v-if="row.pending" class="btn danger" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action', row, 'kill')">强停</button>
-              <button v-else class="btn placeholder" type="button" disabled aria-hidden="true">强停</button>
-
-              <button v-if="canCallTask(row)" class="btn primary" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" :title="callTaskTitle(row)" @click="$emit('call', row)">触发</button>
-              <button v-else class="btn placeholder" type="button" disabled aria-hidden="true">触发</button>
-
-              <button class="btn" type="button" :disabled="busy || pendingActions[row.id] || !canManage" @click="$emit('schedule', row)">配置</button>
-              <button v-if="row.state !== 'invalid'" class="btn task-refresh" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action', row, 'refresh')">{{ pendingActions[row.id] === 'refresh' ? '刷新中…' : '刷新' }}</button>
-              <button v-else class="btn placeholder" type="button" disabled aria-hidden="true">刷新</button>
-              <button class="btn" type="button" :disabled="pendingActions[row.id]" @click="$emit('log', row)">日志</button>
+              <button v-if="row.pending" class="btn" @click="$emit('execution',row)">查看执行</button>
+              <button v-else-if="canCallTask(row)" class="btn primary" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" :title="callTaskTitle(row)" @click="$emit('call',row)">触发</button>
+              <ActionMenu>
+                <button v-if="canStart(row)" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'start')">启动</button>
+                <button v-if="row.state === 'true'" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('pause',row)">暂停</button>
+                <button class="btn" :disabled="busy || pendingActions[row.id] || !canManage" @click="$emit('schedule',row)">配置</button>
+                <button v-if="row.state !== 'invalid'" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'refresh')">{{ pendingActions[row.id] === 'refresh' ? '刷新中…' : '刷新' }}</button>
+                <button class="btn" :disabled="pendingActions[row.id]" @click="$emit('log',row)">最新输出</button>
+                <button v-if="row.pending" class="btn danger" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'kill')">强停</button>
+              </ActionMenu>
             </div>
           </td>
         </tr>
@@ -76,6 +70,7 @@
 </template>
 
 <script setup>
+import ActionMenu from './ActionMenu.vue';
 import { canTrigger, exitLabel, exitClass } from '../executionLabels';
 defineProps({
   rows: { type: Array, required: true },
@@ -86,7 +81,7 @@ defineProps({
   canManage: { type: Boolean, default: true },
 });
 
-defineEmits(['action', 'pause', 'call', 'schedule', 'log', 'detail','favorite','select']);
+defineEmits(['action', 'pause', 'call', 'schedule', 'log', 'detail','favorite','select','execution']);
 
 function stateText(row) {
   if (row.state === 'invalid') {

@@ -1,6 +1,5 @@
 <template>
-  <div v-if="modelValue.open" class="modal-backdrop confirm-backdrop" @click.self="dismiss">
-    <section v-glass class="modal confirm-modal glass-surface glass-floating">
+  <ModalShell :open="modelValue.open" :label="modelValue.title" panel-class="confirm-modal" backdrop-class="confirm-backdrop" @close="dismiss">
       <header class="modal-head">
         <div>
           <p class="eyebrow">{{ modelValue.eyebrow || '高风险操作' }}</p>
@@ -21,11 +20,11 @@
           {{ modelValue.confirmText || '确认执行' }}
         </button>
       </footer>
-    </section>
-  </div>
+  </ModalShell>
 </template>
 
 <script setup>
+import ModalShell from './ModalShell.vue';
 const props = defineProps({
   modelValue: { type: Object, required: true },
 });

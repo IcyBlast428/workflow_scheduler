@@ -11,9 +11,16 @@ from app.bootstrap.schedule_config import load_schedule, save_schedule, record_a
 from app.bootstrap.task_loader import discover_task_specs
 from app.bootstrap.task_source import SourceError, list_source, read_source
 from app.bootstrap.permissions import ROLES
+from app.bootstrap.timebase import business_time
 from app.settings import AUTH_ADMIN_USERNAME
 
 blueprint = Blueprint('operations', __name__)
+
+
+def _business_rows(rows, *fields):
+    """Keep database wall times explicit; Flask would label naive values as GMT."""
+    return [{**row, **{field: business_time(row[field]).isoformat(' ', timespec='seconds')
+                      for field in fields if row.get(field) is not None}} for row in rows]
 
 
 @blueprint.get('/api/taskinfo/matrix')
@@ -71,8 +78,8 @@ def task_detail():
     next_time = getattr(job,'next_run_time',None)
     with GaussDB() as db:
         notifications = db.execute_query_sql('SELECT id,channel,status,attempts,message,created_at FROM wfs_notifications WHERE pid=? ORDER BY created_at DESC LIMIT 20',params=(pid,),return_json=True)
-    return success_msg({'pid':pid, 'description':description, 'schedule':load_schedule(pid), 'runs':records, 'versions':versions, 'audit':changes,
-                        'notifications':notifications,'diagnostics':{'active':runnings.count(),'capacity':int(os.environ.get('WFS_MAX_ACTIVE_RUNS','20')),
+    return success_msg({'pid':pid, 'task_name':spec.get('task_name') or spec.get('folder_name') or pid, 'description':description, 'schedule':load_schedule(pid), 'runs':records, 'versions':_business_rows(versions,'changed_at'), 'audit':_business_rows(changes,'created_at'),
+                        'notifications':_business_rows(notifications,'created_at'),'diagnostics':{'active':runnings.count(),'capacity':int(os.environ.get('WFS_MAX_ACTIVE_RUNS','20')),
                         'next_run_time':str(next_time or ''),'last_not_started':next((item for item in records if item['status'] in ('skipped','missed')),None)}})
 
 
@@ -168,6 +175,29 @@ def runtime_health():
                         'summary':summary,'alerts':dict(alerts),'free_mb':usage.free//1024//1024,'metrics':snapshot()})
 
 
+@blueprint.get('/api/taskinfo/attention')
+def attention():
+    forwarded = _forward()
+    if forwarded is not None:
+        return forwarded
+    from app.bootstrap.attention import snapshot
+    from app.bootstrap.snapshot_cache import cached
+    admin = g.identity['role'] == 'admin'
+    return success_msg(cached(('attention',admin), 10, lambda: snapshot(admin)))
+
+
+@blueprint.get('/api/admin/storage')
+def package_storage():
+    forwarded = _forward()
+    if forwarded is not None:
+        return forwarded
+    from app.bootstrap.version_storage import snapshot
+    try:
+        return success_msg(snapshot(int(request.args.get('keep',20))))
+    except (ValueError, OSError) as exc:
+        return error_msg(str(exc)),400
+
+
 @blueprint.get('/api/taskinfo/runs')
 def runs():
     forwarded = _forward()
@@ -242,7 +272,7 @@ def restore_configuration():
 def audit_log():
     with GaussDB() as db:
         rows = db.execute_query_sql('SELECT actor,action,target,outcome,details,created_at FROM wfs_audit ORDER BY created_at DESC LIMIT 100', return_json=True)
-    return success_msg(rows)
+    return success_msg(_business_rows(rows,'created_at'))
 
 
 @blueprint.route('/api/admin/users', methods=['GET','POST'])

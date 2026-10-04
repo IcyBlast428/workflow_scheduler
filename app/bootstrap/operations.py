@@ -1,4 +1,6 @@
 """Durable execution journal, audit and housekeeping for the single scheduler."""
+from app.bootstrap.timebase import business_now
+
 import datetime as dt
 import json
 import logging
@@ -26,7 +28,7 @@ _service_state = {'ready': False, 'error': '', 'heartbeat': ''}
 
 
 def now():
-    return dt.datetime.now().isoformat(' ', timespec='microseconds')
+    return business_now().isoformat(' ', timespec='microseconds')
 
 
 def run_path(run_id, suffix='json'):
@@ -268,7 +270,7 @@ def maintenance(recover=False):
             journal.defer(_directory, record['run_id'])
             logger.exception('journal maintenance failed: %s', record['run_id'])
     days = max(60, int(os.environ.get('WFS_LOG_RETENTION_DAYS', '90')))
-    expired = journal.expire(_directory, (dt.datetime.now()-dt.timedelta(days=days)).isoformat(' '), batch)
+    expired = journal.expire(_directory, (business_now()-dt.timedelta(days=days)).isoformat(' '), batch)
     _service_state['maintenance'] = {'processed':processed, 'expired':expired, 'completed_at':now()}
     from app.bootstrap.run_summary import backfill
     backfill(batch)
@@ -283,13 +285,13 @@ def maintenance(recover=False):
             path.unlink()
         except Exception:
             logger.exception('audit recovery failed')
-    cutoff = dt.datetime.now() - dt.timedelta(days=int(os.environ.get('WFS_HISTORY_RETENTION_DAYS', '90')))
+    cutoff = business_now() - dt.timedelta(days=int(os.environ.get('WFS_HISTORY_RETENTION_DAYS', '90')))
     with GaussDB() as db:
         # History must be archived and verified before removal. Never purge it here.
         for table, column in (('wfs_executions','created_at'), ('wfs_audit','created_at')):
             key = 'run_id' if table == 'wfs_executions' else 'id'
             db.execute_sql(f'DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM {table} WHERE {column} < ? ORDER BY {column} LIMIT ?)', params=(cutoff,batch))
-        db.execute_sql('DELETE FROM wfs_login_limits WHERE window_start < ?', params=(dt.datetime.now() - dt.timedelta(minutes=15),))
+        db.execute_sql('DELETE FROM wfs_login_limits WHERE window_start < ?', params=(business_now() - dt.timedelta(minutes=15),))
         versions_to_keep = max(20,int(os.environ.get('WFS_CONFIG_VERSIONS_KEEP','100')))
         for pid, version in db.execute_query_sql('SELECT pid,version FROM wfs_task_config'):
             db.execute_sql('DELETE FROM wfs_config_versions WHERE pid=? AND version<=?', params=(pid,version - versions_to_keep))

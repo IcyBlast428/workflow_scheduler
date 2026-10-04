@@ -1,4 +1,6 @@
 import ctypes
+from app.bootstrap.timebase import business_now
+
 import datetime
 import os
 import threading
@@ -43,7 +45,7 @@ class _CpuMonitor:
     def snapshot(self, hours=6, after=''):
         # API 被访问时懒启动采样线程，避免仅导入模块就产生后台线程。
         self.start()
-        since = datetime.datetime.now() - datetime.timedelta(hours=hours)
+        since = business_now() - datetime.timedelta(hours=hours)
         with self._lock:
             samples = [
                 dict(item)
@@ -96,7 +98,7 @@ class _CpuMonitor:
         if percent is None:
             return
 
-        now = datetime.datetime.now()
+        now = business_now()
         cutoff = now - datetime.timedelta(seconds=self.retention)
         sample = {
             'time': now.strftime('%Y-%m-%d %H:%M:%S'),
@@ -226,7 +228,7 @@ class _TaskStartEvents:
         self._lock = threading.Lock()
 
     def record(self, pid, task_name='', group_name='', folder_name='', start_time=None):
-        start_time = start_time or datetime.datetime.now()
+        start_time = start_time or business_now()
         event = {
             'id': pid,
             'name': task_name or pid,
@@ -237,14 +239,14 @@ class _TaskStartEvents:
             'start_time_obj': start_time,
             'source': 'running',
         }
-        cutoff = datetime.datetime.now() - datetime.timedelta(seconds=self.retention)
+        cutoff = business_now() - datetime.timedelta(seconds=self.retention)
         with self._lock:
             self._events.append(event)
             # 只保留总览页需要的最近窗口，避免长时间运行后内存无限增长。
             self._events = [item for item in self._events if item['start_time_obj'] >= cutoff]
 
     def complete(self, pid, start_time, end_time=None):
-        end_time = end_time or datetime.datetime.now()
+        end_time = end_time or business_now()
         start_key = start_time.strftime('%Y-%m-%d %H:%M:%S') if hasattr(start_time, 'strftime') else str(start_time or '')[:19]
         with self._lock:
             for item in reversed(self._events):

@@ -37,7 +37,7 @@
               <div class="form-row"><label for="package-entry">Python 入口</label><select id="package-entry" v-model="entry" class="select" :disabled="busy || !['staged','failed'].includes(preview.release.status)"><option value="" disabled>请选择入口</option><option v-for="item in preview.release.manifest.filter(f => f.path.endsWith('.py'))" :key="item.path" :value="item.path">{{ item.path }}</option></select></div>
               <div class="package-dependencies"><strong>独立依赖环境</strong><p class="hint">{{ preview.release.requirements.length ? preview.release.requirements.join('，') : '未声明第三方依赖，使用独立的 Python 标准库环境。' }}</p><p class="hint">所有第三方依赖及其间接依赖逐行写入 requirements.txt（package==version），并提供 wheels/ 或服务端离线依赖库。不继承原任务或平台环境，检查时不会执行业务代码。</p><p class="hint">代码目录只读；业务输出请写入 WFS_TASK_DATA_DIR 指定的目录，更新与回滚都会保留。</p></div>
               <p class="hint mono package-checksum">包校验 SHA256：{{ preview.release.checksum }}</p>
-              <div class="filter-actions"><button v-if="['staged','failed'].includes(preview.release.status) && !selected.deleted_at" class="btn primary" :disabled="busy || !entry" @click="prepare">检查依赖环境</button><button v-if="canPublish" class="btn primary" :disabled="busy" @click="activate">{{ preview.release.published_at ? '回滚到此版本' : '发布此版本' }}</button><span v-if="preview.release.status === 'preparing'" class="tag warning" role="status">正在准备依赖，完成后可发布</span><a class="btn" :href="downloadUrl" download>下载此任务包</a></div>
+              <div class="filter-actions"><button v-if="['staged','failed'].includes(preview.release.status) && !selected.deleted_at" class="btn primary" :disabled="busy || !entry" @click="prepare">检查依赖环境</button><button v-if="canPublish" class="btn primary" :disabled="busy" @click="activate">{{ preview.release.published_at ? '回滚到此版本' : '发布此版本' }}</button><span v-if="preview.release.status === 'preparing'" class="tag warning" role="status">{{ preview.release.prepare_stage || '准备依赖中' }} · 已用 {{ preparationSeconds }} 秒</span><a class="btn" :href="downloadUrl" download>下载此任务包</a></div>
               <div class="package-diff-layout"><div class="package-files" aria-label="文件清单"><div class="section-heading"><h4>文件与变更</h4><p>新增 {{ counts.added }} · 修改 {{ counts.modified }} · 删除 {{ counts.deleted }}</p></div><button v-for="item in fileList" :key="item.path" class="package-file" :class="path === item.path ? 'selected' : ''" :disabled="diffLoading" @click="inspectFile(item.path)"><span class="tag" :class="{added:'success',modified:'warning',deleted:'danger'}[item.kind] || 'info'">{{ {added:'新增',modified:'修改',deleted:'删除'}[item.kind] || '相同' }}</span><span>{{ item.path }}</span></button></div><div class="package-diff"><div class="section-heading"><h4>{{ path || '选择文件查看' }}</h4><p>代码只读；+ 表示新增行，− 表示删除行。</p></div><LoadingStatus :active="diffLoading" label="正在读取文件差异…" /><pre class="log-pre" tabindex="0">{{ diff || '从左侧选择文件，查看文本内容或版本差异。' }}</pre></div></div>
             </section>
           </template>
@@ -49,6 +49,7 @@
 </template>
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
+import { timestamp } from '../timebase';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
 const props = defineProps({ confirm: {type:Function,required:true}, initialPid: {type:String,default:''} });
@@ -58,6 +59,7 @@ const loading = ref(false), busy = ref(false), busyLabel = ref(''), error = ref(
 const creating = ref(false), trash = ref(false), search = ref(''), file = ref(null), entry = ref('');
 const path = ref(''), diff = ref(''), diffLoading = ref(false), maxMB = ref(64);
 const form = reactive({task_name:'',group_name:'',folder_name:'',note:''});
+const preparationSeconds = computed(() => preview.value?.release.prepare_started_at ? Math.max(0,Math.floor((Date.now()-timestamp(preview.value.release.prepare_started_at))/1000)) : 0);
 let timer, generation = 0, stopped = false;
 const short = value => value?.slice(0,8) || '—';
 const stateLabel = status => ({staged:'等待依赖检查',preparing:'准备依赖中',ready:'检查通过',applied:'曾发布',failed:'检查失败'})[status] || status;
@@ -110,7 +112,7 @@ async function importExisting() { await work('正在复制现有任务代码…'
 async function prepare() { await work('正在提交依赖检查…',async () => { await api.packageAction({action:'prepare',pid:selected.value.pid,version:preview.value.release.version,main_file:entry.value}); await inspect(preview.value.release.version); }); }
 async function activate() {
   const version = preview.value.release.version, rollback = Boolean(preview.value.release.published_at);
-  if (!await props.confirm({title:rollback ? '回滚任务代码' : '发布任务版本',message:`${selected.value.task_name} 将使用版本 ${short(version)}。`,details:[`新增 ${counts.value.added}、修改 ${counts.value.modified}、删除 ${counts.value.deleted} 个文件。`,'保留当前调度配置；已经排队或运行的实例继续使用原版本。'],confirmText:rollback ? '确认回滚' : '确认发布',danger:rollback})) return;
+  if (!await props.confirm({title:rollback ? '回滚任务代码' : '发布任务版本',message:`${selected.value.task_name} 将从 ${short(selected.value.active_version)} 切换为 ${short(version)}。`,details:[`新增 ${counts.value.added}、修改 ${counts.value.modified}、删除 ${counts.value.deleted} 个文件。`,'保留当前调度配置；已经排队或运行的实例继续使用原版本。'],confirmText:rollback ? '确认回滚' : '确认发布',danger:rollback})) return;
   await work('正在发布并等待调度器确认…',async () => { await api.packageAction({action:rollback ? 'rollback' : 'publish',pid:selected.value.pid,version,revision:selected.value.revision}); await refresh(); await inspect(version); message.value = rollback ? '代码已回滚，调度配置保持原样。' : '版本已生效；新任务可在任务列表配置自动调度。'; emit('changed'); });
 }
 async function remove() {

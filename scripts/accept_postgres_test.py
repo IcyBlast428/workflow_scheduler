@@ -192,5 +192,23 @@ class PostgreSQLAcceptance(unittest.TestCase):
             self.assertEqual(db.execute_query_sql('SELECT failures FROM wfs_run_totals WHERE pid=?',params=(self.pid,))[0][0],6)
 
 
+    def test_backfill_skips_locked_history_and_counts_each_record_once(self):
+        from app.bootstrap import run_summary
+        stamp=dt.datetime.now().replace(microsecond=0)
+        identifiers=[uuid.uuid4().hex for _ in range(3)]
+        for identifier in identifiers: self.insert(identifier,stamp,state=1)
+        with GaussDB() as locked:
+            locked.begin_transaction()
+            try:
+                locked.execute_query_sql('SELECT id FROM wfs_run_history WHERE id=? FOR UPDATE',params=(identifiers[0],))
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    self.assertGreaterEqual(pool.submit(run_summary.backfill,100).result(timeout=5),2)
+            finally: locked.set_commit()
+        run_summary.backfill(100);run_summary.backfill(100)
+        with GaussDB() as db:
+            self.assertEqual(db.execute_query_sql('SELECT SUM(executions) FROM wfs_run_summary WHERE pid=?',params=(self.pid,))[0][0],3)
+            self.assertEqual(db.execute_query_sql('SELECT failures FROM wfs_run_totals WHERE pid=?',params=(self.pid,))[0][0],3)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

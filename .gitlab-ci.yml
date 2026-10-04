@@ -17,6 +17,24 @@ frontend-build:
     - npm test
     - npm run build
 
+postgres-acceptance:
+  stage: test
+  image: python:3.12
+  services:
+    - name: postgres:18.1
+      alias: postgres
+  variables:
+    POSTGRES_DB: wfstest
+    POSTGRES_USER: wfstest
+    POSTGRES_PASSWORD: disposable-ci-database-password
+    PGDATABASE: wfstest
+    PGPASSWORD: disposable-ci-database-password
+    WFS_CI_POSTGRES: 'true'
+  script:
+    - apt-get update && apt-get install -y --no-install-recommends odbc-postgresql unixodbc
+    - python -m pip install -r requirements-linux-py312.lock
+    - python scripts/ci_postgres_acceptance.py
+
 browser-regression:
   stage: test
   image: mcr.microsoft.com/playwright:v1.63.0-noble

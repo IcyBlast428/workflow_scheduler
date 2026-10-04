@@ -35,7 +35,7 @@ ddl.sql                  新建生产数据库的初始表结构
 在 Ubuntu WSL 终端进入项目目录：
 
 ```bash
-cd /mnt/c/Users/cy428/Documents/GitLab/workflow_scheduler
+cd "/mnt/c/Users/<Windows用户名>/Documents/Github/workflow_scheduler"
 python3 -m venv ~/.local/share/workflow-scheduler/.venv
 ~/.local/share/workflow-scheduler/.venv/bin/pip install -r requirements.txt
 npm --prefix frontend ci --no-audit --no-fund
@@ -44,6 +44,27 @@ npm --prefix frontend run build
 bash run.sh migrate
 bash scripts/local_service.sh start
 ```
+
+如果已经配置本地 PostgreSQL，请使用对应配置启动：
+
+```bash
+bash scripts/local_service.sh start .env.postgres.local
+```
+
+启动前可加载选择的环境并执行只读检查：
+
+```bash
+set -a
+source .env.postgres.local  # SQLite 环境则选 .env.local
+set +a
+"$WFS_PYTHON" scripts/check_local_env.py --database
+```
+
+检查显示解释器、依赖、端口、空间、数据库类型与基础迁移表，不打印密码或连接凭据。端口已有服务时先用 `local_service.sh status` 核对，不必重复启动。
+
+平台业务时间统一为 `Asia/Shanghai`（UTC+8），包含调度、记录、矩阵与默认日志日期。历史无时区时间按原业务含义保留；已有 UTC 等其他来源数据的安装应先核对来源，再安排单独迁移。本次不自动改写历史记录。普通 PostgreSQL 可显式设置 `WFS_DB_DIALECT=postgresql` 启用统计行级更新；GaussDB/DWS 保持原兼容路径。
+
+界面提供任务更多操作、执行记录名称检索、日期快捷范围、可直接定位的任务/执行链接、总览待处理事项、二维时间图，以及持久化的“简化特效”选项。管理员可在账户与审计页检查版本容量和保留范围；此功能只做预览，不自动删除版本。详细说明见 [本轮优化与验证](docs/workspace-optimizations-2026-10-04.md)。
 
 初始化脚本生成随机管理员密码并只显示一次；配置写入未被 Git 跟踪的 `.env.local`。已存在时不会覆盖配置。启动脚本使用其中的 Python 路径，将 Web 与 Scheduler 放在后台运行。访问 <http://127.0.0.1:18008/>。
 

@@ -1,4 +1,6 @@
 """Shared identities, role policy and bounded login attempts."""
+from app.bootstrap.timebase import business_now
+
 import datetime as dt
 import hashlib
 from flask import session
@@ -44,7 +46,7 @@ def login_keys(username, address):
 
 
 def check_login_limit(username, address):
-    now = dt.datetime.now()
+    now = business_now()
     with GaussDB() as db:
         for index, key in enumerate(login_keys(username, address)):
             rows = db.execute_query_sql('SELECT failures,window_start FROM wfs_login_limits WHERE key_hash=?', params=(key,))
@@ -58,7 +60,7 @@ def check_login_limit(username, address):
 
 
 def record_login_failure(username, address):
-    now = dt.datetime.now()
+    now = business_now()
     with GaussDB() as db:
         db.begin_transaction()
         try:

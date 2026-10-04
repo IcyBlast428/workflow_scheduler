@@ -1,7 +1,6 @@
 <template>
-  <div v-if="runId" class="modal-backdrop" @click.self="$emit('close')">
-    <section v-glass class="modal execution-modal glass-surface glass-floating">
-      <header class="modal-head"><div><h3>本次执行：{{ record.pid || '加载中' }}</h3><p class="hint mono">{{ runId }}</p></div>
+  <ModalShell :open="Boolean(runId)" :label="`本次执行：${record.task_name || record.task_name || record.pid || '加载中'}`" panel-class="execution-modal" backdrop-class="" @close="$emit('close')">
+      <header class="modal-head"><div><h3>本次执行：{{ record.task_name || record.pid || '加载中' }}</h3><p class="hint mono">{{ runId }}</p></div>
         <button class="btn icon-only" title="关闭" @click="$emit('close')">×</button></header>
       <div class="modal-body">
         <LoadingStatus :active="initialLoading" label="正在读取执行详情与日志…" />
@@ -23,10 +22,10 @@
           <a class="btn" :href="`/api/taskinfo/run-download?run_id=${runId}`" download>下载保留日志</a></div>
         <pre ref="logElement" class="log-pre execution-output">{{ filtered || emptyExecutionLog(record.status, search) }}</pre>
       </div>
-    </section>
-  </div>
+  </ModalShell>
 </template>
 <script setup>
+import ModalShell from './ModalShell.vue';
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';

@@ -80,6 +80,7 @@
       <button class="btn icon-only mobile-menu" type="button" title="菜单" @click="mobileNavOpen = !mobileNavOpen">≡</button>
       <nav class="nav">
         <button
+          v-glass
           v-for="item in visibleNavItems"
           :key="item.id"
           class="nav-button"
@@ -87,7 +88,9 @@
           type="button"
           :title="item.label"
           :aria-label="item.label"
-          @click="switchView(item.id)"
+          :aria-current="view === item.id ? 'page' : undefined"
+          @mouseenter="showNavHint(item,$event)" @mouseleave="navHint = null" @focus="showNavHint(item,$event)" @blur="navHint = null"
+          @click="navHint = null; switchView(item.id)"
         >
           <span class="nav-icon" aria-hidden="true">
             <svg class="nav-svg" viewBox="0 0 24 24" role="img">
@@ -101,6 +104,9 @@
           <span class="nav-label">{{ item.label }}</span>
         </button>
       </nav>
+      <div class="sidebar-account">
+        <UserMenu placement="sidebar" :name="user.name || 'Admin'" :avatar="user.avatar" @logout="handleLogout" />
+      </div>
     </aside>
 
     <div class="main">
@@ -110,19 +116,19 @@
           <span>{{ activeNav.description }}</span>
         </div>
         <div class="top-actions">
+          <button class="btn effects-toggle" :aria-pressed="lowEffects" @click="lowEffects = !lowEffects">{{ lowEffects ? '恢复特效' : '简化特效' }}</button>
           <button v-if="canManage" class="btn warning" type="button" :disabled="busy" @click="handleUpdateCode">
             <span class="btn-icon">^</span>
             检查更新
           </button>
           <div class="status-chip" :class="backendStatus.reachable ? 'online' : 'offline'">
-            <strong>{{ backendStatus.reachable ? '后端正常' : '后端异常' }}</strong>
+            <strong>{{ backendStatus.reachable ? '接口正常' : '后端异常' }}</strong>
             <span>{{ backendStatus.checkedAt || '未检测' }}</span>
           </div>
           <div v-if="!['dashboard', 'matrix', 'admin', 'packages'].includes(view)" class="status-chip" :class="liveState.connected ? 'online' : 'offline'">
             <strong>{{ liveState.connected ? '实时同步' : '实时断开' }}</strong>
             <span>{{ liveState.lastEvent || '等待连接' }}</span>
           </div>
-          <UserMenu :name="user.name || 'Admin'" :avatar="user.avatar" @logout="handleLogout" />
         </div>
       </header>
 
@@ -137,6 +143,7 @@
           <LoadingStatus :active="dashboard.loading" label="正在更新总览…" />
           <div v-if="dashboard.error" class="error-state">{{ dashboard.error }}</div>
           <template v-if="!dashboard.error || dashboard.loaded">
+            <RuntimeOverview :can-manage="canManage" @detail="detailPid = $event" @execution="openExecution" @admin="switchView('admin')" />
             <DashboardSummary :summary="dashboard.summary" :failures="dashboard.failure_rank" :recent="dashboard.recent_runs" @tasks="showFilteredTasks" @detail="detailPid = $event" />
             <section class="panel cpu-panel">
               <div class="panel-head cpu-panel-head">
@@ -251,6 +258,7 @@
               @favorite="toggleFavorite"
               @select="toggleSelected"
               @detail="detailPid = $event.id"
+              @execution="openActiveExecution"
               @action="editTask"
               @pause="pauseTask"
               @call="handleCallTask"
@@ -271,10 +279,11 @@
           <section class="panel">
             <div class="panel-head">
               <div>
-                <h2>调度日志</h2>
+                <h2>执行记录</h2>
                 <p>默认查看最近 7 天。历史记录可按任务和日期查询，每次日期范围不超过 93 天。</p>
               </div>
             </div>
+            <div class="log-shortcuts"><span>业务时区：Asia/Shanghai（UTC+8）</span><button v-for="range in [{days:1,label:'今天'},{days:7,label:'最近 7 天'},{days:30,label:'最近 30 天'}]" :key="range.days" class="btn" @click="setLogRange(range.days)">{{ range.label }}</button></div>
             <div v-if="matrixLogRange.length" class="inline-note">来自执行矩阵：{{ matrixLogRange[0] }} — {{ matrixLogRange[1] }}。搜索或清空可恢复按日期查询。</div>
             <form class="filter-grid logs" @submit.prevent="searchTaskLogs">
               <div class="form-row">
@@ -286,12 +295,13 @@
                 </select>
               </div>
               <div class="form-row">
-                <label for="task-log-id">任务 ID</label>
+                <label for="task-log-id">任务编号</label>
                 <input id="task-log-id" v-model.trim="taskLogs.params.taskid" class="input" list="task-id-options" placeholder="PID">
                 <datalist id="task-id-options">
-                  <option v-for="item in taskLogs.ids" :key="item.id" :value="item.id"></option>
+                  <option v-for="item in taskLogs.ids" :key="item.id" :value="item.id">{{ item.name || item.id }}</option>
                 </datalist>
               </div>
+              <div class="form-row"><label for="task-log-name">任务名称</label><input id="task-log-name" v-model.trim="taskLogs.params.taskname" class="input" placeholder="名称关键字"></div>
               <div class="form-row">
                 <label for="task-log-state">执行状态</label>
                 <select id="task-log-state" v-model="taskLogs.params.taskstate" class="select">
@@ -321,12 +331,14 @@
                 <button class="btn" type="button" @click="resetTaskLogFilters">清空</button>
               </div>
             </form>
-            <LoadingStatus :active="taskLogs.loading" label="正在更新调度日志…" />
+            <LoadingStatus :active="taskLogs.loading" label="正在更新执行记录…" />
             <LogTable
               kind="task"
               :rows="taskLogs.rows"
               :loading="taskLogs.loading"
               :error="taskLogs.error"
+              :filtered="Boolean(taskLogs.params.taskid || taskLogs.params.taskname || taskLogs.params.taskstate || matrixLogRange.length)"
+              @reset="resetTaskLogFilters" @tasks="switchView('tasks')"
               @open="openTaskLog"
             />
             <Pagination
@@ -348,7 +360,7 @@
           <section class="panel">
             <div class="panel-head">
               <div>
-                <h2>系统日志</h2>
+                <h2>平台事件</h2>
                 <p>查看调度器事件、任务异常和系统级报错记录。</p>
               </div>
             </div>
@@ -376,13 +388,13 @@
                 <button class="btn" type="button" @click="resetSystemLogFilters">清空</button>
               </div>
             </form>
-            <LoadingStatus :active="systemLogs.loading" label="正在更新系统日志…" />
+            <LoadingStatus :active="systemLogs.loading" label="正在更新平台事件…" />
             <LogTable
               kind="system"
               :rows="systemLogs.rows"
               :loading="systemLogs.loading"
               :error="systemLogs.error"
-              @open="(row) => showModal(`系统日志：${row.id}`, row.systeminfo || ' ')"
+              @open="(row) => showModal(`平台事件：${row.id}`, row.systeminfo || ' ')"
             />
             <Pagination
               :page="systemLogs.params.currentPage"
@@ -399,8 +411,7 @@
     </div>
   </div>
 
-  <div v-if="modal.open" class="modal-backdrop" @click.self="closeModal">
-    <section v-glass class="modal glass-surface glass-floating">
+  <ModalShell :open="modal.open" :label="modal.title" @close="closeModal">
       <header class="modal-head">
         <h3>{{ modal.title }}</h3>
         <div class="modal-actions">
@@ -414,9 +425,9 @@
       <div class="modal-body">
         <pre class="log-pre" :class="{ nowrap: !modal.wrap }">{{ modal.content }}</pre>
       </div>
-    </section>
-  </div>
+  </ModalShell>
 
+  <Teleport to="body"><div v-if="navHint" class="nav-tooltip" :style="{left:`${navHint.left}px`,top:`${navHint.top}px`}" aria-hidden="true">{{ navHint.label }}</div></Teleport>
   <div class="toast-root" aria-live="polite">
     <div v-for="toast in toasts" :key="toast.id" v-glass class="toast glass-surface glass-floating" :class="toast.type">
       <strong>{{ toast.title }}</strong>
@@ -446,6 +457,11 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
+import ModalShell from './components/ModalShell.vue';
+import RuntimeOverview from './components/RuntimeOverview.vue';
+import { readPreference, writePreference } from './workspacePreferences';
+import { readRoute, routeHash } from './routeLocation';
+import { recentDates, timestamp } from './timebase';
 import BrandLogo from './components/BrandLogo.vue';
 import CursorLight from './components/CursorLight.vue';
 import LoginBackdrop from './components/LoginBackdrop.vue';
@@ -473,6 +489,10 @@ import ExecutionMatrix from './components/ExecutionMatrix.vue';
 import { canTrigger } from './executionLabels';
 import { useConfirm } from './composables/useConfirm';
 const loginVisual = shallowRef(null);
+const lowEffects = ref(Boolean(readPreference('wfs:low-effects',false)));
+watch(lowEffects,value => { document.documentElement.dataset.effects = value ? 'low' : 'full'; writePreference('wfs:low-effects',value); window.dispatchEvent(new Event('wfs:effects')); },{immediate:true});
+const navHint = ref(null);
+function showNavHint(item,event) { const rect = event.currentTarget.getBoundingClientRect(); navHint.value = {label:item.label,top:rect.top+rect.height/2,left:rect.right+10}; }
 
 const navItems = [
   {
@@ -504,7 +524,7 @@ const navItems = [
   },
   {
     id: 'taskLogs',
-    label: '调度日志',
+    label: '执行记录',
     iconPaths: [
       'M7 4.5h7l3 3v12H7z',
       'M14 4.5v4h4',
@@ -515,7 +535,7 @@ const navItems = [
   },
   {
     id: 'systemLogs',
-    label: '系统日志',
+    label: '平台事件',
     iconPaths: [
       'M12 3.8l7 4v8.4l-7 4-7-4V7.8z',
       'M12 8v5',
@@ -529,7 +549,7 @@ const navItems = [
 
 const ready = ref(false);
 const token = ref(getToken());
-const view = ref(window.location.hash.replace('#', '') || 'dashboard');
+const view = ref(readRoute(window.location.hash).view);
 const packagePid = ref('');
 const mobileNavOpen = ref(false);
 const loginLoading = ref(false);
@@ -582,7 +602,7 @@ const liveState = reactive({
 
 const dashboard = useDashboardWorkspace();
 const { taskLogs, systemLogs } = useLogWorkspace();
-let taskLogRequestSerial = 0;
+let taskLogRequestSerial = 0, systemLogRequestSerial = 0, logDetailSerial = 0;
 const matrixLogRange = ref([]);
 const modal = reactive({
   open: false,
@@ -724,6 +744,7 @@ function formatModalContent(content) {
 }
 
 function closeModal() {
+  logDetailSerial++;
   modal.open = false;
 }
 
@@ -796,7 +817,7 @@ async function loadDashboard(options = {}) {
     if (incoming.incremental) {
       const cutoff = Date.now() - 6 * 60 * 60 * 1000;
       const merged = new Map([...dashboard.cpu_timeline.samples, ...(incoming.samples || [])].map(item => [item.time, item]));
-      incoming.samples = [...merged.values()].filter(item => new Date(item.time.replace(' ', 'T')).getTime() >= cutoff).sort((a,b) => a.time.localeCompare(b.time));
+      incoming.samples = [...merged.values()].filter(item => timestamp(item.time) >= cutoff).sort((a,b) => a.time.localeCompare(b.time));
     }
     Object.assign(dashboard.cpu_timeline, {
       samples: [],
@@ -833,6 +854,7 @@ async function handleLogin() {
     await loadUser();
     await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
     startLiveEvents();
+    applyRoute();
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '登录失败' });
   } finally {
@@ -1086,7 +1108,9 @@ async function openScheduleDialog(row) {
   }
 }
 
-function closeScheduleDialog() {
+async function closeScheduleDialog(options = {}) {
+  if (scheduleDialog.saving) return;
+  if (options.dirty && !await requestConfirm({ eyebrow: '未保存的修改', title: '放弃未保存的配置？', message: '当前修改尚未保存。关闭后会恢复已保存的配置。', confirmText: '放弃修改', cancelText: '继续编辑' })) return;
   if (scheduleDialog.saving) {
     return;
   }
@@ -1153,11 +1177,16 @@ async function saveSchedule(form) {
 }
 
 async function openLatestLog(row) {
+  const serial = ++logDetailSerial;
+  showModal(`最新输出：${row.name || row.id}`, '正在读取输出…');
   try {
     const content = await api.detailLog({ id: row.id });
+    if (serial !== logDetailSerial || !modal.open) return;
     markBackendHealthy('后端连接正常');
-    showModal(`最新日志：${row.id}`, content || ' ');
+    modal.content = formatModalContent(content || '本次执行没有日志输出。');
   } catch (error) {
+    if (serial !== logDetailSerial || !modal.open) return;
+    modal.content = error.message;
     await handleRequestFailure(error, { toastTitle: '日志读取失败' });
   }
 }
@@ -1170,7 +1199,7 @@ async function reloadTasks(fullReload) {
       message: '全量重载会清空当前调度器内的任务，并按 app/jobs 目录重新注册。',
       details: [
         '正在执行中的子进程不会自动回滚业务数据。',
-        '建议在任务低峰期操作，并关注系统日志。',
+        '建议在任务低峰期操作，并关注平台事件。',
       ],
       confirmText: '全量重载',
       danger: true,
@@ -1227,6 +1256,7 @@ function taskLogQueryParams() {
     scope: taskLogs.params.scope,
     cursor: taskLogs.cursors[taskLogs.params.currentPage-1] || '',
     taskid: taskLogs.params.taskid,
+    taskname: taskLogs.params.taskname,
     taskstate: taskLogs.params.taskstate,
     datetimeval: matrixLogRange.value.length ? matrixLogRange.value : buildDateRange(taskLogs.params),
     currentPage: taskLogs.params.currentPage,
@@ -1263,6 +1293,7 @@ async function loadTaskLogs(resetPage = false, options = {}) {
 }
 
 async function openTaskLog(row) {
+  const serial = ++logDetailSerial;
   showModal(`任务日志：${row.id}`, '正在加载日志...');
   try {
     const content = await api.taskLogDetail({
@@ -1271,8 +1302,10 @@ async function openTaskLog(row) {
       pid: row.id,
     });
     markBackendHealthy('后端连接正常');
+    if (serial !== logDetailSerial || !modal.open) return;
     modal.content = formatModalContent(content);
   } catch (error) {
+    if (serial !== logDetailSerial || !modal.open) return;
     await handleRequestFailure(error, { toastTitle: '日志读取失败' });
     modal.content = error.message || ' ';
   }
@@ -1292,14 +1325,19 @@ function resetTaskLogFilters() {
   const dates = recentLogDates();
   taskLogs.params.scope = 'online';
   taskLogs.params.taskid = '';
+  taskLogs.params.taskname = '';
   taskLogs.params.taskstate = '';
   taskLogs.params.startDate = dates.start;
   taskLogs.params.endDate = dates.end;
+  syncRoute();
   loadTaskLogs(true);
 }
 
+function setLogRange(days) { const dates = recentDates(days); taskLogs.params.startDate = dates.start; taskLogs.params.endDate = dates.end; searchTaskLogs(); }
+
 function searchTaskLogs() {
   matrixLogRange.value = [];
+  syncRoute();
   loadTaskLogs(true);
 }
 
@@ -1329,6 +1367,7 @@ function systemLogQueryParams() {
 }
 
 async function loadSystemLogs(resetPage = false) {
+  const serial = ++systemLogRequestSerial;
   if (resetPage) {
     systemLogs.params.currentPage = 1;
   }
@@ -1336,14 +1375,16 @@ async function loadSystemLogs(resetPage = false) {
   systemLogs.error = '';
   try {
     const data = await api.systemLogs(systemLogQueryParams());
+    if (serial !== systemLogRequestSerial) return;
     markBackendHealthy('后端连接正常');
     systemLogs.rows = data.data || [];
     systemLogs.total = data.total || 0;
     systemLogs.hasMore = Boolean(data.has_more);
   } catch (error) {
+    if (serial !== systemLogRequestSerial) return;
     await handleRequestFailure(error, { state: systemLogs });
   } finally {
-    systemLogs.loading = false;
+    if (serial === systemLogRequestSerial) systemLogs.loading = false;
   }
 }
 
@@ -1352,7 +1393,7 @@ async function loadSystemIds() {
     systemLogs.ids = await api.systemIds();
     markBackendHealthy('后端连接正常');
   } catch (error) {
-    await handleRequestFailure(error, { toastTitle: '系统日志 ID 加载失败' });
+    await handleRequestFailure(error, { toastTitle: '平台事件 ID 加载失败' });
   }
 }
 
@@ -1542,16 +1583,40 @@ watch(token, (nextToken) => {
   syncDashboardPolling();
 });
 
-window.addEventListener('hashchange', () => {
-  const nextView = window.location.hash.replace('#', '');
-  if (navItems.some((item) => item.id === nextView)) {
-    view.value = nextView;
+function applyRoute() {
+  const route = readRoute(window.location.hash);
+  view.value = route.view;
+  if (!token.value) return;
+  detailPid.value = route.run ? '' : route.pid; executionRunId.value = route.run;
+  if (route.view === 'taskLogs') {
+    const mapping = {taskid:'taskid',taskname:'taskname',state:'taskstate',start:'startDate',end:'endDate',scope:'scope'};
+    for (const [query,key] of Object.entries(mapping)) if (route.params.has(query)) taskLogs.params[key] = route.params.get(query).slice(0,200);
+    if (!['online','archive','all'].includes(taskLogs.params.scope)) taskLogs.params.scope = 'online';
+    loadTaskLogs(true);
   }
-});
+}
+function syncRoute() {
+  const current = readRoute(window.location.hash);
+  const values = Object.fromEntries(current.params);
+  values.pid = detailPid.value; values.run = executionRunId.value;
+  if (view.value === 'taskLogs') Object.assign(values,{taskid:taskLogs.params.taskid,taskname:taskLogs.params.taskname,state:taskLogs.params.taskstate,start:taskLogs.params.startDate,end:taskLogs.params.endDate,scope:taskLogs.params.scope});
+  const hash = routeHash(view.value,values);
+  if (hash !== window.location.hash) window.history.pushState(null,'',hash);
+}
+window.addEventListener('hashchange', applyRoute);
+watch([detailPid,executionRunId],syncRoute);
 
 function openExecution(runId) { detailPid.value = ''; executionRunId.value = runId; }
+async function openActiveExecution(row) {
+  try {
+    const runs = await api.runs(row.id);
+    const active = runs.find(run => ['running','queued'].includes(run.status));
+    if (active) openExecution(active.run_id); else detailPid.value = row.id;
+  } catch (error) { await handleRequestFailure(error,{toastTitle:'执行记录读取失败'}); }
+}
 function openMatrixLogs(record) {
   taskLogs.params.taskid = record.pid;
+  taskLogs.params.taskname = '';
   taskLogs.params.scope = 'online';
   taskLogs.params.startDate = record.start_time.slice(0,10);
   taskLogs.params.endDate = record.end_time.slice(0,10);
@@ -1598,6 +1663,7 @@ onMounted(async () => {
     await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
     startLiveEvents();
     syncDashboardPolling();
+    applyRoute();
   } catch (error) {
     clearToken();
     token.value = '';
@@ -1606,6 +1672,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('hashchange',applyRoute);
   stopLiveEvents();
   stopDashboardPolling();
   document.removeEventListener('visibilitychange', handleVisibilityChange);

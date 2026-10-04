@@ -1,12 +1,11 @@
 <template>
-  <div v-if="open" class="modal-backdrop schedule-backdrop" @click.self="$emit('close')">
-    <section v-glass class="modal schedule-modal glass-surface glass-floating">
+  <ModalShell :open="open" :label="`任务配置：${task?.name || task?.id || '-'}`" panel-class="schedule-modal" backdrop-class="" @close="requestClose">
       <header class="modal-head">
         <div>
-          <h3>任务配置：{{ task?.id || '-' }}</h3>
-          <p class="modal-subtitle">{{ task?.group_name || '-' }} / {{ task?.folder_name || '-' }}</p>
+          <h3>任务配置：{{ task?.name || task?.id || '-' }}</h3>
+          <p class="modal-subtitle">{{ task?.id }} · {{ task?.group_name || '-' }} / {{ task?.folder_name || '-' }} · Asia/Shanghai（UTC+8）</p>
         </div>
-        <button class="btn icon-only" type="button" title="关闭" @click="$emit('close')">×</button>
+        <button class="btn icon-only" type="button" title="关闭" @click="requestClose">×</button>
       </header>
 
       <div class="modal-body schedule-body">
@@ -208,18 +207,19 @@
           </div>
 
           <footer class="confirm-footer schedule-footer">
-            <button class="btn" type="button" @click="$emit('close')">取消</button>
+            <button class="btn" type="button" @click="requestClose">取消</button>
             <button class="btn primary" type="submit" :disabled="saving || loading">
               {{ saving ? '保存中...' : '保存配置' }}
             </button>
           </footer>
         </form>
       </div>
-    </section>
-  </div>
+  </ModalShell>
 </template>
 
 <script setup>
+import ModalShell from './ModalShell.vue';
+import { businessDateTime } from '../timebase';
 import { computed, onUnmounted, reactive, watch } from 'vue';
 import { resetScheduleForm } from '../scheduleForm';
 import LoadingStatus from './LoadingStatus.vue';
@@ -279,6 +279,8 @@ const weekdayOptions = [
 ];
 
 const form = reactive(defaultForm());
+let initialForm = '';
+function requestClose() { if (!props.saving) emit('close', { dirty: Boolean(initialForm) && initialForm !== JSON.stringify(form) }); }
 let previewTimer = null;
 
 const activeTypeOptions = computed(() => typeOptions[form.schedule_family] || typeOptions.interval);
@@ -325,6 +327,7 @@ watch(
     resetScheduleForm(form, defaultForm(), schedule?.form || {});
     form.schedule_family = familyForType(form.schedule_type);
     ensureOnceAtDateTime();
+    initialForm = JSON.stringify(form);
   },
   { immediate: true },
 );
@@ -390,15 +393,7 @@ function padNumber(value) {
   return String(value).padStart(2, '0');
 }
 
-function defaultRunDateTime() {
-  const next = new Date(Date.now() + 5 * 60 * 1000);
-  next.setSeconds(0, 0);
-  return [
-    next.getFullYear(),
-    padNumber(next.getMonth() + 1),
-    padNumber(next.getDate()),
-  ].join('-') + `T${padNumber(next.getHours())}:${padNumber(next.getMinutes())}`;
-}
+function defaultRunDateTime() { return businessDateTime(new Date(Date.now()+5*60*1000)); }
 
 function ensureOnceAtDateTime() {
   if (form.schedule_type !== 'once_at') {

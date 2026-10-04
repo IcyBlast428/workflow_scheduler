@@ -39,6 +39,9 @@ with tempfile.TemporaryDirectory(prefix='wfs-pg-acceptance-') as temporary:
         from scripts.accept_postgres_test import PostgreSQLAcceptance
         result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(PostgreSQLAcceptance))
         passed = result.wasSuccessful()
+        if passed and os.environ.get('WFS_PG_BENCHMARK') == 'true':
+            from scripts.benchmark_postgres_completion import benchmark
+            benchmark()
     finally:
         if created:
             # Only the exact fresh UUID schema created by this process is removed.

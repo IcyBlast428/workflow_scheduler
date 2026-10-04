@@ -1,4 +1,6 @@
 """Task process lifecycle, bounded live logs and durable completion."""
+from app.bootstrap.timebase import business_now
+
 import datetime
 import html
 import logging
@@ -91,7 +93,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
         record = update_run(run_id, status='skipped', state=SKIPPED, end_time=now(), reason=runnings.capacity_reason(PID, max_instances))
         save_history(record)
         return
-    start = datetime.datetime.now()
+    start = business_now()
     output = ''
     state = 1
     process = reader = None
@@ -171,7 +173,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 logger.exception('process cleanup failed: %s', PID)
             if reader:
                 reader.join(timeout=5)
-        end = datetime.datetime.now()
+        end = business_now()
         runnings.remove(reservation)
         try:
             record_task_end(PID, start, end)

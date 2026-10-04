@@ -3,6 +3,8 @@
 Once a network send starts, ambiguous failures are marked unknown; they are
 never automatically resent. Failures before sending can be retried safely.
 """
+from app.bootstrap.timebase import business_now
+
 import datetime as dt
 import html
 import json
@@ -25,7 +27,11 @@ def enqueue_result(db, record, output):
     if get_runtime_env() != 'production':
         return
     pid, ended = record['pid'], dt.datetime.fromisoformat(record['end_time'])
-    if not db._local_sqlite:
+    if db.dialect == 'PostgreSQL':
+        import hashlib
+        key = int.from_bytes(hashlib.sha256(('wfs-alert:'+pid).encode()).digest()[:8], 'big', signed=True)
+        db.execute_query_sql('SELECT pg_advisory_xact_lock(CAST(? AS BIGINT))',params=(key,))
+    elif not db._local_sqlite:
         db.execute_sql('LOCK TABLE wfs_alert_incidents IN EXCLUSIVE MODE')
     previous = db.execute_query_sql('SELECT incident,last_alert_at FROM wfs_alert_incidents WHERE pid=?', params=(pid,))
     if is_failure(record.get('state')):
@@ -79,7 +85,7 @@ def process_batch(limit=20, recover=False):
     with _lock, GaussDB() as db:
         if recover:
             db.execute_sql("UPDATE wfs_notifications SET status='unknown',message='服务重启前发送未确认；请核对网关记录，系统不会自动重发。' WHERE status='sending'")
-        rows = db.execute_query_sql("SELECT id,pid,channel,payload,kind,attempts FROM wfs_notifications WHERE status='pending' AND due_at<=? ORDER BY due_at LIMIT ?",params=(dt.datetime.now(),limit))
+        rows = db.execute_query_sql("SELECT id,pid,channel,payload,kind,attempts FROM wfs_notifications WHERE status='pending' AND due_at<=? ORDER BY due_at LIMIT ?",params=(business_now(),limit))
         for identifier,pid,channel,raw,kind,attempts in rows:
             payload = json.loads(raw)
             try:
@@ -89,7 +95,7 @@ def process_batch(limit=20, recover=False):
             except Exception as exc:
                 attempts += 1
                 db.execute_sql('UPDATE wfs_notifications SET attempts=?,status=?,due_at=?,message=? WHERE id=?',
-                               params=(attempts,'failed' if attempts>=5 else 'pending',dt.datetime.now()+dt.timedelta(seconds=min(3600,30*2**attempts)),str(exc)[:1000],identifier))
+                               params=(attempts,'failed' if attempts>=5 else 'pending',business_now()+dt.timedelta(seconds=min(3600,30*2**attempts)),str(exc)[:1000],identifier))
                 continue
             # Autocommit before network I/O: a crash now must not cause resend.
             db.execute_sql("UPDATE wfs_notifications SET status='sending',attempts=attempts+1 WHERE id=? AND status='pending'",params=(identifier,))
