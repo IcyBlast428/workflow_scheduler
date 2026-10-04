@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark light">
+  <meta name="color-scheme" content="dark">
   <title>定时任务调度</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=task-clock">
   <style>
@@ -27,14 +27,13 @@
     if (window.__WFS_UNSUPPORTED_BROWSER__) {
       document.documentElement.className += ' browser-unsupported';
     } else {
-      var initialTheme = 'dark';
-      try { if (localStorage.getItem('workflow_scheduler_theme') === 'light') initialTheme = 'light'; } catch (error) {}
-      document.documentElement.setAttribute('data-theme', initialTheme);
-      document.documentElement.style.colorScheme = initialTheme;
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.style.colorScheme = 'dark';
+      try { localStorage.removeItem('workflow_scheduler_theme'); } catch (error) {}
     }
   </script>
-  <script type="module" crossorigin src="/static/index-CWGsxkDd.js"></script>
-  <link rel="stylesheet" crossorigin href="/static/index-93hZzCpH.css">
+  <script type="module" crossorigin src="/static/index-CSamThO-.js"></script>
+  <link rel="stylesheet" crossorigin href="/static/index-7Da0BipU.css">
 </head>
 <body>
   <div class="browser-unsupported-notice" role="alert" aria-labelledby="browser-notice-title">
@@ -45,6 +44,6 @@
     <p class="browser-notice-hint">如果您使用的是 Edge 的 IE 模式，请退出 IE 模式后重新打开此页面。</p>
   </div>
   <noscript>定时任务调度需要启用 JavaScript 才能正常使用。</noscript>
-  <div id="app"></div>
+  <div id="app"></div>
 </body>
 </html>

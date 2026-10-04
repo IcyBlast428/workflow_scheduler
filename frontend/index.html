@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark light">
+  <meta name="color-scheme" content="dark">
   <title>定时任务调度</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=task-clock">
   <style>
@@ -27,10 +27,9 @@
     if (window.__WFS_UNSUPPORTED_BROWSER__) {
       document.documentElement.className += ' browser-unsupported';
     } else {
-      var initialTheme = 'dark';
-      try { if (localStorage.getItem('workflow_scheduler_theme') === 'light') initialTheme = 'light'; } catch (error) {}
-      document.documentElement.setAttribute('data-theme', initialTheme);
-      document.documentElement.style.colorScheme = initialTheme;
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.style.colorScheme = 'dark';
+      try { localStorage.removeItem('workflow_scheduler_theme'); } catch (error) {}
     }
   </script>
 </head>

@@ -92,7 +92,7 @@ onUnmounted(() => {
   pointer-events: none;
   contain: strict;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(15, 118, 110, .20) 0%, rgba(15, 118, 110, .09) 22%, rgba(15, 118, 110, .035) 44%, transparent 70%);
+  background: radial-gradient(circle, rgba(94, 234, 212, .23) 0%, rgba(45, 212, 191, .105) 22%, rgba(45, 212, 191, .035) 44%, transparent 70%);
 }
 .cursor-light span {
   position: absolute;
@@ -103,9 +103,6 @@ onUnmounted(() => {
   animation-play-state: paused;
 }
 .cursor-light.is-visible span { animation-play-state: running; }
-:global(html[data-theme="dark"]) .cursor-light {
-  background: radial-gradient(circle, rgba(94, 234, 212, .23) 0%, rgba(45, 212, 191, .105) 22%, rgba(45, 212, 191, .035) 44%, transparent 70%);
-}
 @keyframes cursor-glimmer { from { opacity: .5; transform: scale(.85); } to { opacity: .9; transform: scale(1.15); } }
 @media (prefers-reduced-motion: reduce), (hover: none) { .cursor-light { display: none; } }
 </style>

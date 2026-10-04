@@ -69,9 +69,9 @@ export function createMatrixScene(canvas, onSelect, options = {}) {
   function draw() {
     frame=0; hits=[];
     if (!data || !width || !ctx) return;
-    const style=getComputedStyle(document.documentElement), dark=document.documentElement.dataset.theme==='dark';
-    const colors={ ink:style.getPropertyValue('--ink').trim() || '#233348', muted:style.getPropertyValue('--muted').trim() || '#728297', line:style.getPropertyValue('--line').trim() || '#cbd5e1', brand:style.getPropertyValue('--brand').trim() || '#4683d4', success:dark?'#40cf88':'#25b778', failed:dark?'#f16d78':'#e45364', running:dark?'#f6cf54':'#eabf32', pending:dark?'#9cacbf':'#7c8b9e', queued:dark?'#bdc8d6':'#8a99ac', cancelled:dark?'#91a1b7':'#9da9b7', timed_out:'#e45364',interrupted:'#ae8ad8',skipped:'#8897aa',missed:'#a397c1',unknown:'#a397c1' };
-    const grid=dark?'#70849b':'#8499b2';
+    const style=getComputedStyle(document.documentElement);
+    const colors={ ink:style.getPropertyValue('--ink').trim() || '#d9e4ef', muted:style.getPropertyValue('--muted').trim() || '#91a4b7', line:style.getPropertyValue('--line').trim() || '#2a3a49', brand:style.getPropertyValue('--brand').trim() || '#2dd4bf', success:'#40cf88', failed:'#f16d78', running:'#f6cf54', pending:'#9cacbf', queued:'#bdc8d6', cancelled:'#91a1b7', timed_out:'#e45364',interrupted:'#ae8ad8',skipped:'#8897aa',missed:'#a397c1',unknown:'#a397c1' };
+    const grid='#70849b';
     ctx.clearRect(0,0,width,height);
     const layout=layoutTasks(data.tasks), today=data.date===data.server_time.slice(0,10), current=today?minuteOf(data.server_time):1440;
     const unit=7.1/Math.max(60,current), currentY=current*unit;
@@ -124,7 +124,7 @@ export function createMatrixScene(canvas, onSelect, options = {}) {
       const p=project(g.x+g.cols/2,0,g.rows+.55),text=`${g.name} · ${g.tasks.length}`,tw=ctx.measureText(text).width+18;
       let x=clamp(p[0],tw/2+5,width-tw/2-5),y=clamp(p[1],16,height-16);
       for(const old of labels) if(Math.abs(x-old.x)<(tw+old.tw)/2 && Math.abs(y-old.y)<21) y=clamp(old.y+23,16,height-12);
-      labels.push({x,y,tw});ctx.save();ctx.globalAlpha=.95;ctx.fillStyle=dark?'#202d3d':'#ffffff';ctx.fillRect(x-tw/2,y-13,tw,22);ctx.strokeStyle=colors.line;ctx.strokeRect(x-tw/2,y-13,tw,22);ctx.fillStyle=colors.ink;ctx.textAlign='center';ctx.fillText(text,x,y+2);ctx.restore();
+      labels.push({x,y,tw});ctx.save();ctx.globalAlpha=.95;ctx.fillStyle='#202d3d';ctx.fillRect(x-tw/2,y-13,tw,22);ctx.strokeStyle=colors.line;ctx.strokeRect(x-tw/2,y-13,tw,22);ctx.fillStyle=colors.ink;ctx.textAlign='center';ctx.fillText(text,x,y+2);ctx.restore();
     });
   }
   function down(e) {
@@ -154,13 +154,12 @@ export function createMatrixScene(canvas, onSelect, options = {}) {
   const cancel=()=>{drag=null;};
   canvas.addEventListener('pointerdown',down);canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);canvas.addEventListener('lostpointercapture',cancel);canvas.addEventListener('contextmenu',menu);
   const resize=new ResizeObserver(()=>{const rect=canvas.getBoundingClientRect();width=rect.width;height=rect.height;const dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);ctx?.setTransform(dpr,0,0,dpr,0,0);schedule();});resize.observe(canvas);
-  const theme=new MutationObserver(schedule);theme.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   return {
     update(snapshot,pid,focus,key){data=snapshot;selected=pid;focused=focus;selectedKey=key;schedule();},
     getCamera(){return {...camera};},
     setCamera(value){camera=safeCamera(value);schedule();},
     restore(){camera=defaultCamera();options.onCamera?.({...camera});schedule();},
     keyboard(e){if(!e.altKey)return;const moves={ArrowRight:[0,25,0],ArrowLeft:[0,-25,0],ArrowUp:[0,0,-20],ArrowDown:[0,0,20],'+':[2,0,-20],'-':[2,0,20]};if(moves[e.key]){e.preventDefault();moveCamera(camera,...moves[e.key]);options.onCamera?.({...camera});schedule();}},
-    dispose(){resize.disconnect();theme.disconnect();cancelAnimationFrame(frame);for(const [event,handler] of [['pointerdown',down],['pointermove',move],['pointerup',up],['pointercancel',cancel],['lostpointercapture',cancel],['contextmenu',menu]])canvas.removeEventListener(event,handler);}
+    dispose(){resize.disconnect();cancelAnimationFrame(frame);for(const [event,handler] of [['pointerdown',down],['pointermove',move],['pointerup',up],['pointercancel',cancel],['lostpointercapture',cancel],['contextmenu',menu]])canvas.removeEventListener(event,handler);}
   };
 }

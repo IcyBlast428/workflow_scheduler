@@ -17,12 +17,13 @@ const cases = [
 for (const [name, userAgent, documentMode, blocked] of cases) {
   for (const storageFailure of [false, true]) {
     const root = { className: '', style: {}, setAttribute(key, value) { this[key] = value; } };
-    const context = { window: {}, navigator: { userAgent }, document: { documentMode, documentElement: root },
-      localStorage: { getItem() { if (storageFailure) throw new Error('Storage unavailable'); return 'light'; } } };
+    const storage = {theme:'light', getItem() { if (storageFailure) throw new Error('Storage unavailable'); return this.theme; },
+      removeItem(key) { if (storageFailure) throw new Error('Storage unavailable'); assert.equal(key,'workflow_scheduler_theme');this.theme=null; } };
+    const context = { window: {}, navigator: { userAgent }, document: { documentMode, documentElement: root }, localStorage:storage };
     vm.runInNewContext(guard, context);
     assert.equal(context.window.__WFS_UNSUPPORTED_BROWSER__, blocked, name);
     assert.equal(root.className.includes('browser-unsupported'), blocked, name);
-    if (!blocked) assert.equal(root['data-theme'], storageFailure ? 'dark' : 'light');
+    if (!blocked) { assert.equal(root['data-theme'],'dark');assert.equal(root.style.colorScheme,'dark');if(!storageFailure)assert.equal(storage.theme,null); }
   }
 }
 assert.doesNotMatch(guard, /\b(?:let|const)\s|=>|catch\s*\{/);

@@ -39,7 +39,6 @@
             <h2>登录控制台</h2>
             <p class="hint">使用已分配的账户登录。</p>
           </div>
-          <button class="btn icon-only login-theme" type="button" :aria-label="theme === 'dark' ? '切换到浅色' : '切换到深色'" :title="theme === 'dark' ? '切换到浅色' : '切换到深色'" @click="toggleTheme">{{ theme === 'dark' ? '☼' : '☾' }}</button>
         </div>
         <div
           v-if="backendStatus.error"
@@ -111,10 +110,6 @@
           <span>{{ activeNav.description }}</span>
         </div>
         <div class="top-actions">
-          <button class="btn" type="button" @click="toggleTheme">
-            <span class="btn-icon">{{ theme === 'dark' ? '☾' : '☼' }}</span>
-            {{ theme === 'dark' ? '深色' : '浅色' }}
-          </button>
           <button v-if="canManage" class="btn warning" type="button" :disabled="busy" @click="handleUpdateCode">
             <span class="btn-icon">^</span>
             检查更新
@@ -536,7 +531,6 @@ const ready = ref(false);
 const token = ref(getToken());
 const view = ref(window.location.hash.replace('#', '') || 'dashboard');
 const packagePid = ref('');
-const theme = ref(localStorage.getItem('workflow_scheduler_theme') || 'dark');
 const mobileNavOpen = ref(false);
 const loginLoading = ref(false);
 const busy = ref(false);
@@ -632,19 +626,6 @@ const memoryCurrentText = computed(() => {
   const value = Number(dashboard.cpu_timeline.current_memory);
   return Number.isFinite(value) ? `${value.toFixed(1)}%` : '--';
 });
-
-function applyTheme() {
-  document.documentElement.dataset.theme = theme.value;
-  document.documentElement.style.colorScheme = theme.value;
-  localStorage.setItem('workflow_scheduler_theme', theme.value);
-}
-
-applyTheme();
-
-function toggleTheme() {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark';
-  applyTheme();
-}
 
 function trendHeight(value) {
   const height = Math.round((Number(value || 0) / maxTrendValue.value) * 96);
@@ -852,7 +833,6 @@ async function handleLogin() {
     await loadUser();
     await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
     startLiveEvents();
-    pushToast('success', '登录成功', '欢迎回来。');
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '登录失败' });
   } finally {
@@ -1601,7 +1581,6 @@ async function confirmRestore(payload) {
 }
 
 onMounted(async () => {
-  applyTheme();
   document.addEventListener('visibilitychange', handleVisibilityChange);
   if (!navItems.some((item) => item.id === view.value)) {
     view.value = 'dashboard';
