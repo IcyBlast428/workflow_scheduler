@@ -1,4 +1,5 @@
 ﻿<template>
+  <CursorLight />
   <div v-if="!ready" class="boot-screen">
     <div class="boot-card">
       <BrandLogo class="boot-mark" />
@@ -404,7 +405,7 @@
   </div>
 
   <div v-if="modal.open" class="modal-backdrop" @click.self="closeModal">
-    <section class="modal">
+    <section v-glass class="modal glass-surface glass-floating">
       <header class="modal-head">
         <h3>{{ modal.title }}</h3>
         <div class="modal-actions">
@@ -422,7 +423,7 @@
   </div>
 
   <div class="toast-root" aria-live="polite">
-    <div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.type">
+    <div v-for="toast in toasts" :key="toast.id" v-glass class="toast glass-surface glass-floating" :class="toast.type">
       <strong>{{ toast.title }}</strong>
       <span>{{ toast.message }}</span>
     </div>
@@ -451,6 +452,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
 import BrandLogo from './components/BrandLogo.vue';
+import CursorLight from './components/CursorLight.vue';
 import LoginBackdrop from './components/LoginBackdrop.vue';
 import LiquidGlassPanel from './components/LiquidGlassPanel.vue';
 import { LOGIN_CORNER_RADIUS } from './loginBackdropScene';

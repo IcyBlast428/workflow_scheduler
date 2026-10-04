@@ -1,10 +1,15 @@
 <template>
   <div v-if="pid" class="modal-backdrop" @click.self="$emit('close')">
-    <section class="modal task-detail-modal">
+    <section v-glass class="modal task-detail-modal glass-surface glass-floating">
       <header class="modal-head"><h3>任务详情：{{ pid }}</h3><button class="btn icon-only" title="关闭" @click="$emit('close')">×</button></header>
       <div class="modal-body task-detail-body">
-        <div class="detail-toolbar"><div class="filter-actions" aria-label="详情内容"><button v-for="item in tabs" :key="item.id" class="btn" :aria-pressed="tab === item.id" :class="tab === item.id ? 'primary' : ''" @click="selectTab(item.id)">{{ item.label }}</button></div><button class="btn detail-refresh" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新详情' }}</button></div>
-        <div v-if="canManage" class="filter-actions"><button class="btn" @click="$emit('packages',pid)">管理代码版本</button></div>
+        <div class="detail-toolbar">
+          <div class="filter-actions detail-tabs" aria-label="详情内容"><button v-for="item in tabs" :key="item.id" class="btn" :aria-pressed="tab === item.id" :class="tab === item.id ? 'primary' : ''" @click="selectTab(item.id)">{{ item.label }}</button></div>
+          <div class="filter-actions detail-actions" aria-label="详情操作">
+            <button v-if="canManage" class="btn" @click="$emit('packages',pid)">管理代码版本</button>
+            <button class="btn detail-refresh" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新详情' }}</button>
+          </div>
+        </div>
         <LoadingStatus :active="loading || (tab === 'source' && sourceLoading)" :label="tab === 'source' && sourceLoading ? '正在读取任务文件…' : '正在更新任务详情…'" />
         <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div>
         <div class="detail-panels" :aria-busy="loading">
@@ -13,6 +18,7 @@
           <p>生效状态：{{ ({applied:'已生效',pending:'待生效',failed:'生效失败',unconfigured:'未配置'})[data.schedule?.application?.status] || '待确认' }} {{ data.schedule?.application?.message }}</p>
           <p>修改人：{{ data.schedule?.updated_by || '-' }} · {{ data.schedule?.updated_at || '-' }}</p>
           <p>并发上限 {{ data.schedule?.max_instances }} · 超时 {{ data.schedule?.timeout_seconds || '不限' }} 秒</p>
+          <p v-if="data.schedule?.form?.schedule_type === 'once_at' && data.schedule?.preview?.length === 0" class="hint">单次计划时间已过；刷新或重启不会重复执行。可以修改为未来时间重新安排，或手动执行一次。</p>
           <pre class="log-pre">{{ data.schedule?.form?.description || data.description }}</pre>
           <h4>最近执行耗时</h4><div class="duration-trend"><span v-for="run in (data.runs || []).slice(0,8)" :key="run.run_id" class="tag" :title="run.created_at">{{ statusLabel(run.status) }} · {{ duration(run) }}</span></div>
           <h4>调度诊断</h4><p>全局活动实例 {{ data.diagnostics?.active }} / {{ data.diagnostics?.capacity }} · 下次计划 {{ data.diagnostics?.next_run_time || '暂无' }}</p><p v-if="data.diagnostics?.last_not_started">最近未启动：{{ data.diagnostics.last_not_started.reason }} · {{ data.diagnostics.last_not_started.scheduled_time || data.diagnostics.last_not_started.created_at }}</p>

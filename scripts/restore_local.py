@@ -30,19 +30,28 @@ def restore(backup, destination):
                 raise ValueError('备份内含无效路径。')
         destination.mkdir(parents=True)
         try:
+            directory_modes = []
             for item in archive.infolist():
                 target=destination/item.filename
                 target.parent.mkdir(parents=True,exist_ok=True)
                 if item.is_dir():
                     target.mkdir(exist_ok=True)
+                    directory_modes.append((target, (item.external_attr >> 16) & 0o777))
                 else:
                     with archive.open(item) as source,target.open('xb') as output:
                         shutil.copyfileobj(source,output)
+                    # Keep executable interpreters, without restoring setuid bits.
+                    mode = (item.external_attr >> 16) & 0o777
+                    if mode:
+                        target.chmod(mode)
             for database in (destination/'database.sqlite3',destination/'data/executions/journal.sqlite3'):
                 if database.exists():
                     with contextlib.closing(sqlite3.connect(f'file:{database}?mode=ro',uri=True)) as db:
                         if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
                             raise ValueError('恢复后的数据库完整性检查失败。')
+            for directory, mode in reversed(directory_modes):
+                if mode:
+                    directory.chmod(mode)
         except Exception:
             # Preserve failed material for inspection; never remove a computed tree.
             raise

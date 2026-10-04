@@ -68,37 +68,37 @@ const counts = computed(() => Object.fromEntries(['added','modified','deleted'].
 const fileList = computed(() => { if (!preview.value) return []; const changes = new Map(preview.value.changes.map(f => [f.path,f.kind])); return [...new Set([...preview.value.release.manifest.map(f => f.path),...changes.keys()])].sort().map(path => ({path,kind:changes.get(path)})); });
 const canPublish = computed(() => preview.value && !selected.value?.deleted_at && ['ready','applied'].includes(preview.value.release.status) && selected.value?.active_version !== preview.value.release.version);
 const downloadUrl = computed(() => '/api/taskinfo/packages/download?' + new URLSearchParams({pid:selected.value?.pid || '',version:preview.value?.release.version || ''}));
-function resetPreview() { generation++; clearTimeout(timer); preview.value = null; path.value = ''; diff.value = ''; diffLoading.value = false; }
+function resetPreview() { generation++; clearTimeout(timer); preview.value = null; path.value = ''; diff.value = ''; diffLoading.value = false; loading.value = false; }
 function newTask() { if (busy.value) return; resetPreview(); selected.value = null; versions.value = []; creating.value = true; error.value = ''; message.value = ''; file.value = null; Object.assign(form,{task_name:'',group_name:'',folder_name:'',note:''}); }
 function chooseFile(event) { file.value = event.target.files[0] || null; if (file.value && file.value.size > maxMB.value * 1024**2) { error.value = `任务包不能超过 ${maxMB.value} MiB。`; file.value = null; } }
 async function work(label, action) { if (busy.value) return; busy.value = true; busyLabel.value = label; error.value = ''; message.value = ''; try { await action(); } catch (err) { error.value = err.message; } finally { busy.value = false; busyLabel.value = ''; } }
 async function refresh() {
   if (loading.value || stopped) return; loading.value = true; const token = generation;
-  try { const data = await api.packages(); if (stopped) return; tasks.value = data.tasks; maxMB.value = data.limits.upload_bytes / 1024**2;
+  try { const data = await api.packages(); if (stopped || token !== generation) return; tasks.value = data.tasks; maxMB.value = data.limits.upload_bytes / 1024**2;
     const pid = selected.value?.pid || props.initialPid;
     if (pid && !creating.value && token === generation) { const item = tasks.value.find(t => t.pid === pid); if (item) { selected.value = item; if (!item.unmanaged) { const detail = await api.packages(pid); if (token === generation) { selected.value = detail.task; versions.value = detail.versions;
       const version = preview.value?.release.version || detail.versions[0]?.version;
       if (version) { const data = await api.packagePreview(pid,version); if (token === generation && !stopped) { if (preview.value?.against_version !== data.against_version) { path.value = ''; diff.value = ''; } preview.value = data; entry.value = data.release.main_file; if (data.release.status === 'preparing') poll(token); } }
     } } } }
-  } catch (err) { error.value = err.message; } finally { loading.value = false; }
+  } catch (err) { if (token === generation && !stopped) error.value = err.message; } finally { if (token === generation && !stopped) loading.value = false; }
 }
 async function select(item) {
   resetPreview(); const token = generation; selected.value = item; creating.value = false; versions.value = []; error.value = ''; message.value = ''; file.value = null; form.note = '';
   if (item.unmanaged) return; loading.value = true;
-  try { const detail = await api.packages(item.pid); if (token !== generation || stopped) return; selected.value = detail.task; versions.value = detail.versions; await inspect(detail.versions[0]?.version); } catch (err) { error.value = err.message; } finally { loading.value = false; }
+  try { const detail = await api.packages(item.pid); if (token !== generation || stopped) return; selected.value = detail.task; versions.value = detail.versions; await inspect(detail.versions[0]?.version); } catch (err) { if (token === generation && !stopped) error.value = err.message; } finally { if (token === generation && !stopped) loading.value = false; }
 }
 async function inspect(version) {
   if (!version || !selected.value) return; const pid = selected.value.pid, token = ++generation; clearTimeout(timer); path.value = ''; diff.value = ''; loading.value = true;
-  try { const data = await api.packagePreview(pid,version); if (token !== generation || stopped) return; preview.value = data; entry.value = data.release.main_file; if (data.release.status === 'preparing') poll(token); } catch (err) { error.value = err.message; } finally { loading.value = false; }
+  try { const data = await api.packagePreview(pid,version); if (token !== generation || stopped) return; preview.value = data; entry.value = data.release.main_file; if (data.release.status === 'preparing') poll(token); } catch (err) { if (token === generation && !stopped) error.value = err.message; } finally { if (token === generation && !stopped) loading.value = false; }
 }
 async function inspectFile(filename) {
   const token = generation, pid = selected.value.pid, version = preview.value.release.version; diffLoading.value = true; path.value = filename;
-  try { const data = await api.packagePreview(pid,version,filename); if (token === generation && path.value === filename) diff.value = data.diff || data.content || '文件为空或未发生变更。'; } catch (err) { error.value = err.message; } finally { if (token === generation) diffLoading.value = false; }
+  try { const data = await api.packagePreview(pid,version,filename); if (token === generation && !stopped && path.value === filename) diff.value = data.diff || data.content || '文件为空或未发生变更。'; } catch (err) { if (token === generation && !stopped && path.value === filename) error.value = err.message; } finally { if (token === generation && !stopped) diffLoading.value = false; }
 }
 function poll(token) {
   clearTimeout(timer); timer = window.setTimeout(async () => {
     if (token !== generation || stopped || !preview.value) return;
-    try { const data = await api.packagePreview(selected.value.pid,preview.value.release.version); if (token !== generation || stopped) return; preview.value = data; if (data.release.status === 'preparing') poll(token); else { await refresh(); if (data.release.status === 'failed') error.value = data.release.message; } } catch (err) { error.value = err.message; poll(token); }
+    try { const data = await api.packagePreview(selected.value.pid,preview.value.release.version); if (token !== generation || stopped) return; preview.value = data; if (data.release.status === 'preparing') poll(token); else { await refresh(); if (token === generation && !stopped && data.release.status === 'failed') error.value = data.release.message; } } catch (err) { if (token === generation && !stopped) { error.value = err.message; poll(token); } }
   },2000);
 }
 async function upload() {

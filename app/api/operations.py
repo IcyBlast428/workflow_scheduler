@@ -2,7 +2,6 @@
 import json
 import os
 import shutil
-from pathlib import Path
 from flask import Blueprint, request, send_file, g
 from werkzeug.security import generate_password_hash
 from app.bootstrap.database import GaussDB
@@ -57,8 +56,11 @@ def task_detail():
     spec = next((item for item in discover_task_specs() if item['pid'] == pid), None)
     if not spec:
         return error_msg('task not found'), 404
-    path = Path(spec['task_dir']) / 'README.md'
-    description = path.read_text(encoding='utf-8', errors='replace')[:64000] if path.is_file() else '此任务尚未提供 README.md 说明。'
+    try:
+        readme = read_source(spec, 'README.md')
+        description = readme['content'][:64000] if readme['kind'] == 'text' else readme.get('reason', '说明文件无法预览。')
+    except (SourceError, OSError):
+        description = '此任务尚未提供可安全读取的 README.md 说明。'
     with GaussDB() as db:
         versions = db.execute_query_sql('SELECT version,changed_at,changed_by FROM wfs_config_versions WHERE pid=? ORDER BY version DESC LIMIT 20', params=(pid,), return_json=True)
         changes = db.execute_query_sql('SELECT actor,action,outcome,created_at FROM wfs_audit WHERE target=? ORDER BY created_at DESC LIMIT 20', params=(pid,), return_json=True)

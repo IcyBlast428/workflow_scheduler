@@ -1,6 +1,6 @@
 <template>
   <div v-if="open" class="modal-backdrop schedule-backdrop" @click.self="$emit('close')">
-    <section class="modal schedule-modal">
+    <section v-glass class="modal schedule-modal glass-surface glass-floating">
       <header class="modal-head">
         <div>
           <h3>任务配置：{{ task?.id || '-' }}</h3>

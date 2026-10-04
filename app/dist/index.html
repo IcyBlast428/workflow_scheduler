@@ -6,16 +6,44 @@
   <meta name="color-scheme" content="dark light">
   <title>定时任务调度</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=task-clock">
+  <style>
+    .browser-unsupported-notice { display: none; }
+    html.browser-unsupported, html.browser-unsupported body { margin: 0; min-height: 100%; background: #101820; }
+    html.browser-unsupported #app, html.browser-unsupported .cursor-light { display: none !important; }
+    html.browser-unsupported .browser-unsupported-notice {
+      display: block; max-width: 480px; margin: 120px auto 0; margin-top: 15vh; padding: 36px;
+      border: 1px solid #385064; border-radius: 20px; background: #16212b;
+      color: #d9e4ef; font: 16px/1.8 "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
+    .browser-unsupported-notice h1 { margin: 12px 0; color: #f7fbff; font-size: 24px; }
+    .browser-unsupported-notice p { margin: 12px 0; }
+    .browser-unsupported-notice .browser-notice-label { color: #5eead4; font-size: 12px; letter-spacing: 2px; }
+    .browser-unsupported-notice .browser-notice-hint { color: #91a4b7; font-size: 14px; }
+    @media (max-width: 600px) { html.browser-unsupported .browser-unsupported-notice { margin: 48px 20px 0; padding: 24px; } }
+  </style>
   <script>
-    let initialTheme = 'dark';
-    try { if (localStorage.getItem('workflow_scheduler_theme') === 'light') initialTheme = 'light'; } catch {}
-    document.documentElement.dataset.theme = initialTheme;
-    document.documentElement.style.colorScheme = initialTheme;
+    // Keep this guard readable by IE itself, before any application modules.
+    window.__WFS_UNSUPPORTED_BROWSER__ = !!(document.documentMode || /MSIE\s|Trident\//i.test(navigator.userAgent || ''));
+    if (window.__WFS_UNSUPPORTED_BROWSER__) {
+      document.documentElement.className += ' browser-unsupported';
+    } else {
+      var initialTheme = 'dark';
+      try { if (localStorage.getItem('workflow_scheduler_theme') === 'light') initialTheme = 'light'; } catch (error) {}
+      document.documentElement.setAttribute('data-theme', initialTheme);
+      document.documentElement.style.colorScheme = initialTheme;
+    }
   </script>
-  <script type="module" crossorigin src="/static/index-p5JuN_Pc.js"></script>
-  <link rel="stylesheet" crossorigin href="/static/index-Gq31E0IV.css">
+  <script type="module" crossorigin src="/static/index-Cgc5M1sL.js"></script>
+  <link rel="stylesheet" crossorigin href="/static/index-owJgzk0M.css">
 </head>
 <body>
+  <div class="browser-unsupported-notice" role="alert" aria-labelledby="browser-notice-title">
+    <div class="browser-notice-label">WORKFLOW SCHEDULER</div>
+    <h1 id="browser-notice-title">当前浏览器不受支持</h1>
+    <p>检测到您正在使用 Internet Explorer（IE），已禁止进入本系统。</p>
+    <p>请使用 Chrome 内核浏览器访问，例如 Google Chrome 或新版 Microsoft Edge。</p>
+    <p class="browser-notice-hint">如果您使用的是 Edge 的 IE 模式，请退出 IE 模式后重新打开此页面。</p>
+  </div>
   <noscript>定时任务调度需要启用 JavaScript 才能正常使用。</noscript>
   <div id="app"></div>
 </body>

@@ -14,15 +14,16 @@ const source=compileScript(descriptor,{id:'schedule-regression',inlineTemplate:t
 await writeFile(compiledPath,source);
 try {
   const {default:Dialog}=await import(compiledPath.href);
+  const renderDialog=props=>renderToString(createSSRApp(Dialog,props).directive('glass',{}));
   const props={open:true,loading:false,saving:false,task:{id:'second'},error:'配置已被其他操作修改',schedule:{form:{version:1,task_name:'保留的修改',schedule_type:'interval_minutes',interval_minutes:3}}};
-  const savedError=await renderToString(createSSRApp(Dialog,props));
+  const savedError=await renderDialog(props);
   assert.match(savedError,/配置保存失败/);
   assert.match(savedError,/class="schedule-form"/,'A failed save must retain the form');
   assert.match(savedError,/value="保留的修改"/);
   assert.match(savedError,/id="interval-minutes"[^>]*value="3"/);
   assert.match(savedError,/保存配置/);
   assert.match(savedError,/重新加载配置/);
-  const loadError=await renderToString(createSSRApp(Dialog,{...props,schedule:null}));
+  const loadError=await renderDialog({...props,schedule:null});
   assert.match(loadError,/配置加载失败/);
   assert.doesNotMatch(loadError,/class="schedule-form"/);
   assert.match(loadError,/重新加载配置/);

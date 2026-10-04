@@ -25,13 +25,14 @@
       <div class="matrix-notice" v-if="data.aggregated">当日记录较多，按 {{ data.bucket_minutes }} 分钟合并为 {{ data.records.length }} 片；同一时间段出现失败即标红。可点击查看次数和原始日志。</div>
       <div class="matrix-notice" v-for="warning in data.warnings" :key="warning">{{ warning }}</div>
       <div class="matrix-surface">
-        <div class="matrix-legend"><span v-for="item in legend" :key="item[0]"><i :class="item[0]"></i>{{ item[1] }}</span></div>
+        <div v-glass class="matrix-legend glass-surface glass-floating"><span v-for="item in legend" :key="item[0]"><i :class="item[0]"></i>{{ item[1] }}</span></div>
         <canvas ref="canvas" aria-label="任务执行三维视图，可通过下方任务选择框查看任务及执行记录"></canvas>
         <div v-if="!data.tasks.length" class="matrix-empty">还没有可显示的任务</div>
         <div v-else-if="!data.records.length && !data.active.length" class="matrix-empty matrix-empty-small">当天暂无执行记录</div>
-        <div class="matrix-surface-note">底层：当日 00:00 · 上方：未来 2 小时内的下一次计划</div>
+        <div v-if="selectedTask" v-glass class="matrix-selection glass-surface glass-floating"><strong>{{ selectedTask.name }}</strong><span>{{ selectedTask.group }}<template v-if="selectedRecord"> · {{ statusName(selectedRecord.status) }} · {{ selectedRecord.time.slice(11,19) }}</template></span></div>
+        <div v-glass class="matrix-surface-note glass-surface glass-floating">底层：当日 00:00 · 上方：未来 2 小时内的下一次计划</div>
+        <div v-glass class="matrix-camera-bar glass-surface glass-floating"><span>Alt + 左键旋转 · 右键缩放 · 中键平移</span><button class="btn" @click="scene?.restore()" @keydown="scene?.keyboard($event)" title="键盘：Alt + 方向键旋转，Alt + 加减号缩放">恢复全景</button></div>
       </div>
-      <div class="matrix-camera-bar"><span>透视视图 · Alt + 左键自由旋转 · Alt + 右键缩放 · Alt + 中键平移 · 单击选中</span><button class="btn" @click="scene?.restore()" @keydown="scene?.keyboard($event)" title="键盘：Alt + 方向键旋转，Alt + 加减号缩放">恢复全景</button></div>
       <div class="matrix-details">
         <section class="matrix-card"><h3>任务定位</h3>
           <label class="matrix-select-label">选择任务<select class="select" v-model="selectedPid" @change="selectedKey = ''"><option value="">选择任务…</option><optgroup v-for="group in groups" :key="group.name" :label="`${group.name} (${group.tasks.length})`"><option v-for="task in group.tasks" :key="task.pid" :value="task.pid">{{ task.name }}</option></optgroup></select></label>
@@ -134,7 +135,7 @@ onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEv
 .matrix-filter-field { color: var(--muted-strong); font-size: 13px; }
 .matrix-filter-field .select { width: auto; min-width: 136px; }
 .matrix-filter-field input { width: 164px; }
-.matrix-summary, .matrix-camera-bar {
+.matrix-summary {
   padding: 16px var(--panel-padding);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -143,7 +144,7 @@ onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEv
 .matrix-summary { gap: 12px 24px; }
 .matrix-surface, .matrix-card, .matrix-notice { border-radius: var(--radius); }
 .matrix-card { padding: var(--panel-padding); }
-.matrix-legend { background: var(--panel-glass); padding: 10px 12px; border-radius: var(--radius); gap: 8px 14px; }
+.matrix-legend { padding: 10px 12px; gap: 8px 14px; }
 .matrix-record-list button { padding: 12px; min-height: var(--control-height); border-radius: 4px; }
 .matrix-record-list button:hover { background: var(--row-hover); }
 .matrix-status { display: inline-flex; align-items: center; min-height: 24px; }
@@ -158,4 +159,15 @@ onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEv
   .matrix-camera-bar > span { flex: 1 1 240px; }
   .matrix-camera-bar .btn { flex: none; }
 }
+</style>
+<style scoped>
+.matrix-legend { max-width:calc(100% - 40px); padding:12px 16px; gap:12px 18px; border:1px solid var(--surface-glass-edge); }
+.matrix-surface-note { padding:10px 14px; bottom:18px; max-width:calc(100% - 40px); border:1px solid var(--surface-glass-edge); }
+.matrix-camera-bar { position:absolute; right:20px; bottom:18px; padding:8px 10px 8px 16px; gap:12px; border:1px solid var(--surface-glass-edge); font-size:11px; }
+.matrix-camera-bar .btn { min-height:34px; padding:6px 10px; border-radius:12px; }
+.matrix-selection { position:absolute; right:20px; top:112px; max-width:min(340px,calc(100% - 40px)); padding:14px 18px; display:grid; gap:6px; border:1px solid var(--surface-glass-edge); pointer-events:none; }
+.matrix-selection strong { font-size:13px; overflow-wrap:anywhere; }
+.matrix-selection span { font-size:12px; color:var(--muted-strong); }
+@media (max-width:1100px) { .matrix-camera-bar span { display:none; } .matrix-surface-note { max-width:calc(100% - 150px); } }
+@media (max-width:560px) { .matrix-legend { top:12px; left:12px; max-width:calc(100% - 24px); padding:10px 12px; gap:8px 12px; font-size:11px; } .matrix-selection { right:12px; top:auto; bottom:90px; } .matrix-camera-bar { right:12px; bottom:12px; padding:6px; } .matrix-surface-note { left:12px; bottom:12px; padding:8px 10px; } }
 </style>

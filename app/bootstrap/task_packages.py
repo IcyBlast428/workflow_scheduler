@@ -159,17 +159,17 @@ def _unpack(blob, code, entry=''):
                 raise PackageError('解压大小或文件数超过限制。', 413)
             files = []
             seen = set()
-            for entry in entries:
-                name = _path(entry.filename)
+            for member in entries:
+                name = _path(member.filename)
                 key = name.casefold()
-                mode = entry.external_attr >> 16
-                if entry.flag_bits & 1 or stat.S_ISLNK(mode) or stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR):
+                mode = member.external_attr >> 16
+                if member.flag_bits & 1 or stat.S_ISLNK(mode) or stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR):
                     raise PackageError('压缩包不能包含加密文件、符号链接或特殊文件。')
                 if key in seen:
                     raise PackageError('压缩包包含重复文件路径。')
                 seen.add(key)
-                if not entry.is_dir():
-                    files.append((entry, name))
+                if not member.is_dir():
+                    files.append((member, name))
             if not files or len(files) > bound['files']:
                 raise PackageError('任务包为空或文件数超过限制。')
             # A single wrapper directory is conventional ZIP export structure.

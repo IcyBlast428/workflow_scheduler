@@ -1,6 +1,6 @@
 <template>
   <div v-if="runId" class="modal-backdrop" @click.self="$emit('close')">
-    <section class="modal execution-modal">
+    <section v-glass class="modal execution-modal glass-surface glass-floating">
       <header class="modal-head"><div><h3>本次执行：{{ record.pid || '加载中' }}</h3><p class="hint mono">{{ runId }}</p></div>
         <button class="btn icon-only" title="关闭" @click="$emit('close')">×</button></header>
       <div class="modal-body">
@@ -21,7 +21,7 @@
         <div class="filter-actions"><input v-model="search" class="input" placeholder="搜索日志内容" aria-label="搜索日志内容">
           <label><input v-model="follow" type="checkbox">自动滚动</label>
           <a class="btn" :href="`/api/taskinfo/run-download?run_id=${runId}`" download>下载保留日志</a></div>
-        <pre ref="logElement" class="log-pre execution-output">{{ filtered || '等待任务输出…' }}</pre>
+        <pre ref="logElement" class="log-pre execution-output">{{ filtered || emptyExecutionLog(record.status, search) }}</pre>
       </div>
     </section>
   </div>
@@ -30,7 +30,7 @@
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
-import { statusLabel, statusClass } from '../executionLabels';
+import { statusLabel, statusClass, emptyExecutionLog } from '../executionLabels';
 const props = defineProps({ runId: { type: String, default: '' }, canOperate:Boolean, retrying:Boolean });
 defineEmits(['close','retry']);
 const record = ref({}), content = ref(''), error = ref(''), search = ref(''), follow = ref(true), logElement = ref(null), displayTruncated = ref(false);

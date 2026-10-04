@@ -17,7 +17,11 @@ import tempfile
 import zipfile
 
 
-def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=5432,tool='pg_dump',container=None):
+def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=5432,tool='pg_dump',container=None,releases=None):
+    if __package__:
+        from .backup_files import add_task_storage
+    else:
+        from backup_files import add_task_storage
     import fcntl
     data,tasks,output=map(lambda value:Path(value).resolve(),(data,tasks,output))
     if not data.is_dir() or not tasks.is_dir() or output.exists() or data in output.parents or tasks in output.parents:
@@ -60,6 +64,7 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
                     relative=path.relative_to(tasks)
                     if path.is_file() and not path.is_symlink() and not any(part in ('.venv','__pycache__','.git','.wfs-secrets') or part.startswith('.env') for part in relative.parts):
                         archive.write(path,'jobs/'+relative.as_posix())
+                add_task_storage(archive, data, releases, output)
                 archive.writestr('manifest.json',json.dumps({'format':'wfs-platform-1','database':database,'schema':schema,
                     'dump_tool':tool,'created_at':dt.datetime.now().isoformat(' '),'dump_sha256':digest.hexdigest(),
                     'connection_passwords_included':False,'restore_target':'new database only'},indent=2))
@@ -74,5 +79,6 @@ if __name__=='__main__':
     parser.add_argument('--port',type=int,default=5432)
     parser.add_argument('--tool',default='pg_dump')
     parser.add_argument('--container')
+    parser.add_argument('--releases', help='Custom WFS_TASK_RELEASE_DIR, if configured')
     args=parser.parse_args()
     print(bundle(**vars(args)))

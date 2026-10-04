@@ -136,6 +136,18 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(packages.registry(), {})
         self.assertFalse((self.root/'escaped.py').exists())
 
+    def test_nested_entry_is_preserved_when_updating_a_package(self):
+        files = {'src/main.py': 'print("nested")\n', 'src/helper.py': 'value=1\n'}
+        first = packages.stage(archive(files), {'task_name': 'Nested', 'group_name': 'examples',
+                                'folder_name': 'nested', 'main_file': 'src/main.py'}, 'admin')
+        self.assertEqual(first['main_file'], 'src/main.py')
+        self.assertEqual({item['path'] for item in first['manifest']}, set(files))
+        self.activate(self.ready(first))
+        second = packages.stage(archive(files), {'pid': first['pid']}, 'admin')
+        self.assertEqual(second['main_file'], 'src/main.py')
+        wrapped = self.new({'export/main.py': 'print("wrapped")\n', 'export/helper.py': 'value=1\n'})
+        self.assertEqual(wrapped['main_file'], 'main.py')
+
     def test_conflicts_scheduler_failure_and_restart_recovery(self):
         v1 = self.ready(self.new())
         self.activate(v1)

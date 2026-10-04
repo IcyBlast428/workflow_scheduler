@@ -81,7 +81,9 @@ bash scripts/local_service.sh stop
 bash scripts/local_service.sh start .env.postgres.local
 ```
 
-当前测试库包含 14 张表和 4 个已应用迁移。页面地址仍为 <http://127.0.0.1:18008/>。原 SQLite 数据库保留，两种配置使用独立执行数据目录；恢复 SQLite 时先停止服务，再执行 `bash scripts/local_service.sh start`。该切换不会迁移两种数据库中的数据。
+项目回归检查建议使用 `bash scripts/postgres_test_env.sh scripts/accept_postgres_isolated.py`。它为每次检查新建临时 schema，应用全部迁移，验证真实 ODBC、事务、行锁、执行写入、并发汇总和归档，结束后移除该临时 schema；不会改动正在运行页面使用的 `wfs` 数据。
+
+测试库表结构由当前 `ddl.sql` 和全部编号迁移维护，初始化脚本会显示实际表清单。页面地址仍为 <http://127.0.0.1:18008/>。原 SQLite 数据库保留，两种配置使用独立执行数据目录；恢复 SQLite 时先停止服务，再执行 `bash scripts/local_service.sh start`。该切换不会迁移两种数据库中的数据。
 
 可选容量测试：`bash scripts/postgres_test_env.sh scripts/benchmark_postgres_history.py`。它只允许指定本地测试环境，生成 200 万条标记为 `postgres-volume-test` 的合成日志，并写出 `data/postgres-history-benchmark.json`；这些记录会保留供页面查询，数据库约占 1.7 GB。测试衡量本机 SQL 查询与索引计划，不能代表实际业务日志大小、并发压力或生产 GaussDB 性能。
 
@@ -129,6 +131,7 @@ app/jobs/<group>/<task>/
 | `WFS_SECRET_KEY` | 所有 Web/Scheduler 实例共享的随机 Cookie 签名密钥 |
 | `WFS_ADMIN_PASSWORD_HASH` | 管理员 scrypt 摘要 |
 | `WFS_COOKIE_SECURE` | HTTPS Cookie，生产为 true |
+| `WFS_SESSION_COOKIE_NAME` | 登录 Cookie 名称；同一主机运行多个独立平台时使用不同名称，本地浏览器验收已使用独立名称 |
 | `WFS_NACOS_URL/USERNAME/PASSWORD` | 生产配置中心连接 |
 | `WFS_DB_ID` | 数据库与 schema，默认 sysimemedb_wfs |
 | `WFS_DB_CONFIG_FILE` | 开发 GaussDB 配置文件，建议放在仓库外 |
@@ -277,6 +280,8 @@ Vite 开发服务默认 5173，API 代理默认 8008；使用 WSL 18008 时相�
 通知最多 2 个后台消费者、100 条待发记录，网关超时 10 秒；满队列会记录错误，执行结果仍保留。通知队列本身不跨重启持久化。短信需设置 `WFS_SMS_USERNAME/PASSWORD`，可用 `WFS_SMS_HOST/PORT` 覆盖网关；邮件可用 `WFS_SMTP_HOST/PORT/SENDER` 配置。需在实际业务通道验收。
 
 本地一致备份：先停止服务，备份文件必须在 data 外，且不会覆盖旧备份：
+
+两种备份工具还会归档任务版本代码、独立依赖环境和 `task-data` 业务输出。使用自定义 `WFS_TASK_RELEASE_DIR` 时加 `--releases <版本目录>`；恢复后将 `data/task-packages` 复制回原版本目录。恢复跨机器时需验证 Python、操作系统和架构兼容。详见 [任务包备份说明](docs/task-packages.md)。
 
 ```bash
 bash scripts/local_service.sh stop

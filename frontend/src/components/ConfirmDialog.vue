@@ -1,6 +1,6 @@
 <template>
   <div v-if="modelValue.open" class="modal-backdrop confirm-backdrop" @click.self="dismiss">
-    <section class="modal confirm-modal">
+    <section v-glass class="modal confirm-modal glass-surface glass-floating">
       <header class="modal-head">
         <div>
           <p class="eyebrow">{{ modelValue.eyebrow || '高风险操作' }}</p>

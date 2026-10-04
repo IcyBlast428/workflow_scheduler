@@ -3,6 +3,11 @@ export const statusLabels = {
   timed_out: '超时或资源终止', cancelled: '已取消', interrupted: '重启中断', skipped: '并发已满，跳过', missed:'错过调度窗口', unknown:'未知',pending:'待执行',
 };
 export function statusLabel(status) { return statusLabels[status] || status || '未知'; }
+export function emptyExecutionLog(status, search = '') {
+  if (search) return '没有匹配的日志内容。';
+  if (status && !['queued', 'running'].includes(status)) return '本次执行没有日志输出。';
+  return '等待任务输出…';
+}
 export function statusClass(status) {
   if (['success', '成功'].includes(status)) return 'success';
   if (['failed', 'timed_out', '失败', '脚本失败', '超时/终止', statusLabels.timed_out].includes(status)) return 'danger';

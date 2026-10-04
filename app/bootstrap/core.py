@@ -12,7 +12,7 @@ from configobj import ConfigObj
 
 from app.bootstrap.global_vars import runnings, TASK_DIR, uuidhex, ignores,CONFIG_DIR
 from app.bootstrap.task_loader import discover_task_specs
-from app.bootstrap.schedule_config import SCHEDULER_TZ, apply_persisted_schedule, build_scheduler_trigger, record_application
+from app.bootstrap.schedule_config import SCHEDULER_TZ, apply_persisted_schedule, build_scheduler_trigger, record_application, expired_once
 from app.extensions import scheduler
 from app.bootstrap.execution import execute_py, kill_process
 from app.bootstrap.database import GaussDB
@@ -401,6 +401,11 @@ def aps_start(task_pid=None, action='refresh'):
                 enabled=(task_pid is None and spec.get('trigger') == 'interval'),
             )
             trigger = build_scheduler_trigger(spec.get('trigger'), raw_rules)
+            if expired_once(trigger):
+                # DateTrigger returns its old timestamp again when re-created.
+                # Refresh/restart must never replay a completed single-run plan.
+                record_application(pid, version, 'applied')
+                continue
             scheduler.add_job(
                 func=execute_py,
                 trigger=trigger,

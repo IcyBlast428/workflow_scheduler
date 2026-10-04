@@ -9,7 +9,7 @@
     "build": "vite build",
     "test:e2e": "playwright test",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node scripts/test-matrix.mjs && node scripts/test-schedule-form.mjs && node scripts/test-schedule-dialog.mjs && node scripts/test-workspace.mjs && node scripts/test-login-backdrop.mjs && node scripts/test-login-flow.mjs && node scripts/test-glass-optics.mjs"
+    "test": "node scripts/test-browser-support.mjs && node scripts/test-matrix.mjs && node scripts/test-schedule-form.mjs && node scripts/test-schedule-dialog.mjs && node scripts/test-workspace.mjs && node scripts/test-package-workspace.mjs && node scripts/test-login-backdrop.mjs && node scripts/test-login-flow.mjs && node scripts/test-glass-optics.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^6.0.1",

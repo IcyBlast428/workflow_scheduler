@@ -1,6 +1,7 @@
 """Real PostgreSQL/ODBC acceptance; never redirects to SQLite."""
 import datetime as dt
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -11,7 +12,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-if os.environ.get('WFS_POSTGRES_TEST') != 'true' or os.environ.get('WFS_DB_ID') != 'wfstest_wfs' or os.environ.get('WFS_LOCAL_DB_PATH'):
+TEST_SCHEMA = os.environ.get('WFS_DB_ID', '').removeprefix('wfstest_')
+if os.environ.get('WFS_POSTGRES_TEST') != 'true' or not re.fullmatch(r'wfs(?:_acceptance_[a-f0-9]{32})?', TEST_SCHEMA) or os.environ.get('WFS_LOCAL_DB_PATH'):
     raise SystemExit('Only the dedicated PostgreSQL test database is allowed.')
 os.environ['WFS_ENABLE_SCHEDULER'] = 'false'
 from werkzeug.security import generate_password_hash
@@ -55,7 +57,7 @@ class PostgreSQLAcceptance(unittest.TestCase):
         with GaussDB() as db:
             self.assertFalse(db._local_sqlite)
             row = db.execute_query_sql('SELECT current_database(),current_schema(),version()')[0]
-            self.assertEqual(tuple(row[:2]),('wfstest','wfs'))
+            self.assertEqual(tuple(row[:2]),('wfstest',TEST_SCHEMA))
             self.assertTrue(row[2].startswith('PostgreSQL 18.1'))
             db.begin_transaction()
             db.execute_sql('INSERT INTO wfs_job_stats(pid,task_name) VALUES(?,?)',params=(self.pid,"中文 ' ? ;"))

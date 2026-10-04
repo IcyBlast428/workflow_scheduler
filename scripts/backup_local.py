@@ -8,7 +8,11 @@ import tempfile
 import zipfile
 
 
-def backup(database, data, output):
+def backup(database, data, output, releases=None):
+    if __package__:
+        from .backup_files import add_task_storage
+    else:
+        from backup_files import add_task_storage
     import fcntl
     database, data, output = map(lambda value: Path(value).resolve(), (database, data, output))
     if not database.is_file() or not data.is_dir():
@@ -43,6 +47,7 @@ def backup(database, data, output):
                     archive.write(journal_copy,'data/executions/journal.sqlite3')
                 if (data / 'metrics.json').is_file():
                     archive.write(data / 'metrics.json', 'data/metrics.json')
+                add_task_storage(archive, data, releases)
                 archive.writestr('manifest.json', json.dumps({'format':2,'database':'database.sqlite3','data':'data','credentials_included':False}))
     return output
 
@@ -52,8 +57,9 @@ if __name__ == '__main__':
     parser.add_argument('--database', required=True)
     parser.add_argument('--data', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--releases', help='Custom WFS_TASK_RELEASE_DIR, if configured')
     args = parser.parse_args()
     try:
-        print(backup(args.database, args.data, args.output))
+        print(backup(args.database, args.data, args.output, args.releases))
     except BlockingIOError:
         parser.exit(2, 'Scheduler is running: stop the local services before backing up.\n')

@@ -62,7 +62,7 @@ data = Path(os.environ['WFS_TASK_DATA_DIR'])
 
 上线前运行 `python scripts/migrate.py` 应用新增的 **007_task_packages.sql**，再重启单实例调度服务和 Web 服务。Web 的 multipart 上传和 ZIP 下载会转发到调度服务；继续沿用会话、CSRF 和角色控制。不要增加调度器副本。
 
-数据库登记表为 `wfs_package_tasks`、`wfs_task_releases`；备份应包含数据库、版本目录和 task-data。自定义版本目录时需单独纳入备份。已发布版本、回收站和失败准备目录均不会自动清理；持续运行时按磁盘容量规划保留空间，本版本不提供永久删除按钮。
+数据库登记表为 `wfs_package_tasks`、`wfs_task_releases`。`backup_local.py` 与 `backup_platform.py` 会包含默认版本目录、独立依赖环境和 task-data；设置了自定义 `WFS_TASK_RELEASE_DIR` 时，备份命令需加 `--releases <该目录>`。归档统一放入 `data/task-packages`，恢复时应复制回原版本目录与原数据目录，因为数据库和虚拟环境仍引用原路径。恢复到另一台服务器时，基础 Python、操作系统和架构必须兼容，并在启用调度前验证解释器与业务依赖。备份不接受指向外部业务文件的符号链接，此类文件需单独备份；环境中的 Python 链接会复制为可执行文件。已发布版本、回收站和失败准备目录均不会自动清理；持续运行时按磁盘容量规划保留空间，本版本不提供永久删除按钮。
 
 ## 接口
 

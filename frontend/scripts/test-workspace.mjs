@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mergeMatrixSnapshot, matrixQuery, readPreference, writePreference } from '../src/workspacePreferences.js';
+import { emptyExecutionLog } from '../src/executionLabels.js';
 const store=new Map();globalThis.localStorage={getItem:key=>store.get(key),setItem:(key,value)=>store.set(key,value)};
 writePreference('alice',{favorites:['one']});writePreference('bob',{favorites:['two']});
 assert.deepEqual(readPreference('alice',{}).favorites,['one']);
@@ -10,4 +11,7 @@ assert.deepEqual(mergeMatrixSnapshot(old,incoming).records,[{key:'two',count:3},
 const nextDay={date:'2026-10-04',incremental:false,records:[]};assert.equal(mergeMatrixSnapshot(old,nextDay),nextDay);
 assert.equal('date' in matrixQuery(true,'2026-10-03','old'),false);
 assert.equal(matrixQuery(false,'2026-10-03').date,'2026-10-03');
+assert.equal(emptyExecutionLog('success','missing'),'没有匹配的日志内容。');
+assert.equal(emptyExecutionLog('success'),'本次执行没有日志输出。');
+assert.equal(emptyExecutionLog('running'),'等待任务输出…');
 console.log('Workspace preferences, delta reconciliation and midnight follow checks passed');

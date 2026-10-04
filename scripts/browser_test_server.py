@@ -11,7 +11,8 @@ root = Path(temporary.name)
 os.environ.update(WFS_ENV='development', WFS_ENABLE_SCHEDULER='true', WFS_DEV_RUN_ALL='true',
                   WFS_LOCAL_DB_PATH=str(root/'database.sqlite3'),WFS_DATA_DIR=str(root/'data'),
                   WFS_LOG_DIR=str(root/'logs'),WFS_SECRET_KEY='disposable-browser-test-key',
-                  WFS_SCHEDULER_CONTROL_URL='',WFS_COOKIE_SECURE='false')
+                  WFS_SCHEDULER_CONTROL_URL='',WFS_COOKIE_SECURE='false',
+                  WFS_SESSION_COOKIE_NAME='wfs_browser_acceptance_session')
 from werkzeug.security import generate_password_hash
 os.environ['WFS_ADMIN_PASSWORD_HASH'] = generate_password_hash('browser-test-password')
 from app.bootstrap import global_vars

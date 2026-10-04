@@ -58,6 +58,10 @@ def _as_int(value, field_name, minimum=1, maximum=None):
     return result
 
 
+def _default_number(value, default):
+    return default if value in (None, '') else value
+
+
 def _time_parts(value, field_name='time'):
     try:
         parsed = datetime.datetime.strptime(str(value), '%H:%M')
@@ -117,7 +121,7 @@ def _cron_rules(hour='9', minute='0', day='*', month='*', day_of_week='*'):
 def _build_window_rules(form):
     start_hour, start_minute = _time_parts(form.get('window_start') or '09:00', 'window_start')
     end_hour, end_minute = _time_parts(form.get('window_end') or '18:00', 'window_end')
-    interval = _as_int(form.get('window_interval_minutes') or 1, 'window_interval_minutes', 1, 1440)
+    interval = _as_int(_default_number(form.get('window_interval_minutes'), 1), 'window_interval_minutes', 1, 1440)
     day_of_week = str(form.get('window_day_of_week') or '*').strip().lower()
     if day_of_week not in WEEKDAY_OPTIONS:
         raise ValueError('window_day_of_week is invalid')
@@ -140,9 +144,9 @@ def build_schedule_payload(form):
     if schedule_type == 'every_hour':
         return 'interval', {'HOURS': '1'}, schedule_type
     if schedule_type == 'interval_minutes':
-        return 'interval', {'MINUTES': str(_as_int(form.get('interval_minutes') or 1, 'interval_minutes', 1))}, schedule_type
+        return 'interval', {'MINUTES': str(_as_int(_default_number(form.get('interval_minutes'), 1), 'interval_minutes', 1))}, schedule_type
     if schedule_type == 'interval_hours':
-        return 'interval', {'HOURS': str(_as_int(form.get('interval_hours') or 1, 'interval_hours', 1))}, schedule_type
+        return 'interval', {'HOURS': str(_as_int(_default_number(form.get('interval_hours'), 1), 'interval_hours', 1))}, schedule_type
     if schedule_type == 'daily_fixed':
         hour, minute = _time_parts(form.get('fixed_time') or '09:00', 'fixed_time')
         return 'cron', _cron_rules(hour=hour, minute=minute), schedule_type
@@ -154,7 +158,7 @@ def build_schedule_payload(form):
         return 'cron', _cron_rules(hour=hour, minute=minute, day_of_week=day_of_week), schedule_type
     if schedule_type == 'monthly_fixed':
         hour, minute = _time_parts(form.get('fixed_time') or '09:00', 'fixed_time')
-        month_day = _as_int(form.get('month_day') or 1, 'month_day', 1, 31)
+        month_day = _as_int(_default_number(form.get('month_day'), 1), 'month_day', 1, 31)
         return 'cron', _cron_rules(hour=hour, minute=minute, day=month_day), schedule_type
     if schedule_type == 'monthly_last_day':
         hour, minute = _time_parts(form.get('fixed_time') or '09:00', 'fixed_time')
@@ -244,6 +248,8 @@ def preview_schedule(form=None, trigger=None, rules=None, limit=PREVIEW_LIMIT):
         trigger, rules, _ = build_schedule_payload(form)
     schedule_trigger = build_scheduler_trigger(trigger, rules)
     now = datetime.datetime.now(SCHEDULER_TZ)
+    if expired_once(schedule_trigger, now):
+        return []
     previous = None
     upcoming = []
     for _ in range(limit):
@@ -259,6 +265,10 @@ def preview_schedule(form=None, trigger=None, rules=None, limit=PREVIEW_LIMIT):
         })
         previous = next_time
     return upcoming
+
+
+def expired_once(trigger, now=None):
+    return isinstance(trigger, DateTrigger) and trigger.run_date <= (now or datetime.datetime.now(SCHEDULER_TZ))
 
 
 def _default_form(enabled=True):
@@ -399,7 +409,7 @@ def _record_belongs_to_spec(record, spec):
 def _normalize_task_config(spec, form):
     task_name = str(form.get('task_name') or spec.get('task_name') or '').strip()
     main_file = str(form.get('main_file') or spec.get('main_file') or '').strip()
-    max_instances = _as_int(form.get('max_instances') or 1, 'max_instances', 1)
+    max_instances = _as_int(_default_number(form.get('max_instances'), 1), 'max_instances', 1)
     timeout_seconds = _as_int(form.get('timeout_seconds') or 0, 'timeout_seconds', 0)
     resolve_main_file(spec.get('task_dir'), main_file)
     return task_name, main_file, max_instances, timeout_seconds

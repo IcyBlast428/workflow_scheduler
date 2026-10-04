@@ -36,6 +36,7 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = os.environ.get('WFS_SECRET_KEY')
     SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_NAME = os.environ.get('WFS_SESSION_COOKIE_NAME', 'session')
     SESSION_COOKIE_SAMESITE = 'Strict'
     SESSION_COOKIE_SECURE = os.environ.get('WFS_COOKIE_SECURE', 'false').lower() in {'1', 'true', 'yes'}
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)

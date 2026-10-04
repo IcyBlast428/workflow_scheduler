@@ -66,6 +66,26 @@ class TaskSourceTests(unittest.TestCase):
         self.assertEqual((self.task/'main.py').read_bytes(), before)
         self.assertEqual(client.get(endpoint, query_string={'pid': 'unknown'}).status_code, 404)
 
+    def test_description_is_bounded_and_does_not_follow_symlinks(self):
+        client, _ = self.client()
+        endpoint = '/api/taskinfo/detail'
+        with patch.object(views, 'load_schedule', return_value={}):
+            normal = client.get(endpoint, query_string={'pid': self.spec['pid']})
+            self.assertIn('<script>', normal.json['data']['description'])
+            readme = self.task/'README.md'
+            readme.write_text('x' * (source.MAX_BYTES + 1), encoding='utf-8')
+            oversized = client.get(endpoint, query_string={'pid': self.spec['pid']})
+            self.assertEqual(oversized.status_code, 200)
+            self.assertLess(len(oversized.json['data']['description']), 1000)
+            if os.name != 'nt':
+                readme.unlink()
+                outside = self.base/'private.txt'
+                outside.write_text('OUTSIDE_PRIVATE_CONTENT', encoding='utf-8')
+                readme.symlink_to(outside)
+                linked = client.get(endpoint, query_string={'pid': self.spec['pid']})
+                self.assertEqual(linked.status_code, 200)
+                self.assertNotIn('OUTSIDE_PRIVATE_CONTENT', linked.json['data']['description'])
+
     def test_existing_viewer_role_can_only_read(self):
         with GaussDB() as db:
             db.execute_sql('INSERT INTO wfs_users(username,password_hash,role,enabled) VALUES(?,?,?,1)', params=('source-read-viewer', generate_password_hash('test-password'), 'viewer'))
