@@ -76,6 +76,21 @@ def task_detail():
                         'next_run_time':str(next_time or ''),'last_not_started':next((item for item in records if item['status'] in ('skipped','missed')),None)}})
 
 
+@blueprint.get('/api/taskinfo/flow')
+def task_flow():
+    forwarded = _forward()
+    if forwarded is not None:
+        return forwarded
+    spec = next((item for item in discover_task_specs() if item['pid'] == request.args.get('pid')), None)
+    if not spec:
+        return error_msg('task not found'), 404
+    from app.bootstrap.task_flow import analyze
+    try:
+        return success_msg(analyze(spec))
+    except SourceError as exc:
+        return error_msg(str(exc)), exc.status
+
+
 @blueprint.post('/api/taskinfo/batch')
 def batch_tasks():
     forwarded = _forward()

@@ -2,6 +2,7 @@
   <section class="task-source-viewer" aria-label="任务文件只读查看">
     <p class="hint">当前部署的任务文件 · 只读</p>
     <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div>
+    <p v-if="versionNotice" class="inline-alert" role="status">{{ versionNotice }}</p>
     <LoadingStatus v-if="showLoadingStatus" :active="loading" label="正在读取任务文件…" />
     <div class="source-browser">
       <aside class="source-files" aria-label="任务目录文件列表">
@@ -22,7 +23,7 @@
           <template v-if="source.kind === 'text'">
             <div class="source-toolbar"><label for="source-search">搜索文件内容<input id="source-search" v-model="search" class="input" placeholder="输入内容定位行" @input="matchIndex = 0; locate()"></label><span aria-live="polite">{{ search ? `${matches.length ? matchIndex + 1 : 0} / ${matches.length} 处` : `共 ${lines.length} 行` }}</span><button class="btn" :disabled="!matches.length" @click="jumpMatch(-1)">上一处</button><button class="btn" :disabled="!matches.length" @click="jumpMatch(1)">下一处</button></div>
             <div ref="codeView" class="source-code" :class="{ 'source-wrapped': wrap }" aria-label="只读文件内容">
-              <div v-for="(line,index) in pageLines" :key="page * PAGE_SIZE + index" class="source-line" :class="{ 'source-match': matches.includes((page - 1) * PAGE_SIZE + index) }"><span class="source-line-number" aria-hidden="true">{{ (page - 1) * PAGE_SIZE + index + 1 }}</span><code>{{ line || ' ' }}</code></div>
+              <div v-for="(line,index) in pageLines" :key="page * PAGE_SIZE + index" class="source-line" :class="{ 'source-match': matches.includes((page - 1) * PAGE_SIZE + index), 'source-focused': focusedLine === (page - 1) * PAGE_SIZE + index + 1 }"><span class="source-line-number" aria-hidden="true">{{ (page - 1) * PAGE_SIZE + index + 1 }}</span><code>{{ line || ' ' }}</code></div>
             </div>
             <div class="source-pagination"><span>第 {{ page }} / {{ pageCount }} 页 · 每页 {{ PAGE_SIZE }} 行</span><button class="btn" :disabled="page === 1" @click="changePage(-1)">上一页内容</button><button class="btn" :disabled="page === pageCount" @click="changePage(1)">下一页内容</button></div>
           </template>
@@ -37,12 +38,14 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
-const props = defineProps({ pid: { type: String, required: true }, showLoadingStatus: { type: Boolean, default: true } });
+const props = defineProps({ pid: { type: String, required: true }, showLoadingStatus: { type: Boolean, default: true }, location:{type:Object,default:null} });
 const emit = defineEmits(['loading']);
 const entries = ref([]), directory = ref(''), selected = ref(''), source = ref(null), loading = ref(false), error = ref('');
 const hasMore = ref(false), truncated = ref(false), nextOffset = ref(0);
 const search = ref(''), matchIndex = ref(0), page = ref(1), copied = ref(false), wrap = ref(false);
 const codeView = ref(null);
+const focusedLine=ref(0);
+const versionNotice=ref('');
 watch(loading, value => emit('loading', value));
 const PAGE_SIZE = 200;
 let generation = 0;
@@ -60,10 +63,10 @@ async function locate() {
 }
 function changePage(step) { page.value += step; if (codeView.value) codeView.value.scrollTop = 0; }
 function jumpMatch(step) { matchIndex.value = (matchIndex.value + step + matches.value.length) % matches.value.length; locate(); }
-async function openFile(filename) {
+async function openFile(filename, focusLine = 0, expectedSha = '') {
   if (!filename) return;
   const seq = ++generation;
-  loading.value = true; error.value = '';
+  loading.value = true; error.value = ''; versionNotice.value='';
   try {
     const result = await api.taskSource(props.pid, filename);
     if (seq === generation) {
@@ -72,12 +75,15 @@ async function openFile(filename) {
       if (!sameFile) { search.value = ''; page.value = 1; matchIndex.value = 0; }
       page.value = Math.min(page.value, pageCount.value);
       matchIndex.value = Math.min(matchIndex.value, Math.max(0, matches.value.length - 1));
+      if(expectedSha && result.sha256 !== expectedSha){versionNotice.value='任务代码已更新，源码行号可能变化，请返回执行流程重新分析。';focusLine=0;}
+      focusedLine.value=focusLine ? Math.max(1,Math.min(lines.value.length,Math.floor(focusLine))) : 0;
+      if(focusedLine.value){page.value=Math.floor((focusedLine.value-1)/PAGE_SIZE)+1;await nextTick();codeView.value?.children[(focusedLine.value-1)%PAGE_SIZE]?.scrollIntoView({block:'nearest'});}
     }
   }
   catch (err) { if (seq === generation) error.value = err.message; }
   finally { if (seq === generation) loading.value = false; }
 }
-async function loadDirectory(path = '', more = false) {
+async function loadDirectory(path = '', more = false, autoOpen = true) {
   const seq = ++generation;
   loading.value = true; error.value = '';
   try {
@@ -86,10 +92,11 @@ async function loadDirectory(path = '', more = false) {
     directory.value = path; entries.value = more ? [...entries.value,...result.entries] : result.entries;
     hasMore.value = result.has_more; truncated.value = result.truncated; nextOffset.value = result.next_offset;
     loading.value = false;
-    if (!more && !source.value) {
+    if (autoOpen && !more && !source.value) {
       const initial = path === '' && result.main_file ? result.main_file : result.entries.find(entry => entry.type === 'file')?.path;
       if (initial) await openFile(initial);
     }
+    return true;
   } catch (err) { if (seq === generation) error.value = err.message; }
   finally { if (seq === generation) loading.value = false; }
 }
@@ -97,6 +104,11 @@ async function copy() {
   try { await navigator.clipboard.writeText(source.value.content); copied.value = true; }
   catch { error.value = '浏览器未允许复制，请在文件区域选择内容复制。'; }
 }
-watch(() => props.pid, () => { generation++; entries.value = []; directory.value = ''; selected.value = ''; source.value = null; loadDirectory(); }, { immediate: true });
+watch(() => [props.pid,props.location], async ([pid,location], previous) => {
+  generation++;
+  if(!previous || previous[0]!==pid){entries.value=[];directory.value='';selected.value='';source.value=null;focusedLine.value=0;}
+  if(location?.file){const dir=location.file.split('/').slice(0,-1).join('/');const loaded=await loadDirectory(dir,false,false);if(loaded && props.pid===pid && props.location===location)await openFile(location.file,location.line,location.sha256);}
+  else await loadDirectory();
+}, { immediate: true });
 onBeforeUnmount(() => generation++);
 </script>

@@ -21,6 +21,9 @@ task = global_vars.TASK_DIR/'acceptance'/'slow'
 task.mkdir(parents=True)
 (task/'main.py').write_text('import time\nprint("浏览器回归开始", flush=True)\ntime.sleep(10)\nprint("浏览器回归完成", flush=True)\n',encoding='utf-8')
 (task/'README.md').write_text('隔离的浏览器回归任务。', encoding='utf-8')
+if os.environ.get('WFS_BROWSER_FLOW_FIXTURE') == '1':
+    import shutil
+    shutil.copytree(ROOT/'examples/task-flow',global_vars.TASK_DIR/'acceptance'/'flow')
 from app import create_app
 from app.bootstrap.core import aps_start
 from app.bootstrap.schedule_config import save_schedule
@@ -29,5 +32,7 @@ app = create_app()
 if scheduler.get_job('MAIN_TASK_JOB'):
     scheduler.remove_job('MAIN_TASK_JOB')
 save_schedule('acceptance__slow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})
+if os.environ.get('WFS_BROWSER_FLOW_FIXTURE') == '1':
+    save_schedule('acceptance__flow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})
 aps_start()
 app.run(host='127.0.0.1',port=19008,debug=False,threaded=True)

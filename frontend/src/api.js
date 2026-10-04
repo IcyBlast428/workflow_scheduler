@@ -155,6 +155,7 @@ export const api = {
     return request('/api/taskinfo/call_task', { method: 'POST', params });
   },
   taskDetail(pid) { return request('/api/taskinfo/detail', { params: { pid } }); },
+  taskFlow(pid) { return request('/api/taskinfo/flow', { params: { pid }, timeout: 30000 }); },
   executionMatrix(params = {}) { return request('/api/taskinfo/matrix', { params, timeout: 30000 }); },
   taskSources(pid, dir = '', offset = 0) { return request('/api/taskinfo/source', { params: { pid, dir, offset } }); },
   taskSource(pid, file) { return request('/api/taskinfo/source', { params: { pid, file } }); },

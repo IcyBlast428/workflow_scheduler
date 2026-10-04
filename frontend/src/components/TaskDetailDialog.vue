@@ -10,7 +10,7 @@
             <button class="btn detail-refresh" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新详情' }}</button>
           </div>
         </div>
-        <LoadingStatus :active="loading || (tab === 'source' && sourceLoading)" :label="tab === 'source' && sourceLoading ? '正在读取任务文件…' : '正在更新任务详情…'" />
+        <LoadingStatus :active="loading || (tab === 'source' && sourceLoading) || (tab === 'flow' && flowLoading)" :label="tab === 'source' && sourceLoading ? '正在读取任务文件…' : tab === 'flow' && flowLoading ? '正在分析任务执行流程…' : '正在更新任务详情…'" />
         <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div>
         <div class="detail-panels" :aria-busy="loading">
         <div v-show="tab === 'description'" class="detail-tab-panel" aria-label="说明与配置">
@@ -31,7 +31,8 @@
           <tr v-for="item in data.versions || []" :key="item.version"><td>{{ item.version }}</td><td>{{ item.changed_by }}</td><td>{{ item.changed_at }}</td><td><button v-if="canManage" class="btn" :disabled="restoring" @click="restore(item.version)">恢复此配置</button></td></tr>
         </tbody></table><p class="hint">恢复会生成新版本，不删除历史；沿用该版本的调度启用状态。</p></div>
         <div v-show="tab === 'audit'" class="table-wrap detail-tab-panel" aria-label="操作记录"><table><thead><tr><th>操作人</th><th>操作</th><th>结果</th><th>时间</th></tr></thead><tbody><tr v-for="(item,index) in data.audit || []" :key="index"><td>{{ item.actor }}</td><td>{{ actionLabel(item.action) }}</td><td>{{ item.outcome === 'success' ? '成功' : '失败' }}</td><td>{{ item.created_at }}</td></tr></tbody></table></div>
-        <div v-if="sourceVisited" v-show="tab === 'source'" class="detail-tab-panel"><TaskSourceViewer :key="pid" :pid="pid" :show-loading-status="false" @loading="sourceLoading = $event" /></div>
+        <div v-if="flowVisited" v-show="tab === 'flow'" class="detail-tab-panel"><TaskFlowViewer :key="pid" :pid="pid" :revision="flowRevision" @source="showFlowSource" @loading="flowLoading=$event" /></div>
+        <div v-if="sourceVisited" v-show="tab === 'source'" class="detail-tab-panel"><TaskSourceViewer :key="pid" :pid="pid" :location="sourceLocation" :show-loading-status="false" @loading="sourceLoading = $event" /></div>
         </div>
       </div>
     </section>
@@ -42,19 +43,22 @@ import { onBeforeUnmount, ref, watch } from 'vue';
 import { api } from '../api';
 import { statusLabel, actionLabel, statusClass } from '../executionLabels';
 import TaskSourceViewer from './TaskSourceViewer.vue';
+import TaskFlowViewer from './TaskFlowViewer.vue';
 import LoadingStatus from './LoadingStatus.vue';
 const props = defineProps({ pid: {type:String,default:''}, canManage:Boolean });
 const emit = defineEmits(['close','execution','confirmRestore','packages']);
 const data = ref({}), tab = ref('description'), error = ref(''), loading = ref(false), restoring = ref(false);
 const sourceVisited = ref(false);
 const sourceLoading = ref(false);
-function selectTab(id) { if (id === 'source') sourceVisited.value = true; tab.value = id; }
-const tabs = [{id:'description',label:'说明与配置'},{id:'source',label:'查看代码'},{id:'runs',label:'执行记录'},{id:'versions',label:'配置历史'},{id:'audit',label:'操作记录'}];
+const flowVisited=ref(false),flowRevision=ref(0),flowLoading=ref(false),sourceLocation=ref(null);
+function selectTab(id) { if (id === 'source') sourceVisited.value = true; if(id === 'flow')flowVisited.value=true; tab.value = id; }
+function showFlowSource(location) { sourceLocation.value={...location,key:Date.now()};sourceVisited.value=true;tab.value='source'; }
+const tabs = [{id:'description',label:'说明与配置'},{id:'flow',label:'执行流程'},{id:'source',label:'查看代码'},{id:'runs',label:'执行记录'},{id:'versions',label:'配置历史'},{id:'audit',label:'操作记录'}];
 let generation = 0;
 async function load() {
   if (!props.pid) return;
   const seq = ++generation; loading.value = true;
-  try { const result = await api.taskDetail(props.pid); if (seq === generation) { data.value = result; error.value = ''; } }
+  try { const result = await api.taskDetail(props.pid); if (seq === generation) { data.value = result; error.value = ''; if(flowVisited.value)flowRevision.value++; } }
   catch (err) { if (seq === generation) error.value = err.message; }
   finally { if (seq === generation) loading.value = false; }
 }
@@ -63,6 +67,6 @@ function duration(run) {
   return `${Math.max(0,(Date.parse(run.end_time.replace(' ','T')) - Date.parse(run.start_time.replace(' ','T'))) / 1000).toFixed(1)} 秒`;
 }
 function restore(version) { emit('confirmRestore', {pid:props.pid, restore_version:version, version:data.value.schedule.version, done:load}); }
-watch(() => props.pid, () => { generation++; tab.value = 'description'; sourceVisited.value = false; sourceLoading.value = false; data.value = {}; error.value = ''; loading.value = false; load(); }, {immediate:true});
+watch(() => props.pid, () => { generation++; tab.value = 'description'; sourceVisited.value = false; sourceLoading.value = false; flowVisited.value=false;flowRevision.value=0;flowLoading.value=false;sourceLocation.value=null;data.value = {}; error.value = ''; loading.value = false; load(); }, {immediate:true});
 onBeforeUnmount(() => generation++);
 </script>
