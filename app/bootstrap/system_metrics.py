@@ -257,12 +257,12 @@ class _TaskStartEvents:
                     item['source'] = 'memory'
                     return
 
-    def recent(self, since):
+    def recent(self, since, include_active=False):
         with self._lock:
             events = [
                 dict(item)
                 for item in self._events
-                if item['start_time_obj'] >= since
+                if item['start_time_obj'] >= since or include_active and not item.get('end_time')
             ]
         for item in events:
             item.pop('start_time_obj', None)
@@ -275,6 +275,22 @@ _task_starts = _TaskStartEvents()
 
 
 def cpu_monitor_snapshot(hours=6, after=''):
+    from app.settings import WFS_ENABLE_SCHEDULER, WFS_SCHEDULER_CONTROL_URL
+    if not WFS_ENABLE_SCHEDULER and WFS_SCHEDULER_CONTROL_URL:
+        from app.bootstrap.snapshot_cache import cached
+        def read():
+            try:
+                return json.loads((Path(DATA_DIR)/'metrics.json').read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                return []
+        retained = cached('persisted-resource-samples', 2, read, mutable=False)
+        since = (business_now()-datetime.timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+        latest = retained[-1] if retained else {}
+        return {'samples': [item for item in retained if item['time'] >= since and (not after or item['time'] > after)],
+                'current': latest.get('cpu'), 'current_memory': latest.get('memory'),
+                'cursor': latest.get('time', ''), 'incremental': bool(after),
+                'sample_interval_seconds': CPU_SAMPLE_INTERVAL_SECONDS, 'retention_hours': hours,
+                'warning': '' if retained else '等待调度器发布资源采样'}
     return _cpu_monitor.snapshot(hours=hours, after=after)
 
 
@@ -292,5 +308,5 @@ def record_task_end(pid, start_time, end_time=None):
     _task_starts.complete(pid, start_time, end_time=end_time)
 
 
-def recent_task_starts(since):
-    return _task_starts.recent(since)
+def recent_task_starts(since, include_active=False):
+    return _task_starts.recent(since, include_active=include_active)

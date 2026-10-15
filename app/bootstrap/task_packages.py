@@ -51,7 +51,13 @@ def limits():
 
 
 def storage_root():
-    return Path(os.environ.get('WFS_TASK_RELEASE_DIR', str(Path(DATA_DIR) / 'task-packages'))).resolve()
+    root = Path(os.environ.get('WFS_TASK_RELEASE_DIR', str(Path(DATA_DIR) / 'task-packages'))).resolve()
+    # venv/ensurepip contains deeply nested filenames. Extended paths avoid the
+    # Windows MAX_PATH limit without changing machine-wide registry settings.
+    if os.name == 'nt' and not str(root).startswith('\\\\?\\'):
+        value = str(root)
+        root = Path('\\\\?\\UNC\\' + value[2:] if value.startswith('\\\\') else '\\\\?\\' + value)
+    return root
 
 
 def release_dir(pid, version):
@@ -407,7 +413,9 @@ def _command(command, root, timeout):
     # Don't send pip diagnostics through the UI; they can contain machine paths.
     with (root / 'prepare.log').open('ab') as log:
         result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, env=env,
-                                cwd=root, timeout=timeout, stdin=subprocess.DEVNULL, check=False)
+                                executable=command[0] if os.name == 'nt' else None,
+                                cwd=Path(__file__).resolve().parents[2] if os.name == 'nt' else root,
+                                timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     if result.returncode:
         raise PackageError('依赖准备失败，请确认离线 wheel 与 Python/操作系统版本匹配。管理员可查看版本目录中的 prepare.log。')
 
@@ -431,9 +439,10 @@ def _prepare_worker(pid, version, token):
         env = root / ('environment-' + token)
         timeout = max(30, min(int(os.environ.get('WFS_PACKAGE_PREPARE_SECONDS', '300')), 1800))
         stage('创建独立环境')
-        _command([sys.executable, '-I', '-m', 'venv', str(env)], root, timeout)
+        _command([sys.executable, '-I', '-m', 'venv', '--without-pip', str(env)], root, timeout)
         python = env / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         if data['requirements']:
+            _command([str(python), '-I', '-m', 'ensurepip', '--default-pip'], root, timeout)
             wheels = [code / 'wheels']
             if os.environ.get('WFS_TASK_WHEELHOUSE'):
                 wheels.append(Path(os.environ['WFS_TASK_WHEELHOUSE']).resolve())

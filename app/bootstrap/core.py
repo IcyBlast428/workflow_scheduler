@@ -456,4 +456,6 @@ def aps_start(task_pid=None, action='refresh'):
     _sync_job_stats(job_list, prune_missing=(task_pid is None))
     if task_pid is None:
         mark_ready()
+        from app.bootstrap.runtime_snapshot import start
+        start()
     logging.getLogger(__name__).info('end to run aps_start pid={} action={}'.format(task_pid, action))

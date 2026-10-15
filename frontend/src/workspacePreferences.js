@@ -13,3 +13,6 @@ export function mergeMatrixSnapshot(previous, incoming) {
   return { ...incoming, records: [...records.values()] };
 }
 export function matrixQuery(live, date, cursor = '') { return { ...(live ? {} : { date }), cursor }; }
+export function matrixViewMode(saved, width) {
+  return ['2d','3d'].includes(saved) ? saved : width <= 760 ? '2d' : '3d';
+}

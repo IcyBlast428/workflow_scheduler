@@ -1,5 +1,5 @@
 <template>
-  <section class="panel attention-panel">
+  <section class="panel attention-panel" :class="{'is-clear': !loading && !error && data.scheduler?.healthy && !data.issues?.length}">
     <div class="panel-head"><div><h2>需要处理</h2><p>配置、执行和服务维护的待处理事项。</p></div><button class="btn" :disabled="loading" @click="load">刷新</button></div>
     <div class="panel-body">
       <div class="runtime-alerts"><span class="tag" :class="data.scheduler?.healthy ? 'success' : 'warning'">调度器：{{ data.scheduler?.healthy ? '正常' : data.scheduler?.message || '检测中' }}</span><span class="tag info">业务时区：Asia/Shanghai · UTC+8</span><span class="tag info">数据库：{{ data.database || '-' }}</span></div>

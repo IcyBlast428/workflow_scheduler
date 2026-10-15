@@ -80,35 +80,9 @@ class health(Resource):
 
 class ready(Resource):
     def get(self):
-        import shutil
-        import datetime
-        import os
-        import requests
-        from app.bootstrap.database import GaussDB
-        from app.bootstrap.operations import service_state
-        from app.bootstrap.global_vars import DATA_DIR
-        from app.settings import WFS_ENABLE_SCHEDULER, WFS_SCHEDULER_CONTROL_URL
-        try:
-            with GaussDB() as db:
-                for table in ('wfs_task_config','wfs_executions','wfs_auth_sessions','wfs_config_application'):
-                    db.execute_query_sql(f'SELECT 1 FROM {table} LIMIT 0')
-            if shutil.disk_usage(DATA_DIR).free < int(os.environ.get('WFS_MIN_FREE_MB', '100')) * 1024 * 1024:
-                raise RuntimeError('data directory free space below configured minimum')
-            if WFS_ENABLE_SCHEDULER:
-                from app.extensions import scheduler
-                state = service_state()
-                if not scheduler.running or not state['ready'] or not state['heartbeat']:
-                    raise RuntimeError('scheduler initialization incomplete')
-                if (business_now() - datetime.datetime.fromisoformat(state['heartbeat'])).total_seconds() > 120:
-                    raise RuntimeError('scheduler heartbeat stale')
-            elif WFS_SCHEDULER_CONTROL_URL:
-                response = requests.get(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/api/user/ready', timeout=5)
-                if response.status_code != 200:
-                    raise RuntimeError('scheduler not ready')
-            return success_msg({'ready':True, 'database':True, 'scheduler':bool(WFS_ENABLE_SCHEDULER or WFS_SCHEDULER_CONTROL_URL), 'timezone':'Asia/Shanghai'})
-        except Exception as exc:
-            current_app.logger.warning('readiness unavailable: %s', exc)
-            return error_msg('服务尚未就绪，请查看运行日志。'), 503
+        from app.bootstrap.readiness import snapshot
+        data = snapshot()
+        return success_msg(data), 200 if data['ready'] else 503
 
 
 class test(Resource):

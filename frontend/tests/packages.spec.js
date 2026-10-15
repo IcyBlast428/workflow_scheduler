@@ -37,11 +37,11 @@ test('multi-file upload, preview, publish, execute, rollback and recycle', async
   await page.getByRole('button',{name:'任务列表',exact:true}).click();
   const row = page.locator('.task-table tbody tr').filter({hasText:'多文件发布验收'});
   await expect(row).toContainText('未配置');
-  await row.getByRole('button',{name:'触发',exact:true}).click();
+  await row.getByRole('button',{name:'手动执行',exact:true}).click();
   await expect(page.locator('.execution-output')).toContainText('PACKAGE_V1',{timeout:15000});
   await page.locator('.execution-modal').getByTitle('关闭').click();
   await row.getByRole('button',{name:'详情',exact:true}).click();
-  await page.getByRole('button',{name:'查看代码',exact:true}).click();
+  await page.getByRole('tab',{name:'查看代码',exact:true}).click();
   await expect(page.locator('.source-files')).toContainText('helper.py');
   await page.getByRole('button',{name:'管理代码版本',exact:true}).click();
   await expect(page.locator('.package-overview')).toContainText('多文件发布验收');

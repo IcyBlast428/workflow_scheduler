@@ -5,6 +5,7 @@ export default defineConfig({
   base: '/',
   plugins: [vue()],
   build: {
+    manifest: true,
     outDir: '../app/dist',
     assetsDir: 'static',
     emptyOutDir: false,

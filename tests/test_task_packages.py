@@ -54,6 +54,15 @@ class PackageTests(unittest.TestCase):
         for item in reversed(self.patches):
             item.stop()
         task_loader.invalidate_task_cache()
+        if os.name == 'nt':
+            # The Windows regression deliberately creates paths beyond MAX_PATH.
+            import shutil
+            temporary_root = self.root.resolve()
+            temporary_root.relative_to(Path(tempfile.gettempdir()).resolve())
+            def cleanup_error(function, path, error):
+                if not isinstance(error, FileNotFoundError):
+                    raise error
+            shutil.rmtree('\\\\?\\' + str(temporary_root), onexc=cleanup_error)
         self.temp.cleanup()
 
     def new(self, files=None, folder='demo'):
@@ -223,6 +232,17 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(core.execute_py(spec['main_file_path'],spec['pid'],python_executable=spec['python_executable']),0)
         from app.bootstrap.operations import list_runs
         self.assertIn('OFFLINE_WHEEL_OK', read_log(list_runs(spec['pid'])[0]['run_id'])['content'])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows extended paths')
+    def test_windows_deep_release_path_can_prepare_and_execute(self):
+        deep = self.root / ('nested-' + 'x'*90) / 'packages'
+        with patch.dict(os.environ, {'WFS_TASK_RELEASE_DIR':str(deep)}):
+            data = self.ready(self.new())
+            self.assertTrue(str(packages.storage_root()).startswith('\\\\?\\'))
+            self.activate(data)
+            spec = task_loader.discover_task_specs()[0]
+            self.assertEqual(core.execute_py(spec['main_file_path'], spec['pid'],
+                                            python_executable=spec['python_executable']), 0)
 
     def test_multipart_csrf_permissions_download_and_proxy(self):
         base = '/api/taskinfo/packages'

@@ -107,6 +107,7 @@ def batch_tasks():
     from app.bootstrap.schedule_config import set_schedule_enabled
     from app.bootstrap.global_vars import ignores, runnings
     from app.bootstrap.operations import audit
+    from app.extensions import scheduler
     form = request.get_json(silent=True) or {}
     if not isinstance(form, dict):
         return error_msg('批量操作请求格式无效。'),400

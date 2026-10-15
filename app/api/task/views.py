@@ -103,6 +103,31 @@ def _scheduler_control_enabled():
     return (not WFS_ENABLE_SCHEDULER) and bool(WFS_SCHEDULER_CONTROL_URL)
 
 
+def _shared_runtime():
+    if _scheduler_control_enabled():
+        from app.bootstrap.runtime_snapshot import read_snapshot
+        return read_snapshot()
+    return None
+
+
+def _task_runtime(spec, shared=None):
+    pid = spec.get('pid') or spec.get('folder_name')
+    if shared is not None:
+        value = shared.get(pid, {})
+        result = {**value, 'state': value.get('state', 'false'),
+                  'pending': bool(value.get('pending')), 'running_instances': value.get('running_instances', 0),
+                  'next_run_time': value.get('next_run_time', '')}
+    else:
+        job = scheduler.get_job(pid)
+        next_time = getattr(job, 'next_run_time', None)
+        result = {'state': 'pause' if pid in ignores else 'true' if job else 'false',
+                  'pending': runnings.is_running(pid), 'running_instances': runnings.count(pid),
+                  'next_run_time': next_time.strftime('%Y-%m-%d %H:%M:%S') if next_time else ''}
+    if spec.get('error') or spec.get('main_file_error'):
+        result['state'] = 'invalid'
+    return result
+
+
 def _internal_auth_headers():
     headers = {}
     if request.headers.get('Cookie'):
@@ -354,7 +379,7 @@ def _dedupe_task_markers(items):
     return merged
 
 
-def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
+def _load_task_start_markers(hours=CPU_TIMELINE_HOURS, live_markers=None):
     since = business_now() - datetime.timedelta(hours=hours)
     markers = []
     try:
@@ -365,7 +390,7 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
                     SELECT pid, taskname, state, start_time, end_time, group_name, folder_name
                     FROM wfs_run_history
                     WHERE start_time >= ?
-                    ORDER BY start_time ASC
+                    ORDER BY start_time DESC
                     LIMIT 1000
                     """,
                     return_json=True,
@@ -379,7 +404,7 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
                     SELECT pid, taskname, state, start_time, end_time, '' AS group_name, '' AS folder_name
                     FROM wfs_run_history
                     WHERE start_time >= ?
-                    ORDER BY start_time ASC
+                    ORDER BY start_time DESC
                     LIMIT 1000
                     """,
                     return_json=True,
@@ -400,7 +425,7 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS):
         markers = []
 
     return sorted(
-        _dedupe_task_markers(markers + recent_task_starts(since)),
+        _dedupe_task_markers(markers + (recent_task_starts(since) if live_markers is None else live_markers)),
         key=lambda item: _parse_datetime_value(item.get('start_time')) or datetime.datetime.min,
     )
 
@@ -474,6 +499,9 @@ def _event_snapshot():
 class Events(Resource):
     def get(self):
         if _scheduler_control_enabled():
+            shared = _shared_runtime()
+            if shared is not None:
+                return success_msg({key: shared[key] for key in ('server_time', 'tasks', 'logs', 'scheduler')})
             return _proxy_scheduler_resource('/api/taskinfo/events')
         try:
             return success_msg(_event_snapshot())
@@ -483,10 +511,12 @@ class Events(Resource):
 
 class Dashboard(Resource):
     def get(self):
-        if _scheduler_control_enabled():
+        shared = _shared_runtime()
+        if _scheduler_control_enabled() and shared is None:
             return _proxy_scheduler_resource('/api/taskinfo/dashboard')
 
         specs = discover_task_specs(TASK_DIR)
+        runtime = {item['id']: item for item in shared['tasks']} if shared is not None else None
         job_stats = _load_job_stats()
         counters = {
             'total': len(specs),
@@ -503,13 +533,14 @@ class Dashboard(Resource):
             if spec.get('error') or spec.get('main_file_error'):
                 counters['invalid'] += 1
                 continue
-            if pid in ignores:
+            task_state = _task_runtime(spec, runtime)
+            if task_state['state'] == 'pause':
                 counters['paused'] += 1
-            elif scheduler.get_job(pid):
+            elif task_state['state'] == 'true':
                 counters['running'] += 1
             else:
                 counters['stopped'] += 1
-            if runnings.is_running(pid):
+            if task_state['pending']:
                 counters['pending'] += 1
             if is_failure((job_stats.get(pid) or {}).get('last_status')):
                 counters['failed_jobs'] += 1
@@ -517,7 +548,7 @@ class Dashboard(Resource):
         recent = _load_recent_run_stats()
         cpu_metrics = cpu_monitor_snapshot(hours=CPU_TIMELINE_HOURS, after=request.args.get('after','')[:19])
         data = {
-            'scheduler': {
+            'scheduler': shared['scheduler'] if shared is not None else {
                 'enabled': WFS_ENABLE_SCHEDULER,
                 'control_url': WFS_SCHEDULER_CONTROL_URL,
                 'job_count': len(scheduler.get_jobs()) if WFS_ENABLE_SCHEDULER else 0,
@@ -530,7 +561,7 @@ class Dashboard(Resource):
                 'samples': cpu_metrics['samples'],
                 'cursor': cpu_metrics['cursor'],
                 'incremental': cpu_metrics['incremental'],
-                'markers': _load_task_start_markers(CPU_TIMELINE_HOURS),
+                'markers': _load_task_start_markers(CPU_TIMELINE_HOURS, shared['task_starts'] if shared is not None else None),
                 'current': cpu_metrics['current'],
                 'current_memory': cpu_metrics['current_memory'],
                 'sample_interval_seconds': cpu_metrics['sample_interval_seconds'],
@@ -544,8 +575,10 @@ class Dashboard(Resource):
 
 class State(Resource):
     def get(self):
-        if _scheduler_control_enabled():
+        shared = _shared_runtime()
+        if _scheduler_control_enabled() and shared is None:
             return _proxy_scheduler_resource('/api/taskinfo/state')
+        runtime = {item['id']: item for item in shared['tasks']} if shared is not None else None
 
         current_page, pagesize = _get_page_args()
         taskgroup = request.args.get("taskgroup")
@@ -589,28 +622,18 @@ class State(Resource):
                 'failed_times': stats.get('failed_times') or 0,
                 'last_sms_alarm': str(stats.get('last_sms_alarm') or ''),
                 'max_instances': spec.get('max_instances') or 1,
-                'running_instances': runnings.count(display_pid),
+                'running_instances': 0,
                 'total_failures': stats.get('total_failures') or 0,
                 'owner': (spec.get('schedule_form') or {}).get('owner',''),
                 'application': applications.get(display_pid,{}),
             }
 
+            task_state.update(_task_runtime(spec, runtime))
             if spec.get('error') or spec.get('main_file_error'):
                 task_state['state'] = 'invalid'
                 task_state['config_error'] = spec.get('error') or spec.get('main_file_error')
                 task_state['group_name'] = spec.get('group_name') or ''
                 task_state['folder_name'] = spec.get('folder_name') or ''
-            else:
-                pid = spec.get('pid')
-                job = scheduler.get_job(pid)
-                if job:
-                    task_state['state'] = 'true'
-                    task_state['next_run_time'] = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    task_state['state'] = 'false'
-                task_state['pending'] = runnings.is_running(pid)
-                if pid in ignores:
-                    task_state['state'] = 'pause'
             status_filter = request.args.get('status')
             if status_filter == 'active' and not task_state['pending']:
                 continue

@@ -113,7 +113,8 @@ class ScaleTests(unittest.TestCase):
         job=SimpleNamespace(func=execute_py,args=[],kwargs={},id=self.pid,_jobstore_alias='default',misfire_grace_time=5)
         events=run_with_times(job,[now-dt.timedelta(seconds=20),now],'test')
         self.assertEqual([event.code for event in events],[EVENT_JOB_MISSED,EVENT_JOB_EXECUTED])
-        self.assertEqual(results[0]['scheduled_time'],now.astimezone().replace(tzinfo=None).isoformat(' '))
+        from app.bootstrap.timebase import business_time
+        self.assertEqual(results[0]['scheduled_time'],business_time(now).isoformat(' '))
 
     def test_matrix_delta_reconciles_updates_removals_and_new_dates(self):
         from app.bootstrap import execution_matrix as matrix,snapshot_cache
@@ -144,6 +145,31 @@ class ScaleTests(unittest.TestCase):
         from app.bootstrap.permissions import allowed
         self.assertFalse(allowed('/api/taskinfo/batch','POST','viewer'))
         self.assertTrue(allowed('/api/taskinfo/batch','POST','operator'))
+
+    def test_batch_start_and_pause_apply_to_scheduler_and_report_success(self):
+        from app.bootstrap.schedule_config import save_schedule, load_schedule
+        from app.bootstrap.global_vars import ignores
+        from app.extensions import scheduler
+        pid = 'testJob__test_job1'
+        save_schedule(pid, {'schedule_type':'every_hour', 'main_file':'main.py', 'enabled':False})
+        client = create_app().test_client()
+        login = client.post('/api/user/login', json={'username':'admin', 'password':'test-password'})
+        headers = {'X-CSRF-Token': login.json['data']['csrf_token']}
+        try:
+            for action in ('start', 'pause'):
+                preview = client.post('/api/taskinfo/batch', json={'ids':[pid], 'action':action, 'preview':True}, headers=headers)
+                version = preview.json['data']['preview'][0]['version']
+                result = client.post('/api/taskinfo/batch', json={'ids':[pid], 'action':action, 'versions':{pid:version}}, headers=headers)
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.json['data']['results'], [{'pid':pid, 'ok':True}])
+                self.assertEqual(bool(scheduler.get_job(pid)), action == 'start')
+                saved = load_schedule(pid)
+                self.assertEqual(saved['form']['enabled'], action == 'start')
+                self.assertEqual(saved['application']['status'], 'applied')
+        finally:
+            if scheduler.get_job(pid):
+                scheduler.remove_job(pid)
+            ignores.remove(pid)
 
     @unittest.skipIf(os.name=='nt','Linux backup lease')
     def test_backup_restore_includes_index_and_nested_logs(self):

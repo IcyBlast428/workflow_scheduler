@@ -84,6 +84,11 @@ def init_middleware(app):
                 from app.bootstrap.permissions import READ_POSTS
                 if request.path not in READ_POSTS or request.method != 'POST':
                     audit(g.identity['username'], request.path, target, 'success' if payload.get('code') == 20000 else 'failed', payload.get('message',''))
+                    from app.bootstrap.runtime_snapshot import publish
+                    try:
+                        publish()
+                    except Exception:
+                        app.logger.exception('runtime read model refresh deferred')
         resp.headers['X-Content-Type-Options'] = 'nosniff'
         resp.headers['Referrer-Policy'] = 'same-origin'
         return resp

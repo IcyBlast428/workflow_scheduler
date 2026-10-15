@@ -52,10 +52,10 @@
             <div class="row-actions task-actions">
               <button class="btn" @click="$emit('detail', row)">详情</button>
               <button v-if="row.pending" class="btn" @click="$emit('execution',row)">查看执行</button>
-              <button v-else-if="canCallTask(row)" class="btn primary" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" :title="callTaskTitle(row)" @click="$emit('call',row)">触发</button>
+              <button v-else-if="canCallTask(row)" class="btn primary" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" :title="callTaskTitle(row)" @click="$emit('call',row)">手动执行</button>
               <ActionMenu>
-                <button v-if="canStart(row)" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'start')">启动</button>
-                <button v-if="row.state === 'true'" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('pause',row)">暂停</button>
+                <button v-if="canStart(row)" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'start')">启用调度</button>
+                <button v-if="row.state === 'true'" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('pause',row)">暂停调度</button>
                 <button class="btn" :disabled="busy || pendingActions[row.id] || !canManage" @click="$emit('schedule',row)">配置</button>
                 <button v-if="row.state !== 'invalid'" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'refresh')">{{ pendingActions[row.id] === 'refresh' ? '刷新中…' : '刷新' }}</button>
                 <button class="btn" :disabled="pendingActions[row.id]" @click="$emit('log',row)">最新输出</button>

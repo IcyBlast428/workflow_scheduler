@@ -1,8 +1,8 @@
 <template>
   <section ref="pageElement" class="matrix-page">
     <div class="matrix-toolbar">
-      <div><h2>任务执行矩阵</h2><p>{{ displayMode === '2d' ? '按任务与小时查看执行分布 · 同一时段异常优先显示' : '分类固定位置 · 高度表示完成时间 · 执行中位于当前平面' }}</p></div>
-      <div class="matrix-filters">
+      <div class="matrix-heading"><div><h2>任务执行矩阵</h2><p>{{ displayMode === '2d' ? '按任务与小时查看执行分布 · 同一时段异常优先显示' : '分类固定位置 · 高度表示完成时间 · 执行中位于当前平面' }}</p></div><button class="btn matrix-filter-toggle" :aria-expanded="filtersOpen" aria-controls="matrix-filters" @click="filtersOpen=!filtersOpen">{{ filtersOpen ? '收起筛选' : '筛选' }}</button></div>
+      <div id="matrix-filters" class="matrix-filters" :class="{'is-open':filtersOpen}">
         <label class="matrix-filter-field">视图 <select class="select" v-model="displayMode" aria-label="矩阵视图" @change="savePreferences()"><option value="3d">三维矩阵</option><option value="2d">二维时间图</option></select></label>
         <label class="checkbox-row"><input type="checkbox" v-model="live" @change="changeMode">实时跟随今天</label>
         <label class="matrix-filter-field">日期 <input class="input" type="date" v-model="date" :max="data?.server_time.slice(0,10)" :min="minDate" @change="changeDate"></label>
@@ -68,16 +68,16 @@ import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
 import { createMatrixScene, layoutTasks } from '../executionMatrixScene';
 import { statusLabel } from '../executionLabels';
-import { readPreference, writePreference, mergeMatrixSnapshot, matrixQuery } from '../workspacePreferences';
+import { readPreference, writePreference, mergeMatrixSnapshot, matrixQuery, matrixViewMode } from '../workspacePreferences';
 const props = defineProps({userKey:{type:String,default:''}});
 defineEmits(['task', 'execution', 'logs']);
 const canvas=ref(null),data=ref(null),date=ref(''),loading=ref(false),error=ref(''),selectedPid=ref(''),selectedKey=ref(''),focus=ref(false);
 const recordLimit=ref(200);
-const displayMode=ref('3d');
+const displayMode=ref(matrixViewMode(null,window.innerWidth)),filtersOpen=ref(false);
 const pageElement=ref(null),live=ref(true),category=ref(''),timeWindow=ref('day'),onlyAbnormal=ref(false);
 const preferenceKey=()=>`wfs:matrix:${props.userKey || 'anonymous'}`;
 let savedCamera;
-function restorePreferences(){const value=readPreference(preferenceKey(),{});displayMode.value=value.displayMode==='2d'?'2d':'3d';category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.camera;scene?.setCamera(savedCamera);}
+function restorePreferences(){const value=readPreference(preferenceKey(),{});displayMode.value=matrixViewMode(value.displayMode,window.innerWidth);category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.camera;scene?.setCamera(savedCamera);}
 function savePreferences(camera=scene?.getCamera()){writePreference(preferenceKey(),{displayMode:displayMode.value,category:category.value,timeWindow:timeWindow.value,onlyAbnormal:onlyAbnormal.value,camera});}
 let scene=null,timer=null,serial=0,disposed=false;
 const allGroups=computed(()=>[...new Set((data.value?.tasks || []).map(task=>task.group))]);
@@ -98,6 +98,7 @@ const legend=['success','running','failed','timed_out','interrupted','skipped','
 const statusName=status=>statusLabel(status);
 const isRun=record=>record.inspectable && /^[a-f0-9]{32}$/.test(record.run_id||'');
 function updateScene(){scene?.update(visibleData.value,selectedPid.value,focus.value,selectedKey.value);}
+function ensureScene(){if(displayMode.value==='3d'&&!scene&&canvas.value)scene=createMatrixScene(canvas.value,record=>{selectedPid.value=record.pid;selectedKey.value=record.key||'';},{camera:savedCamera,onCamera:savePreferences});}
 async function load(force=false){
   if(disposed||loading.value&&!force)return;
   const current=++serial;loading.value=true;
@@ -107,7 +108,7 @@ async function load(force=false){
     data.value=mergeMatrixSnapshot(data.value,result);date.value=result.date;error.value='';
     if(!result.tasks.some(t=>t.pid===selectedPid.value)){selectedPid.value='';selectedKey.value='';}
     await nextTick();
-    if(!scene&&canvas.value)scene=createMatrixScene(canvas.value,record=>{selectedPid.value=record.pid;selectedKey.value=record.key||'';},{camera:savedCamera,onCamera:savePreferences});
+    ensureScene();
     updateScene();
   }catch(exc){if(!disposed&&current===serial)error.value=exc.message||'暂时无法读取执行矩阵。';}
   finally{if(current===serial)loading.value=false;}
@@ -117,6 +118,7 @@ function changeDate(){live.value=false;load(true);}
 function changeMode(){load(true);}
 async function toggleFullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await pageElement.value?.requestFullscreen();}catch{error.value='此浏览器暂不支持全屏，请使用浏览器的全屏功能。';}}
 watch([selectedPid,selectedKey,focus],updateScene);
+watch(displayMode,async()=>{await nextTick();ensureScene();updateScene();});
 watch([category,timeWindow,onlyAbnormal],()=>{updateScene();savePreferences();});
 watch(()=>props.userKey,restorePreferences,{immediate:true});
 watch(selectedPid,()=>{recordLimit.value=200;});
@@ -167,6 +169,14 @@ onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEv
 }
 </style>
 <style scoped>
+.matrix-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.matrix-filter-toggle { display:none; flex:none; }
+@media(max-width:760px) {
+  .matrix-filter-toggle { display:inline-flex; }
+  .matrix-filters:not(.is-open) { display:none; }
+  .matrix-toolbar { padding:16px; gap:14px; }
+  .matrix-heading p { margin-bottom:0; }
+}
 .matrix-legend { max-width:calc(100% - 40px); padding:12px 16px; gap:12px 18px; border:1px solid var(--surface-glass-edge); }
 .matrix-surface-note { padding:10px 14px; bottom:18px; max-width:calc(100% - 40px); border:1px solid var(--surface-glass-edge); }
 .matrix-camera-bar { position:absolute; right:20px; bottom:18px; padding:8px 10px 8px 16px; gap:12px; border:1px solid var(--surface-glass-edge); font-size:11px; }

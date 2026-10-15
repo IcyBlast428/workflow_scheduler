@@ -77,7 +77,7 @@ async function request(path, options = {}) {
     window.clearTimeout(timeout);
   }
 
-  if (!response.ok && payload.code !== 50008) {
+  if (!response.ok && payload.code !== 50008 && !(options.acceptUnavailable && response.status === 503)) {
     throw createError(payload.message || `服务请求失败（HTTP ${response.status}）。`, `HTTP_${response.status}`);
   }
   if (payload.code !== 20000) {
@@ -95,6 +95,9 @@ export const api = {
   packageAction(body) { return request('/api/taskinfo/packages/action', { method: 'POST', body, timeout: 65000 }); },
   health() {
     return request('/api/user/health');
+  },
+  readiness() {
+    return request('/api/user/ready', { acceptUnavailable: true });
   },
   login(credentials) {
     return request('/api/user/login', { method: 'POST', body: credentials });

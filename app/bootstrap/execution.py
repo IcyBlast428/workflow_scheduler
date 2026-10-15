@@ -128,7 +128,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                        '--memory-mb', str(_resource_limit(limits, 'memory_mb', 'WFS_TASK_MEMORY_MB', 0)),
                        '--cpu-seconds', str(_resource_limit(limits, 'cpu_seconds', 'WFS_TASK_CPU_SECONDS', 0)),
                        '--file-mb', str(_resource_limit(limits, 'file_mb', 'WFS_TASK_FILE_MB', 100)), str(entry)]
-            kwargs = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
+            kwargs = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP, 'executable': command[0]} if os.name == 'nt' else {'start_new_session': True}
             process = subprocess.Popen(command, cwd=str(entry.parent), stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0, shell=False, env=child_env, **kwargs)
             runnings.set_process(reservation, PID, process.pid)

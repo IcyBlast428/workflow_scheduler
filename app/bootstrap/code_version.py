@@ -25,7 +25,8 @@ def execution_version(entry, python_executable=''):
     executable = python_executable or sys.executable
     def runtime():
         try:
-            return subprocess.check_output([executable,'--version'],timeout=3,stderr=subprocess.STDOUT).decode().strip()[:200]
+            return subprocess.check_output([executable,'--version'],executable=executable if os.name == 'nt' else None,
+                                           timeout=3,stderr=subprocess.STDOUT).decode().strip()[:200]
         except (OSError,subprocess.SubprocessError):
             return 'unknown'
     requirements = []
