@@ -24,6 +24,9 @@ class SQLAlchemyAdapter(DatabaseAdapter):
     def build_url(self):
         raise NotImplementedError
 
+    def connection_options(self):
+        return {}
+
     def get_engine(self, poolSize=3, poolRecycle=600, poolTimeout=30):
         if self._engine is None:
             self._engine = create_engine(
@@ -32,6 +35,8 @@ class SQLAlchemyAdapter(DatabaseAdapter):
                 pool_size=poolSize,
                 pool_recycle=poolRecycle,
                 pool_timeout=poolTimeout,
+                pool_pre_ping=True,
+                connect_args=self.connection_options(),
             )
         if self._connection is None or self._connection.closed:
             self._connection = self._engine.connect()

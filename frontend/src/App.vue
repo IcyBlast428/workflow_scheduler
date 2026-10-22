@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <CursorLight />
   <div v-if="!ready" class="boot-screen">
     <div class="boot-card">
@@ -30,9 +30,7 @@
           <BrandLogo /><span>WORKFLOW SCHEDULER</span>
         </div>
         <h1>定时任务调度</h1>
-        <p>
-          面向内网运维任务的调度控制台，集中管理任务扫描、暂停启动、运行日志与系统异常记录。
-        </p>
+        <p>{{ loginPortal === 'admin' ? '管理员登录后可管理任务、调度、账户及数据库连接。' : '登录用户工作区，查看任务状态、执行计划和执行记录。' }}</p>
         <div class="login-workflow" aria-hidden="true">
           <div class="login-workflow-line" />
           <div class="login-workflow-step">
@@ -64,8 +62,8 @@
       <form class="login-form" @submit.prevent="handleLogin">
         <div class="login-form-head">
           <div>
-            <h2>登录控制台</h2>
-            <p class="hint">使用已分配的账户登录。</p>
+            <h2>{{ loginPortal === 'admin' ? '管理员登录' : '用户登录' }}</h2>
+            <p class="hint">{{ loginPortal === 'admin' ? '仅管理员账户可以进入。' : '使用管理员分配的账户查看任务。' }}</p>
           </div>
         </div>
         <div v-if="backendStatus.error" class="inline-alert danger">
@@ -115,6 +113,7 @@
           <span class="btn-icon">></span>
           {{ loginLoading ? '登录中...' : '登录' }}
         </button>
+        <a class="hint" :href="loginPortal === 'admin' ? '/viewer/#tasks' : '/admin/#dashboard'">{{ loginPortal === 'admin' ? '返回用户登录' : '管理员入口 →' }}</a>
       </form>
     </LiquidGlassPanel>
   </main>
@@ -189,7 +188,7 @@
       <header class="topbar">
         <div class="page-title">
           <strong>{{ activeNav.label }}</strong>
-          <span>{{ activeNav.description }}</span>
+          <span>{{ canManage ? activeNav.description : '用户工作区 · 只读查看任务' }}</span>
         </div>
         <div class="top-actions">
           <button
@@ -211,7 +210,7 @@
           </button>
           <ServiceStatus :status="backendStatus" />
           <div
-            v-if="!['dashboard', 'matrix', 'admin', 'packages'].includes(view)"
+            v-if="!['dashboard', 'matrix', 'admin', 'packages', 'connections'].includes(view)"
             class="status-chip"
             :class="liveState.connected ? 'online' : 'offline'"
           >
@@ -320,7 +319,8 @@
         <template v-else-if="view === 'admin' && canManage"
           ><AdminPanel
         /></template>
-        <template v-else>
+        <template v-else-if="view === 'connections' && canManage"><DatabaseConnections :confirm="requestConfirm" /></template>
+        <template v-else-if="canManage">
           <SystemEventsView
             :system-logs="systemLogs"
             @search="loadSystemLogs(true)"
@@ -459,6 +459,7 @@ import ExecutionDialog from './components/ExecutionDialog.vue';
 const AdminPanel = defineAsyncComponent(
   () => import('./components/AdminPanel.vue'),
 );
+const DatabaseConnections = defineAsyncComponent(() => import('./components/DatabaseConnections.vue'));
 const TaskPackageManager = defineAsyncComponent(
   () => import('./components/TaskPackageManager.vue'),
 );
@@ -551,6 +552,7 @@ const navItems = [
     iconPaths: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
     description: '账户权限与操作记录。',
   },
+  {id: 'connections', label: '数据库连接', iconPaths: ['M4 6c0-4 16-4 16 0s-16 4-16 0','M4 6v12c0 4 16 4 16 0V6','M4 12c0 4 16 4 16 0'], description: '平台与任务业务数据库连接设置。'},
 ];
 
 const ready = ref(false);
@@ -580,6 +582,7 @@ const loginForm = reactive({
   username: 'admin',
   password: '',
 });
+const loginPortal = ref(window.location.pathname.startsWith('/admin') ? 'admin' : 'viewer');
 
 const user = reactive({
   project: '',
@@ -588,12 +591,10 @@ const user = reactive({
   roles: [],
 });
 const canManage = computed(() => user.roles.includes('admin'));
-const canOperate = computed(
-  () => canManage.value || user.roles.includes('operator'),
-);
+const canOperate = computed(() => canManage.value);
 const visibleNavItems = computed(() =>
   navItems.filter(
-    (item) => !['admin', 'packages'].includes(item.id) || canManage.value,
+    (item) => canManage.value || ['tasks', 'matrix', 'taskLogs'].includes(item.id),
   ),
 );
 
@@ -797,12 +798,15 @@ async function loadUser() {
   user.name = data.name || 'Admin';
   user.avatar = data.avatar || '/static/img/head.gif';
   user.roles = data.roles || [];
+  loginPortal.value = canManage.value ? 'admin' : 'viewer';
   if (data.csrf_token) {
     setToken(data.csrf_token);
     token.value = data.csrf_token;
   }
-  if (['admin', 'packages'].includes(view.value) && !canManage.value)
+  if (!canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(view.value))
     switchView('tasks');
+  const prefix = canManage.value ? '/admin/' : '/viewer/';
+  window.history.replaceState(null, '', prefix + window.location.hash);
 }
 
 async function handleLogin() {
@@ -814,12 +818,13 @@ async function handleLogin() {
 
   loginLoading.value = true;
   try {
-    const data = await api.login(loginForm);
+    const data = await api.login({ ...loginForm, portal: loginPortal.value });
+    loginForm.password = '';
     markBackendHealthy('后端连接正常');
     setToken(data.csrf_token);
     token.value = data.csrf_token;
     await loadUser();
-    await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
+    await Promise.all([...(canManage.value ? [loadDashboard()] : []), loadTasks(), loadGroups()]);
     startLiveEvents();
     applyRoute();
   } catch (error) {
@@ -830,6 +835,7 @@ async function handleLogin() {
 }
 
 async function handleLogout() {
+  loginPortal.value = canManage.value ? 'admin' : 'viewer';
   try {
     await api.logout();
   } catch (error) {
@@ -837,10 +843,16 @@ async function handleLogout() {
   }
   clearToken();
   token.value = '';
+  detailPid.value = '';
+  executionRunId.value = '';
+  scheduleDialog.open = false;
+  scheduleDialog.data = null;
+  closeModal();
   stopLiveEvents();
 }
 
 function switchView(nextView) {
+  if (token.value && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(nextView)) nextView = 'tasks';
   view.value = nextView;
   window.location.hash = nextView;
   mobileNavOpen.value = false;
@@ -1226,6 +1238,10 @@ watch(view, async (nextView) => {
 
 function applyRoute() {
   const route = readRoute(window.location.hash);
+  if (token.value && user.roles.length && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(route.view)) {
+    switchView('tasks');
+    return;
+  }
   view.value = route.view;
   if (!token.value) return;
   detailPid.value = route.run ? '' : route.pid;
@@ -1364,7 +1380,7 @@ onMounted(async () => {
   const hadToken = Boolean(token.value);
   try {
     await loadUser();
-    await Promise.all([loadDashboard(), loadTasks(), loadGroups()]);
+    await Promise.all([...(canManage.value ? [loadDashboard()] : []), loadTasks(), loadGroups()]);
     startLiveEvents();
     syncDashboardPolling();
     applyRoute();

@@ -44,7 +44,7 @@ def restore(backup, destination):
                     mode = (item.external_attr >> 16) & 0o777
                     if mode:
                         target.chmod(mode)
-            for database in (destination/'database.sqlite3',destination/'data/executions/journal.sqlite3'):
+            for database in (destination/'database.sqlite3',destination/'data/executions/journal.sqlite3',destination/'data/database-connections.sqlite3'):
                 if database.exists():
                     with contextlib.closing(sqlite3.connect(f'file:{database}?mode=ro',uri=True)) as db:
                         if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':

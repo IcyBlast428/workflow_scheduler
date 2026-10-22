@@ -45,9 +45,11 @@ test('multi-file upload, preview, publish, execute, rollback and recycle', async
   await expect(page.locator('.source-files')).toContainText('helper.py');
   await page.getByRole('button',{name:'管理代码版本',exact:true}).click();
   await expect(page.locator('.package-overview')).toContainText('多文件发布验收');
+  await expect(page.locator('.package-version')).toHaveCount(1);
   await page.getByText('上传新版本',{exact:true}).click();
   await page.getByLabel('完整任务包（ZIP）',{exact:true}).setInputFiles({name:'demo-v2.zip',mimeType:'application/zip',buffer:packageZip({
     'main.py':'from helper import value\nprint(value, flush=True)\n','helper.py':'value="PACKAGE_V2"\n','README.md':'new version'})});
+  await expect(page.locator('.package-upload-disclosure')).toHaveAttribute('open', '');
   await page.getByLabel('版本说明',{exact:true}).fill('第二版本');
   await page.getByRole('button',{name:'上传并预览差异',exact:true}).click();
   await expect(page.locator('.package-preview')).toContainText('新增 1 · 修改 1 · 删除 1');

@@ -91,7 +91,7 @@ class TaskSourceTests(unittest.TestCase):
             db.execute_sql('INSERT INTO wfs_users(username,password_hash,role,enabled) VALUES(?,?,?,1)', params=('source-read-viewer', generate_password_hash('test-password'), 'viewer'))
         try:
             client, headers = self.client('source-read-viewer')
-            self.assertEqual(client.get('/api/taskinfo/source', query_string={'pid': self.spec['pid'], 'file': 'main.py'}).status_code, 200)
+            self.assertEqual(client.get('/api/taskinfo/source', query_string={'pid': self.spec['pid'], 'file': 'main.py'}).status_code, 403)
             self.assertEqual(client.put('/api/taskinfo/source', headers=headers, json={}).status_code, 403)
         finally:
             with GaussDB() as db:

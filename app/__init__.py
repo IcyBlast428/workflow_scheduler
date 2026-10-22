@@ -11,6 +11,8 @@ def create_app():
     :param env_name: 使用的环境名称
     :return: app实例
     '''
+    from app.bootstrap.connection_settings import activate_at_app_start
+    activate_at_app_start()
     from flask import Flask, send_from_directory
     from flask_compress import Compress
     from app.extensions import ext_init

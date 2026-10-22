@@ -15,3 +15,5 @@ def init_api(app):
     app.register_blueprint(blueprint)
     from app.api.task_packages import blueprint as packages_blueprint
     app.register_blueprint(packages_blueprint)
+    from app.api.database_connections import blueprint as connections_blueprint
+    app.register_blueprint(connections_blueprint)

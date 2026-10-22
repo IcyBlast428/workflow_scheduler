@@ -1,4 +1,4 @@
-const views = new Set(['dashboard','tasks','taskLogs','systemLogs','matrix','packages','admin']);
+const views = new Set(['dashboard','tasks','taskLogs','systemLogs','matrix','packages','admin','connections']);
 export function readRoute(hash) {
   const [raw, query = ''] = hash.replace(/^#/, '').split('?');
   const params = new URLSearchParams(query);

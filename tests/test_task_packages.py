@@ -258,7 +258,7 @@ class PackageTests(unittest.TestCase):
         from app.bootstrap.permissions import allowed
         self.assertFalse(allowed(base+'/upload','POST','operator'))
         self.assertFalse(allowed(base+'/action','POST','viewer'))
-        self.assertTrue(allowed(base,'GET','viewer'))
+        self.assertFalse(allowed(base,'GET','viewer'))
         with patch('app.api.task.views._scheduler_control_enabled',return_value=True), patch('app.api.task_packages.requests.request') as proxy:
             proxy.return_value.headers = {'Content-Type':'application/json'}
             proxy.return_value.json.return_value = {'code':20000,'data':{}}

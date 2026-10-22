@@ -87,6 +87,8 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  databaseConnections() { return request('/api/admin/database-connections'); },
+  changeDatabaseConnection(action, body) { return request(`/api/admin/database-connections/${action}`, {method: 'POST', body, timeout: 65000}); },
   attention() { return request('/api/taskinfo/attention'); },
   storage(keep) { return request('/api/admin/storage', {params:{keep},timeout:20000}); },
   packages(pid = '') { return request('/api/taskinfo/packages', { params: { pid } }); },

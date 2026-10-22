@@ -39,7 +39,7 @@
 <script setup>
 import { timestamp } from '../timebase';
 import ModalShell from './ModalShell.vue';
-import { onBeforeUnmount, ref, watch, nextTick, useId } from 'vue';
+import { computed, onBeforeUnmount, ref, watch, nextTick, useId } from 'vue';
 import { api } from '../api';
 import { statusLabel, actionLabel, statusClass } from '../executionLabels';
 import TaskSourceViewer from './TaskSourceViewer.vue';
@@ -53,13 +53,14 @@ const sourceLoading = ref(false);
 const flowVisited=ref(false),flowRevision=ref(0),flowLoading=ref(false),sourceLocation=ref(null);
 function selectTab(id) { if (id === 'source') sourceVisited.value = true; if(id === 'flow')flowVisited.value=true; tab.value = id; }
 function showFlowSource(location) { sourceLocation.value={...location,key:Date.now()};sourceVisited.value=true;tab.value='source'; }
-const tabs = [{id:'description',label:'说明与配置'},{id:'flow',label:'执行流程'},{id:'source',label:'查看代码'},{id:'runs',label:'执行记录'},{id:'versions',label:'配置历史'},{id:'audit',label:'操作记录'}];
+const tabs = computed(() => [{id:'description',label:'说明与配置'},{id:'flow',label:'执行流程'},{id:'source',label:'查看代码'},{id:'runs',label:'执行记录'},{id:'versions',label:'配置历史'},{id:'audit',label:'操作记录'}].filter(item => props.canManage || ['description','runs'].includes(item.id)));
 const dialogId = useId();
+watch(() => props.canManage, value => { if (!value) { tab.value = 'description'; sourceVisited.value = false; flowVisited.value = false; sourceLocation.value = null; } });
 async function tabKey(event,index) {
   if (!['ArrowRight','ArrowLeft','Home','End'].includes(event.key)) return;
   event.preventDefault();
-  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length-1 : (index+(event.key === 'ArrowRight' ? 1 : -1)+tabs.length)%tabs.length;
-  selectTab(tabs[next].id); await nextTick(); document.getElementById(`${dialogId}-${tabs[next].id}`)?.focus();
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.value.length-1 : (index+(event.key === 'ArrowRight' ? 1 : -1)+tabs.value.length)%tabs.value.length;
+  selectTab(tabs.value[next].id); await nextTick(); document.getElementById(`${dialogId}-${tabs.value[next].id}`)?.focus();
 }
 let generation = 0;
 async function load() {

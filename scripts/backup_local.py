@@ -10,9 +10,9 @@ import zipfile
 
 def backup(database, data, output, releases=None):
     if __package__:
-        from .backup_files import add_task_storage
+        from .backup_files import add_task_storage, add_connection_settings
     else:
-        from backup_files import add_task_storage
+        from backup_files import add_task_storage, add_connection_settings
     import fcntl
     database, data, output = map(lambda value: Path(value).resolve(), (database, data, output))
     if not database.is_file() or not data.is_dir():
@@ -48,7 +48,8 @@ def backup(database, data, output, releases=None):
                 if (data / 'metrics.json').is_file():
                     archive.write(data / 'metrics.json', 'data/metrics.json')
                 add_task_storage(archive, data, releases)
-                archive.writestr('manifest.json', json.dumps({'format':2,'database':'database.sqlite3','data':'data','credentials_included':False}))
+                encrypted_settings = add_connection_settings(archive, data, temporary)
+                archive.writestr('manifest.json', json.dumps({'format':2,'database':'database.sqlite3','data':'data','credentials_included':False,'encrypted_connections_included':encrypted_settings}))
     return output
 
 

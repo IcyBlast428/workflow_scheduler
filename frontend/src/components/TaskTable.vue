@@ -26,7 +26,7 @@
       <tbody>
         <tr v-for="row in rows" :key="row.id">
           <td class="task-name-cell">
-            <div class="task-identity"><input type="checkbox" :aria-label="`选择任务 ${row.id}`" :checked="selected.includes(row.id)" @change="$emit('select',row.id)"><button class="btn icon-only favorite-button" :class="{ 'is-favorite': favorites.includes(row.id) }" :aria-label="`${favorites.includes(row.id) ? '取消收藏' : '收藏'}任务 ${row.id}`" @click="$emit('favorite',row.id)">{{ favorites.includes(row.id) ? '★' : '☆' }}</button><button class="task-name-link clip" :title="row.name" @click="$emit('detail',row)">{{ row.name }}</button></div>
+            <div class="task-identity"><input v-if="canOperate" type="checkbox" :aria-label="`选择任务 ${row.id}`" :checked="selected.includes(row.id)" @change="$emit('select',row.id)"><button class="btn icon-only favorite-button" :class="{ 'is-favorite': favorites.includes(row.id) }" :aria-label="`${favorites.includes(row.id) ? '取消收藏' : '收藏'}任务 ${row.id}`" @click="$emit('favorite',row.id)">{{ favorites.includes(row.id) ? '★' : '☆' }}</button><button class="task-name-link clip" :title="row.name" @click="$emit('detail',row)">{{ row.name }}</button></div>
             <div class="mono muted clip" :title="row.id">{{ row.id }}</div>
             <div v-if="row.config_error" class="muted clip" :title="row.config_error">{{ row.config_error }}</div>
             <div v-else-if="!row.schedule_configured" class="muted clip">尚未配置调度策略</div>
@@ -52,14 +52,14 @@
             <div class="row-actions task-actions">
               <button class="btn" @click="$emit('detail', row)">详情</button>
               <button v-if="row.pending" class="btn" @click="$emit('execution',row)">查看执行</button>
-              <button v-else-if="canCallTask(row)" class="btn primary" type="button" :disabled="busy || pendingActions[row.id] || !canOperate" :title="callTaskTitle(row)" @click="$emit('call',row)">手动执行</button>
+              <button v-else-if="canOperate && canCallTask(row)" class="btn primary" type="button" :disabled="busy || pendingActions[row.id]" :title="callTaskTitle(row)" @click="$emit('call',row)">手动执行</button>
               <ActionMenu>
-                <button v-if="canStart(row)" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'start')">启用调度</button>
-                <button v-if="row.state === 'true'" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('pause',row)">暂停调度</button>
-                <button class="btn" :disabled="busy || pendingActions[row.id] || !canManage" @click="$emit('schedule',row)">配置</button>
-                <button v-if="row.state !== 'invalid'" class="btn" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'refresh')">{{ pendingActions[row.id] === 'refresh' ? '刷新中…' : '刷新' }}</button>
+                <button v-if="canOperate && canStart(row)" class="btn" :disabled="busy || pendingActions[row.id]" @click="$emit('action',row,'start')">启用调度</button>
+                <button v-if="canOperate && row.state === 'true'" class="btn" :disabled="busy || pendingActions[row.id]" @click="$emit('pause',row)">暂停调度</button>
+                <button v-if="canManage" class="btn" :disabled="busy || pendingActions[row.id]" @click="$emit('schedule',row)">配置</button>
+                <button v-if="canOperate && row.state !== 'invalid'" class="btn" :disabled="busy || pendingActions[row.id]" @click="$emit('action',row,'refresh')">{{ pendingActions[row.id] === 'refresh' ? '刷新中…' : '刷新' }}</button>
                 <button class="btn" :disabled="pendingActions[row.id]" @click="$emit('log',row)">最新输出</button>
-                <button v-if="row.pending" class="btn danger" :disabled="busy || pendingActions[row.id] || !canOperate" @click="$emit('action',row,'kill')">强停</button>
+                <button v-if="canOperate && row.pending" class="btn danger" :disabled="busy || pendingActions[row.id]" @click="$emit('action',row,'kill')">强停</button>
               </ActionMenu>
             </div>
           </td>

@@ -290,7 +290,9 @@ def maintenance(recover=False):
         # History must be archived and verified before removal. Never purge it here.
         for table, column in (('wfs_executions','created_at'), ('wfs_audit','created_at')):
             key = 'run_id' if table == 'wfs_executions' else 'id'
-            db.execute_sql(f'DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM {table} WHERE {column} < ? ORDER BY {column} LIMIT ?)', params=(cutoff,batch))
+            sql = (f'DELETE FROM {table} WHERE {column} < ? ORDER BY {column} LIMIT ?' if db.dialect == 'MySQL' else
+                   f'DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM {table} WHERE {column} < ? ORDER BY {column} LIMIT ?)')
+            db.execute_sql(sql, params=(cutoff,batch))
         db.execute_sql('DELETE FROM wfs_login_limits WHERE window_start < ?', params=(business_now() - dt.timedelta(minutes=15),))
         versions_to_keep = max(20,int(os.environ.get('WFS_CONFIG_VERSIONS_KEEP','100')))
         for pid, version in db.execute_query_sql('SELECT pid,version FROM wfs_task_config'):

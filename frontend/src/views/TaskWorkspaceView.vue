@@ -26,7 +26,7 @@
     <div class="panel-head">
       <div>
         <h2>任务列表</h2>
-        <p>查看已发布任务和 Git 任务，维护调度策略与运行状态。</p>
+        <p>{{ canManage ? '查看已发布任务和 Git 任务，维护调度策略与运行状态。' : '查看任务状态、执行计划和执行记录。' }}</p>
       </div>
       <div class="filter-actions">
         <button
@@ -121,7 +121,7 @@
         >
       </div>
     </form>
-    <div class="batch-toolbar">
+    <div v-if="canOperate" class="batch-toolbar">
       <span class="selection-count"
         >已选择 <strong>{{ selectedTasks.length }}</strong> 个任务</span
       >
@@ -156,7 +156,7 @@
       <span>{{
         tasks.loading
           ? '正在更新结果，请稍候。'
-          : '可以清空筛选条件，或点击“同步任务”同步 app/jobs 目录。'
+          : canManage ? '可以清空筛选条件，或点击“同步任务”同步 app/jobs 目录。' : '可以清空筛选条件后重试。'
       }}</span>
     </div>
     <TaskTable

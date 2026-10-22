@@ -74,7 +74,7 @@ def snapshot(date=None):
                     bucket += 5
                 minute = ("CAST(strftime('%H',end_time) AS INTEGER)*60+CAST(strftime('%M',end_time) AS INTEGER)"
                           if db._local_sqlite else 'CAST(EXTRACT(HOUR FROM end_time) AS INTEGER)*60+CAST(EXTRACT(MINUTE FROM end_time) AS INTEGER)')
-                bin_sql = f'CAST(({minute}) / {bucket} AS INTEGER)'
+                bin_sql = f'FLOOR(({minute}) / {bucket})' if db.dialect == 'MySQL' else f'CAST(({minute}) / {bucket} AS INTEGER)'
                 rows = db.execute_query_sql(f'''SELECT pid,{bin_sql} AS slot,COUNT(*),
 SUM(CASE WHEN state=0 THEN 1 ELSE 0 END),
 SUM(CASE WHEN state IS NOT NULL AND state NOT IN (0,-15,-1,-10001,-10002) THEN 1 ELSE 0 END),

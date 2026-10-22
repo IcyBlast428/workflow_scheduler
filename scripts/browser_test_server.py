@@ -29,6 +29,11 @@ from app.bootstrap.core import aps_start
 from app.bootstrap.schedule_config import save_schedule
 from app.extensions import scheduler
 app = create_app()
+from app.bootstrap.database import GaussDB
+with GaussDB() as db:
+    for username,role in [('browser-viewer','viewer'), ('browser-operator','operator')]:
+        db.execute_sql('INSERT INTO wfs_users(username,password_hash,role,enabled) VALUES(?,?,?,1)',
+                       params=(username,os.environ['WFS_ADMIN_PASSWORD_HASH'],role))
 if scheduler.get_job('MAIN_TASK_JOB'):
     scheduler.remove_job('MAIN_TASK_JOB')
 save_schedule('acceptance__slow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})

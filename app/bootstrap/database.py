@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """项目本体数据库连接工具。
 
-平台本体固定使用高斯数据库，任务侧如需访问数据库也优先复用这个实现。
+平台支持 MySQL/PolarDB、GaussDB/PostgreSQL 及本地 SQLite。
 当前采用“短生命周期连接 + ODBC 驱动层复用”的模式：每次业务操作打开连接，
 操作结束关闭连接，避免在 Flask/Gunicorn 多线程环境里共享全局 connection。
 """
@@ -62,6 +62,8 @@ class GaussDB:
 
     @property
     def dialect(self):
+        if getattr(self, '_mysql', False):
+            return 'MySQL'
         if self._local_sqlite:
             return 'SQLite'
         if os.environ.get('WFS_DB_DIALECT') == 'postgresql' or (os.environ.get('WFS_POSTGRES_TEST') == 'true' and GAUSS_DRIVER.startswith('PostgreSQL')):
@@ -69,6 +71,21 @@ class GaussDB:
         return 'GaussDB/DWS'
 
     def __init__(self, db_id=DEFAULT_DB_ID):
+        from app.bootstrap.connection_settings import active_platform, connect_mysql
+        profile = active_platform()
+        self._mysql = bool(profile)
+        self._in_transaction = False
+        if profile:
+            self._local_sqlite = False
+            self.conn = connect_mysql(profile)
+            self.cursor = self.conn.cursor()
+            try:
+                self.cursor.execute("SET time_zone = '+08:00'")
+                self.cursor.execute('SET SESSION innodb_lock_wait_timeout = 10')
+            except Exception:
+                self.close()
+                raise
+            return
         self._local_sqlite = bool(os.environ.get('WFS_LOCAL_DB_PATH'))
         if self._local_sqlite:
             db_path = Path(os.environ['WFS_LOCAL_DB_PATH']).expanduser().resolve()
@@ -133,22 +150,50 @@ class GaussDB:
     # 当前默认 autocommit=True；预留给需要显式事务的场景。
     def set_commit(self):
         self.conn.commit()
+        self._in_transaction = False
+        if self._mysql:
+            return
         if not self._local_sqlite:
             self.conn.autocommit = True
     
     # 当前默认 autocommit=True；预留给需要显式事务的场景。
     def set_rollback(self):
         self.conn.rollback()
+        self._in_transaction = False
+        if self._mysql:
+            return
         if not self._local_sqlite:
             self.conn.autocommit = True
 
     def begin_transaction(self):
+        if self._mysql:
+            if self._in_transaction:
+                raise RuntimeError('nested platform transactions are not supported')
+            self.conn.begin()
+            self._in_transaction = True
+            # A transaction-owned InnoDB row replaces PostgreSQL table locks.
+            # Acquire it before any other locks, including history row locks.
+            self.cursor.execute('SELECT id FROM wfs_platform_lock WHERE id=1 FOR UPDATE')
+            if not self.cursor.fetchone():
+                raise RuntimeError('missing platform transaction lock; initialize the MySQL schema')
+            return
         if self._local_sqlite:
             self.conn.execute('BEGIN IMMEDIATE')
         else:
             self.conn.autocommit = False
 
     def _sql(self, sql):
+        if self._mysql:
+            if sql.strip().upper().startswith('LOCK TABLE '):
+                if not self._in_transaction:
+                    raise RuntimeError('platform lock requires an explicit transaction')
+                return 'DO 0'
+            sql = sql.replace('extract(epoch from (end_time - start_time))::bigint',
+                              'TIMESTAMPDIFF(SECOND,start_time,end_time)')
+            sql = sql.replace("date_trunc('hour',end_time)", "DATE_FORMAT(end_time,'%Y-%m-%d %H:00:00')")
+            sql = sql.replace('CAST(EXTRACT(HOUR FROM end_time) AS INTEGER)', 'HOUR(end_time)').replace(
+                'CAST(EXTRACT(MINUTE FROM end_time) AS INTEGER)', 'MINUTE(end_time)')
+            return sql
         if not self._local_sqlite:
             return sql
         return sql.replace('NOW()', 'CURRENT_TIMESTAMP').replace(
@@ -163,6 +208,14 @@ class GaussDB:
         return self.cursor
     
     def close(self):
+        if self._mysql:
+            try:
+                if self._in_transaction:
+                    self.conn.rollback()
+            finally:
+                self.cursor.close()
+                self.conn.close()
+            return
         if not self._local_sqlite:
             try:
                 if not self.conn.autocommit:
@@ -185,7 +238,7 @@ class GaussDB:
         if params is None:
             self.cursor.execute(self._sql(sql))
         else:
-            self.cursor.execute(self._sql(sql), params)
+            self.cursor.execute(self._parameters(self._sql(sql)), params)
         result = self.cursor.fetchall()
         if return_json:
             columns = [i[0] for i in self.cursor.description]
@@ -198,9 +251,42 @@ class GaussDB:
             if params is None:
                 self.cursor.execute(self._sql(sql))
             else:
-                self.cursor.execute(self._sql(sql), params)
+                self.cursor.execute(self._parameters(self._sql(sql)), params)
         except Exception as e:
             raise Exception(e)
+
+    def _parameters(self, sql):
+        if not self._mysql:
+            return sql
+        # PyMySQL uses %-formatting. Escape literal percent signs and replace
+        # question-mark parameters only outside literals/comments/identifiers.
+        result, quote, index = [], '', 0
+        while index < len(sql):
+            char = sql[index]
+            if quote:
+                result.append('%%' if char == '%' else char)
+                if char == '\\' and index + 1 < len(sql):
+                    index += 1
+                    result.append('%%' if sql[index] == '%' else sql[index])
+                elif char == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        result.append(quote)
+                        index += 1
+                    else:
+                        quote = ''
+            elif char in "'\"`":
+                quote = char
+                result.append(char)
+            elif sql.startswith('--', index) or char == '#' or sql.startswith('/*', index):
+                end = sql.find('*/', index + 2) + 2 if char == '/' else sql.find('\n', index)
+                if end < index + 1:
+                    end = len(sql)
+                result.append(sql[index:end].replace('%', '%%'))
+                index = end - 1
+            else:
+                result.append('%s' if char == '?' else '%%' if char == '%' else char)
+            index += 1
+        return ''.join(result)
 
     def __get_db_config(self, db_name, schema):
         conf_dic = dict()

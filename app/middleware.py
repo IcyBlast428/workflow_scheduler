@@ -80,7 +80,7 @@ def init_middleware(app):
                 body = request.get_json(silent=True) or {}
                 payload = payload if isinstance(payload, dict) else {}
                 body = body if isinstance(body, dict) else {}
-                target = request.args.get('id') or request.args.get('pid') or body.get('pid') or body.get('username') or ''
+                target = request.args.get('id') or request.args.get('pid') or body.get('pid') or body.get('username') or body.get('id') or ''
                 from app.bootstrap.permissions import READ_POSTS
                 if request.path not in READ_POSTS or request.method != 'POST':
                     audit(g.identity['username'], request.path, target, 'success' if payload.get('code') == 20000 else 'failed', payload.get('message',''))

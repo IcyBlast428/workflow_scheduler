@@ -144,7 +144,7 @@ class ScaleTests(unittest.TestCase):
         self.assertEqual(conflict.status_code,409)
         from app.bootstrap.permissions import allowed
         self.assertFalse(allowed('/api/taskinfo/batch','POST','viewer'))
-        self.assertTrue(allowed('/api/taskinfo/batch','POST','operator'))
+        self.assertFalse(allowed('/api/taskinfo/batch','POST','operator'))
 
     def test_batch_start_and_pause_apply_to_scheduler_and_report_success(self):
         from app.bootstrap.schedule_config import save_schedule, load_schedule

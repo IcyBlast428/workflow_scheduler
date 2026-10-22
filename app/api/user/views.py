@@ -29,7 +29,8 @@ class login(Resource):
         if not check_login_limit(username, request.remote_addr or ''):
             return error_msg('登录尝试过多，请在 15 分钟后重试。'), 429
         record = user_record(username)
-        if record and record['enabled'] and record['password_hash'] and isinstance(password, str) and len(password) <= 1024 and check_password_hash(record['password_hash'], password):
+        portal_allowed = logininfo.get('portal') != 'admin' or record and record['role'] == 'admin'
+        if record and record['enabled'] and record['password_hash'] and isinstance(password, str) and len(password) <= 1024 and check_password_hash(record['password_hash'], password) and portal_allowed:
             revoke_session(session.get('sid'))
             session_id = create_session(current_app.permanent_session_lifetime)
             session.clear()
@@ -40,6 +41,7 @@ class login(Resource):
             data = {
                 'csrf_token': session['csrf_token'],
                 'name': username,
+                'role': record['role'],
             }
             audit(username, 'login', username)
             return success_msg(data)
@@ -61,7 +63,7 @@ class info(Resource):
         data = {
             'project': current_app.config.get('APP_NAME'),
             'avatar': APP_AVATAR_URL,
-            'introduction': "I am a super administrator",
+            'introduction': '管理员控制台' if identity()['role'] == 'admin' else '任务查看工作区',
             'name': identity()['username'],
             'roles': [identity()['role']],
             'csrf_token': session.get('csrf_token'),

@@ -1,6 +1,6 @@
 <template>
   <section class="panel admin-panel">
-    <div class="panel-head"><div><h2>账户与操作记录</h2><p>查看者可读；操作员可触发、启停任务；管理员可维护配置与账户。</p></div><button class="btn" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></div>
+    <div class="panel-head"><div><h2>账户与操作记录</h2><p>普通用户仅查看任务；管理员拥有全部管理功能。原操作员账户按只读用户处理。</p></div><button class="btn" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></div>
     <LoadingStatus :active="loading" label="正在更新维护状态与账户…" />
     <div class="panel-body">
     <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div><div v-if="message" class="inline-alert success" role="status">{{ message }}</div>
@@ -25,7 +25,7 @@
     <form class="filter-grid account-form" @submit.prevent="save">
       <div class="form-row"><label for="account-name">用户名</label><input id="account-name" v-model.trim="form.username" class="input" required maxlength="100"></div>
       <div class="form-row"><label for="account-password">设置密码</label><input id="account-password" v-model="form.password" class="input" type="password" autocomplete="new-password" minlength="12" placeholder="已有账户留空表示不变"></div>
-      <div class="form-row"><label for="account-role">角色</label><select id="account-role" v-model="form.role" class="select"><option value="viewer">查看者</option><option value="operator">操作员</option><option value="admin">管理员</option></select></div>
+      <div class="form-row"><label for="account-role">角色</label><select id="account-role" v-model="form.role" class="select"><option value="viewer">普通用户（只读）</option><option v-if="form.role === 'operator'" value="operator">普通用户（原操作员）</option><option value="admin">管理员</option></select></div>
       <div class="filter-actions"><label class="checkbox-row"><input v-model="form.enabled" type="checkbox">允许登录</label><button class="btn primary" :disabled="saving">保存账户</button></div>
     </form>
     <div class="table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in accounts" :key="item.username"><td>{{ item.username }}</td><td>{{ roles[item.role] }}</td><td>{{ item.enabled ? '启用' : '禁用' }}</td><td><span v-if="item.managed_by">通过服务配置管理</span><button v-else class="btn" @click="edit(item)">编辑</button></td></tr></tbody></table></div>
@@ -43,7 +43,7 @@ import VersionStorage from './VersionStorage.vue';
 const accounts = ref([]), records = ref([]), error = ref(''), message = ref(''), saving = ref(false);
 const runtime = ref({});
 const loading = ref(false);
-const roles = {viewer:'查看者',operator:'操作员',admin:'管理员'};
+const roles = {viewer:'普通用户',operator:'普通用户（原操作员）',admin:'管理员'};
 const form = reactive({username:'',password:'',role:'viewer',enabled:true});
 function edit(item) { Object.assign(form,{...item,password:'',enabled:Boolean(item.enabled)}); message.value = ''; }
 async function load() { if (loading.value) return; loading.value = true; try { [accounts.value, records.value,runtime.value] = await Promise.all([api.users(),api.audit(),api.runtime()]); error.value = ''; } catch (err) { error.value = err.message; } finally { loading.value = false; } }

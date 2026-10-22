@@ -8,6 +8,7 @@ SQLAlchemy==2.0.46
 configobj==5.0.8
 requests==2.32.5
 PyMySQL==1.1.0
+cryptography==50.0.2
 pandas==3.0.0
 pyDes==2.0.1
 gunicorn==26.2.0

@@ -11,6 +11,7 @@ test('dialogs keep focus, protect unsaved edits and restore task deep links', as
   await page.locator('.action-menu').getByRole('button',{name:'配置',exact:true}).click();
   const schedule = page.getByRole('dialog',{name:/任务配置/});
   await expect(schedule).toBeFocused();
+  await expect(schedule.getByRole('button',{name:'保存配置',exact:true})).toBeEnabled();
   await schedule.press('Shift+Tab');
   await expect(schedule.getByRole('button',{name:'保存配置',exact:true})).toBeFocused();
   await schedule.getByLabel('任务名称',{exact:true}).fill('未保存检查');

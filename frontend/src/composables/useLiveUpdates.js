@@ -23,7 +23,7 @@ export function useLiveUpdates({
     if (
       !token.value ||
       livePollInFlight ||
-      ['dashboard', 'matrix', 'admin', 'packages'].includes(view.value) ||
+      ['dashboard', 'matrix', 'admin', 'packages', 'connections'].includes(view.value) ||
       document.visibilityState === 'hidden'
     ) {
       return;

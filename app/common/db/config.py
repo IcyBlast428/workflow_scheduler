@@ -25,6 +25,10 @@ def load_database_config(db_id):
     非高斯业务库属于公共/任务侧能力，暂时沿用 `app/config/database/*.ini`。
     未来如果要改为 Nacos 或密钥服务，只需要替换这一层，不影响 adapter。
     """
+    from app.bootstrap.connection_settings import business_profile
+    managed = business_profile(db_id)
+    if managed:
+        return managed
     current_env = get_runtime_env()
     ini = os.path.join(CONFIG_DIR, 'database', current_env + '.ini')
     config_base = ConfigObj(ini, encoding='utf-8')

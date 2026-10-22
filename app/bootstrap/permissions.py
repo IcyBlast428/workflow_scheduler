@@ -10,10 +10,14 @@ from app.bootstrap.database import GaussDB
 from app.settings import AUTH_ADMIN_PASSWORD_HASH, AUTH_ADMIN_USERNAME
 
 ROLES = {'viewer', 'operator', 'admin'}
-OPERATOR_ACTIONS = {'/api/taskinfo/editTask', '/api/taskinfo/call_task','/api/taskinfo/batch'}
 READ_POSTS = {'/api/user/logout', '/api/taskinfo/taskLogs', '/api/taskinfo/taskLogDetail',
               '/api/taskinfo/systemLogs', '/api/taskinfo/taskids', '/api/taskinfo/groups',
               '/api/taskinfo/systemids', '/api/taskinfo/logview', '/api/taskinfo/schedule'}
+VIEWER_GETS = {'/api/user/info', '/api/taskinfo/state', '/api/taskinfo/events',
+               '/api/taskinfo/detail', '/api/taskinfo/matrix', '/api/taskinfo/runs',
+               '/api/taskinfo/run', '/api/taskinfo/run-download', '/api/taskinfo/schedule'}
+VIEWER_POSTS = {'/api/user/logout', '/api/taskinfo/taskLogs', '/api/taskinfo/taskLogDetail',
+                '/api/taskinfo/taskids', '/api/taskinfo/groups', '/api/taskinfo/logview'}
 
 
 def user_record(username):
@@ -34,11 +38,12 @@ def identity():
 def allowed(path, method, role):
     if role == 'admin':
         return True
-    if path.startswith('/api/admin'):
+    # The legacy operator role now follows the same read-only policy. Unknown
+    # roles never receive access, and newly added endpoints default to denied.
+    if role not in {'viewer', 'operator'}:
         return False
-    if method in {'GET','HEAD','OPTIONS'} or method == 'POST' and path in READ_POSTS:
-        return True
-    return role == 'operator' and method == 'POST' and path in OPERATOR_ACTIONS
+    return (method in {'GET', 'HEAD'} and path in VIEWER_GETS or
+            method == 'POST' and path in VIEWER_POSTS)
 
 
 def login_keys(username, address):

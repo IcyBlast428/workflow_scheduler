@@ -61,6 +61,13 @@ def statements(path):
 
 def main():
     with GaussDB() as db:
+        if db.dialect == 'MySQL':
+            from app.bootstrap.connection_settings import schema_check
+            missing = schema_check(db.conn)
+            if missing:
+                raise RuntimeError('MySQL schema incomplete: ' + ', '.join(missing))
+            print('MySQL baseline verified; PostgreSQL migrations are not applicable.')
+            return
         for table in REQUIRED_TABLES:
             db.execute_query_sql(f'SELECT 1 FROM {table} LIMIT 0')
         db.execute_sql('CREATE TABLE IF NOT EXISTS wfs_schema_migrations (name varchar(200) PRIMARY KEY, applied_at timestamp NOT NULL, checksum varchar(64))')

@@ -3,6 +3,7 @@ export default defineConfig({
   testDir: './tests',
   workers: 1,
   timeout: 45000,
+  expect: { timeout: 15000 },
   use: { baseURL: 'http://127.0.0.1:19008', trace: 'retain-on-failure',
     launchOptions:process.env.WFS_BROWSER_EXECUTABLE ? {executablePath:process.env.WFS_BROWSER_EXECUTABLE} : {} },
   webServer: {

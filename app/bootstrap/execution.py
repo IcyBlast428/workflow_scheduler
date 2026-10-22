@@ -121,8 +121,12 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 data_dir.mkdir(parents=True, exist_ok=True)
                 child_env['WFS_TASK_DATA_DIR'] = str(data_dir.resolve())
                 child_env['WFS_TASK_ID'] = PID
-            for key in ('WFS_SECRET_KEY', 'WFS_ADMIN_PASSWORD_HASH', 'WFS_USERS_JSON'):
+            from app.bootstrap.connection_settings import task_database_key
+            database_key = task_database_key()
+            for key in ('WFS_SECRET_KEY', 'WFS_CONNECTIONS_KEY', 'WFS_TASK_DATABASE_KEY', 'WFS_ADMIN_PASSWORD_HASH', 'WFS_USERS_JSON'):
                 child_env.pop(key, None)
+            if database_key:
+                child_env['WFS_TASK_DATABASE_KEY'] = database_key
             child_env['PYTHONPATH'] = os.pathsep.join(filter(None, (str(BASE_DIR.parent), child_env.get('PYTHONPATH'))))
             command = [python_executable or sys.executable, '-u', str(Path(__file__).with_name('worker.py')),
                        '--memory-mb', str(_resource_limit(limits, 'memory_mb', 'WFS_TASK_MEMORY_MB', 0)),
