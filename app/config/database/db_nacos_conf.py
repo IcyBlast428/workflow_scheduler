@@ -1,25 +1,4 @@
 db_nacos_conf_dic = {
-    "oracle_rmf": {
-        "tenant": "public",
-        "data_id": "oracle.immpdb1.rmf.json",
-        "group": "public",
-        "user_name": "immp",
-        "password": "aW1tcA=="
-    },
-    "oracle_tb0a": {
-        "tenant": "public",
-        "data_id": "oracle.immpdb2.tb0a.json",
-        "group": "public",
-        "user_name": "immp",
-        "password": "aW1tcA=="
-    },
-    "oracle_bsm": {
-        "tenant": "public",
-        "data_id": "oracle.bsm.bsm.json",
-        "group": "public",
-        "user_name": "immp",
-        "password": "aW1tcA=="
-    },
     "mysql_immpdb": {
         "tenant": "public",
         "data_id": "mysql.immp-dbs-01.icbc.immpdb.json",

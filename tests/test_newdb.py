@@ -130,6 +130,15 @@ class NewDBTests(unittest.TestCase):
         mysql = dict(id='orders',host='localhost',database='orders',user='reader',password='test-only-password')
         self.assertEqual(settings.validate(mysql)['tls'], 'disabled')
         self.assertEqual(settings.validate(dict(mysql,dialect='postgresql'))['port'],5432)
+        from app.common.db.catalog import capabilities
+        catalog = {item['dialect']: item['label'] for item in capabilities()}
+        self.assertEqual(set(catalog), {'mysql', 'postgresql', 'clickhouse', 'sqlite'})
+        self.assertEqual(catalog['postgresql'], 'PostgreSQL / GaussDB')
+        for removed in ('oracle', 'mssql', 'sqlserver'):
+            with self.subTest(dialect=removed), self.assertRaises(ValueError):
+                settings.validate(dict(mysql, dialect=removed))
+            with self.subTest(adapter=removed), self.assertRaises(ValueError):
+                adapter_for(dict(mysql, dialect=removed))
         with self.assertRaises(ValueError):
             settings.validate(dict(mysql,id='platform',dialect='postgresql'))
         with self.assertRaises(ValueError):
@@ -144,7 +153,7 @@ class NewDBTests(unittest.TestCase):
         for spec in capabilities():
             if spec['dialect'] == 'sqlite':
                 continue
-            if spec['dialect'] != 'mssql' and not spec['available']:
+            if not spec['available']:
                 continue
             adapter = adapter_for(dict(config,dialect=spec['dialect']))
             url = adapter.build_url()

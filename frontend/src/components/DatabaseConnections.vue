@@ -96,7 +96,8 @@
         </div>
         <p class="hint">
           数据库类型由连接标识对应的配置自动选择；除 MySQL、SQLite
-          外，其余类型需在目标数据库上验收。SQL Server 还需系统 ODBC 驱动。
+          外，其余类型需在目标数据库上验收。GaussDB 按 PostgreSQL
+          兼容方式展示，驱动和协议兼容性需按实际产品、版本验证。
         </p>
       </section>
       <form class="connection-form" @submit.prevent="run('save')">
@@ -168,11 +169,7 @@
             </div>
             <div class="form-row">
               <label for="db-name">{{
-                isSQLite
-                  ? 'SQLite 文件名'
-                  : form.dialect === 'oracle'
-                    ? 'Oracle 服务名'
-                    : '数据库名称'
+                isSQLite ? 'SQLite 文件名' : '数据库名称'
               }}</label
               ><input
                 id="db-name"
@@ -224,11 +221,7 @@
               </select>
             </div>
             <div
-              v-if="
-                !isSQLite &&
-                form.tls === 'verify_identity' &&
-                form.dialect !== 'mssql'
-              "
+              v-if="!isSQLite && form.tls === 'verify_identity'"
               class="form-row"
             >
               <label for="db-ca">服务器 CA 证书路径</label
@@ -240,20 +233,6 @@
                 placeholder="例如 /etc/wfs/certs/polardb-ca.pem"
               /><small class="hint"
                 >文件需在 Web、调度和任务运行环境的相同路径可读。</small
-              >
-            </div>
-            <div
-              v-if="form.dialect === 'mssql'"
-              class="form-row connection-wide"
-            >
-              <label for="db-odbc">SQL Server ODBC 驱动名称</label
-              ><input
-                id="db-odbc"
-                v-model.trim="form.odbc_driver"
-                class="input"
-                required
-              /><small class="hint"
-                >启用 TLS 时使用操作系统证书信任库，并校验服务器证书。</small
               >
             </div>
           </div>
@@ -406,7 +385,6 @@ const empty = () => ({
   max_overflow: 2,
   pool_recycle: 600,
   pool_timeout: 10,
-  odbc_driver: 'ODBC Driver 18 for SQL Server',
 });
 const form = reactive(empty());
 const databaseTypes = computed(

@@ -30,13 +30,13 @@ Web 和 Scheduler 应使用相同的 `WFS_DATA_DIR`。调度器每 2 秒原子�
 
 ## PolarDB 与数据库连接设置
 
-管理员打开“数据库连接”分别管理平台库和业务库。地址只填主机名/IP，默认端口按类型填写；PolarDB 平台库使用允许写入的主地址或集群地址，并配置实例白名单、网络及数据库账号权限。新连接默认不启用传输加密，已有连接保留原设置；如启用 TLS，则校验 CA 与主机名，CA 文件需部署在所有 Web、Scheduler 和任务运行环境的同一路径。SQL Server 使用系统证书信任库。
+管理员打开“数据库连接”分别管理平台库和业务库。地址只填主机名/IP，默认端口按类型填写；PolarDB 平台库使用允许写入的主地址或集群地址，并配置实例白名单、网络及数据库账号权限。新连接默认不启用传输加密，已有连接保留原设置；如启用 TLS，则校验 CA 与主机名，CA 文件需部署在所有 Web、Scheduler 和任务运行环境的同一路径。
 
 1. **平台数据库**：固定标识 `platform`，保存任务、账号、会话、审计及执行历史。测试连接会检查 MySQL 版本、只读状态、InnoDB 表和所需字段；结构不完整不能保存。
 2. **新空库初始化**：先创建独立数据库和账号。在页面填写连接信息，输入库名确认“初始化新库平台表”。服务只在没有任何 `wfs_` 平台表的新库执行 [MySQL 基线](app/bootstrap/mysql_schema.sql)，需要 CREATE/INSERT 权限。MySQL DDL 隐式提交，失败后应核对已建表，用数据库工具执行同一份幂等基线补全；不会自动删除已有表。
 3. **已有库切换**：先备份并完成数据迁移，核对表结构、索引、主键和账号权限，再测试并保存。连接页不搬迁旧数据库数据。运行账号需要目标库的 SELECT/INSERT/UPDATE/DELETE 权限，建表账号可单独使用。`python scripts/migrate.py` 对 MySQL 检查当前基线，不执行 PostgreSQL/GaussDB 迁移文件。
 4. **生效方式**：平台配置先保存为待生效；停止所有 Web/Scheduler 及任务进程后统一启动。应用启动时激活新配置，存量进程始终使用其启动时的连接；任务子进程不会提前采用待生效平台配置。平台切换应在维护窗口进行，不使用逐个滚动重启。
-5. **业务数据库**：支持 MySQL / PolarDB / MariaDB、PostgreSQL、Oracle、SQL Server、ClickHouse、SQLite。前端根据同一份后端类型目录展示类型、端口及驱动就绪状态。SQLite 使用服务数据目录内的文件名，不填写主机或密码。使用固定标识（例如现有 `mysql_orders`）保存多个连接；任务侧只传连接标识，自动选择驱动。页面配置优先于旧 INI，同名配置修改后，下次创建 `NewDB` 时读取；已经打开的连接继续使用旧配置。直接在脚本中写死连接信息的任务仍需一次性改为使用连接标识。
+5. **业务数据库**：提供 MySQL / PolarDB / MariaDB、PostgreSQL / GaussDB、ClickHouse、SQLite 四组。GaussDB 先按 PostgreSQL 兼容方式展示，内部仍使用 PostgreSQL 驱动，实际型号、版本及协议必须单独验收。Oracle 与 SQL Server 已移除，不再接受新配置或创建适配器。前端根据同一份后端类型目录展示类型、端口及驱动就绪状态。SQLite 使用服务数据目录内的文件名，不填写主机或密码。使用固定标识（例如现有 `mysql_orders`）保存多个连接；任务侧只传连接标识，自动选择驱动。页面配置优先于旧 INI，同名配置修改后，下次创建 `NewDB` 时读取；已经打开的连接继续使用旧配置。直接在脚本中写死连接信息的任务仍需一次性改为使用连接标识。
 
 ### NewDB 的使用与连接池
 
@@ -50,7 +50,7 @@ with NewDB('mysql_orders') as db:
         db.execute('INSERT INTO order_events(order_id) VALUES(:id)', {'id': 1})
 ```
 
-`query`、`execute`、`executemany` 是简洁入口，原 `execute_query_sql`、`execute_single_sql`、`insert_many`、`insert_with_rollback` 继续保留。支持 SQLAlchemy 的命名参数 `:name`、旧 `%(name)s` 字典参数，以及 `?` 加元组的通用位置参数；SQL 语法本身仍需符合目标数据库。原生 DBAPI 占位符也保留。ClickHouse 支持查询和写入，但不提供上述跨语句事务回滚能力。Oracle 使用服务名；SQL Server 使用 Microsoft ODBC Driver。
+`query`、`execute`、`executemany` 是简洁入口，原 `execute_query_sql`、`execute_single_sql`、`insert_many`、`insert_with_rollback` 继续保留。支持 SQLAlchemy 的命名参数 `:name`、旧 `%(name)s` 字典参数，以及 `?` 加元组的通用位置参数；SQL 语法本身仍需符合目标数据库。原生 DBAPI 占位符也保留。ClickHouse 支持查询和写入，但不提供上述跨语句事务回滚能力。
 
 连接池按进程和连接标识共享，默认惰性创建，上限 3 条常驻连接加 2 条临时连接，等待空闲连接最多 10 秒，连接 600 秒后在下次借出时回收；借出前探活，归还时回滚未完成事务。`close()` / `with` 退出只归还本实例持有的连接，不销毁共享连接池。普通查询或写入每次使用后及时归还；显式 `transaction()` 在代码块内使用同一连接，正常结束提交，异常自动回滚。直接通过 `get_connection()` 操作的连接在实例关闭时也会回滚未提交事务。
 
@@ -58,9 +58,9 @@ with NewDB('mysql_orders') as db:
 
 高频任务若在同一进程内重复创建 NewDB，会复用物理连接；每次任务执行使用独立 Python 子进程，所以不同执行之间不能共享 Python 连接池。单次任务应合并重复数据库操作、使用批量写入或在一个事务内完成相关写操作。不要为了复用连接把活跃连接传给其它进程。
 
-Web 和对应任务运行环境可用 `pip install -r requirements-databases.txt` 安装可选驱动合集；SQL Server 还需系统 ODBC Driver。未安装驱动时前端会明确标识，不会将“已接入类型”等同于目标数据库已通过验收。MySQL/SQLite 有真实本地验收，其余类型已验证驱动加载与连接参数，仍需对应数据库实例验收。
+Web 测试连接的环境可用 `pip install -r requirements-databases.txt` 安装驱动合集。任务使用独立环境，不继承 Web 已安装的包；按[任务编写示例](examples/tasks/README.md)准备最小依赖、完整版本锁定和离线 wheels。未安装驱动时前端会明确标识，不会将“已接入类型”等同于目标数据库已通过验收。MySQL/SQLite 有真实本地验收，其余类型仍需对应数据库实例验收。
 
-连接配置保存在共享 `WFS_DATA_DIR/database-connections.sqlite3`，内容使用 Fernet 认证加密。默认从高强度 `WFS_SECRET_KEY` 派生独立密钥；生产可另设固定的 `WFS_CONNECTIONS_KEY`，所有服务保持一致。平台和业务连接使用不同的派生密钥；任务仅获得业务连接的派生密钥，不获得会话签名密钥、主配置密钥或平台连接解密能力。使用公共数据库工具的任务独立环境需要安装其依赖（包括 SQLAlchemy、PyMySQL、configobj、requests、cryptography），可复用平台依赖版本。
+连接配置保存在共享 `WFS_DATA_DIR/database-connections.sqlite3`，内容使用 Fernet 认证加密。默认从高强度 `WFS_SECRET_KEY` 派生独立密钥；生产可另设固定的 `WFS_CONNECTIONS_KEY`，所有服务保持一致。平台和业务连接使用不同的派生密钥；任务仅获得业务连接的派生密钥，不获得会话签名密钥、主配置密钥或平台连接解密能力。使用 NewDB 的任务独立环境需要 SQLAlchemy、configobj、cryptography、目标数据库驱动及其间接依赖；仅使用 NewDB 不会加载平台数据库与 Nacos 组件。
 
 密码不回传浏览器；编辑时留空保留原密码。连接测试/保存错误仅返回错误码和排查提示，审计不保存请求密码。共享目录不要放入 Git；Linux 配置文件权限为 0600，Windows 应限制数据目录 ACL。备份工具会一致备份加密配置，恢复时必须另行保留原密钥，不能直接轮换或丢失密钥。
 
@@ -69,6 +69,12 @@ Web 和对应任务运行环境可用 `pip install -r requirements-databases.txt
 本地 MySQL 兼容性验收使用 `WFS_TEST_MYSQL=true python scripts/accept_mysql_isolated.py`：只连接本机测试端口（默认 33080，可设 `WFS_MYSQL_TEST_PORT`），使用 `WFS_MYSQL_TEST_USER` / `WFS_MYSQL_TEST_PASSWORD`；测试账号需能创建/删除独立测试库。脚本创建随机名称的新库，验证后只删除该新库，不读取现有生产连接。PolarDB 的实际网络、TLS 证书和账号权限仍需在目标环境验收。
 
 MySQL 的显式平台写事务先锁定 `wfs_platform_lock` 中的单行，以替代旧实现的表锁；提交、回滚或断开连接都会释放该锁，避免 `LOCK TABLES` 隐式提交破坏原子性。这些短事务会串行化；本地并发正确性验证不代表生产 PolarDB 的吞吐或故障切换验收。
+
+## 任务入门与部署选型
+
+任务发布页可展开“任务编写示例”，查看、复制或下载入门、数据库查询、事务批量写入、报表输出和离线依赖准备示例。展示源码来自 [examples/tasks](examples/tasks/README.md)，示例已用隔离 SQLite 验证查询、提交、失败回滚与重复执行。
+
+平台与业务数据库拆分、容器交付的取舍和日志增长治理见[部署与平台数据库建议](docs/deployment-and-storage.md)。优先独立事务型平台库，长期日志分析再按需求接入 ClickHouse，不将其直接作为平台主库。
 
 ## 目录
 

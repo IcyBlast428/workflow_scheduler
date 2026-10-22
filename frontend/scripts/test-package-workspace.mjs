@@ -13,7 +13,8 @@ packagePreview:async(pid,version)=>({release:{pid,version,main_file:'main.py',st
 const compiled = compileScript(descriptor, {id:'package-regression'}).content
   .replace("'../timebase'", "'../src/timebase.js'")
   .replace("'../api'", JSON.stringify(mockPath.href))
-  .replace("import LoadingStatus from './LoadingStatus.vue';", 'const LoadingStatus = {};');
+  .replace("import LoadingStatus from './LoadingStatus.vue';", 'const LoadingStatus = {};')
+  .replace("import TaskWritingGuide from './TaskWritingGuide.vue';", 'const TaskWritingGuide = {};');
 await writeFile(compiledPath, compiled);
 try {
   const {default:Component} = await import(compiledPath.href);

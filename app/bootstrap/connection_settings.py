@@ -166,7 +166,7 @@ def validate(form):
     ca = form.get('ssl_ca', '')
     if not isinstance(ca, str) or len(ca) > 1024 or '\x00' in ca:
         raise ValueError('CA 证书路径无效。')
-    if mode == 'verify_identity' and dialect != 'mssql' and (not ca or not Path(ca).is_file()):
+    if mode == 'verify_identity' and (not ca or not Path(ca).is_file()):
         raise ValueError('启用 TLS 时请填写此服务器上有效的 CA 证书文件路径。')
     result.update(tls=mode, ssl_ca=ca if mode == 'verify_identity' else '')
     for key, default, minimum, maximum in [('pool_size',3,1,20),('max_overflow',2,0,20),('pool_recycle',600,30,3600),('pool_timeout',10,1,120)]:
@@ -180,11 +180,6 @@ def validate(form):
     result['pool_enabled'] = form.get('pool_enabled', previous.get('pool_enabled', True))
     if not isinstance(result['pool_enabled'], bool):
         raise ValueError('连接池开关必须为布尔值。')
-    if dialect == 'mssql':
-        driver = form.get('odbc_driver') or previous.get('odbc_driver') or 'ODBC Driver 18 for SQL Server'
-        if not isinstance(driver, str) or len(driver)>100 or any(c in driver for c in ';{}\r\n'):
-            raise ValueError('SQL Server ODBC 驱动名称无效。')
-        result['odbc_driver'] = driver
     return result
 
 
@@ -280,8 +275,7 @@ def probe_business(profile):
     adapter = None
     try:
         adapter = adapter_for({**profile, 'id': identifier, 'pool_enabled': False})
-        sql = {'oracle': 'SELECT 1 FROM DUAL', 'mssql': 'SELECT @@VERSION',
-               'sqlite': 'SELECT sqlite_version()', 'mysql': 'SELECT VERSION()',
+        sql = {'sqlite': 'SELECT sqlite_version()', 'mysql': 'SELECT VERSION()',
                'postgresql': 'SELECT version()', 'clickhouse': 'SELECT version()'}[profile['dialect']]
         version = adapter.execute_query_sql(sql)[0][0]
         return {'connected': True, 'ready': True, 'version': str(version), 'database': profile['database'], 'missing': []}

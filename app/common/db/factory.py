@@ -2,19 +2,16 @@
 
 from app.common.db.config import load_database_config
 from app.common.db.mysql import MySQLAdapter
-from app.common.db.oracle import OracleAdapter
 from app.common.db.clickhouse import ClickHouseAdapter
-from app.common.db.adapters import PostgreSQLAdapter, SQLServerAdapter, SQLiteAdapter
+from app.common.db.adapters import PostgreSQLAdapter, SQLiteAdapter
 from app.common.db.catalog import DATABASES, normalize
 from contextlib import contextmanager
 
 
 ADAPTERS = {
     'mysql': MySQLAdapter,
-    'oracle': OracleAdapter,
     'clickhouse': ClickHouseAdapter,
     'postgresql': PostgreSQLAdapter,
-    'mssql': SQLServerAdapter,
     'sqlite': SQLiteAdapter,
 }
 

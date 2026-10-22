@@ -1,0 +1,18 @@
+# 在与生产任务相同的操作系统、CPU 架构和 Python 版本上准备。
+# 使用全新环境，避免把平台整套依赖或开发工具打进任务。
+python -m venv .task-build
+
+# Linux 激活方式；Windows 改用 .task-build\Scripts\activate.bat（cmd）。
+. .task-build/bin/activate
+python -m pip install SQLAlchemy==2.0.46 configobj==5.0.8 cryptography==50.0.2 PyMySQL==1.1.0
+
+# PostgreSQL 兼容连接：把上行 PyMySQL 替换为 psycopg[binary]==3.3.6。
+# ClickHouse：替换为 clickhouse-connect[sqlalchemy]==1.11.0。
+# SQLite 不需要额外驱动，仍需要 NewDB 的前三项依赖。
+# GaussDB 需先确认型号与驱动兼容性，不要直接套用 PostgreSQL 驱动。
+
+python -m pip freeze > requirements.txt
+python -m pip download --only-binary=:all: -r requirements.txt -d wheels
+# 将 main.py、requirements.txt、wheels/ 放在 ZIP 根目录。
+# 不要打包 .task-build/；检查 freeze 结果仅包含 package==version。
+# 全部间接依赖也必须锁定并提供 wheel，平台检查依赖时不联网。

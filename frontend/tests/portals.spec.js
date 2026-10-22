@@ -85,8 +85,8 @@ test('database settings switch scopes, report test failures and preserve masked 
 test('supported types, SQLite profiles and pool settings work with the real backend', async ({page}) => {
   await login(page,'admin','/#connections');
   await page.getByRole('button',{name:'任务业务数据库',exact:true}).click();
-  await expect(page.getByRole('region',{name:'支持的数据库'})).toContainText('PostgreSQL');
-  await expect(page.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveCount(6);
+  await expect(page.getByRole('region',{name:'支持的数据库'})).toContainText('PostgreSQL / GaussDB');
+  await expect(page.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveText(['MySQL / PolarDB / MariaDB', 'PostgreSQL / GaussDB', 'ClickHouse', 'SQLite']);
   await page.getByLabel('数据库类型',{exact:true}).selectOption('sqlite');
   await expect(page.getByLabel('数据库地址',{exact:true})).toHaveCount(0);
   await expect(page.getByLabel('连接加密',{exact:true})).toHaveCount(0);

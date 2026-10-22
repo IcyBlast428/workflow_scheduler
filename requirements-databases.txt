@@ -1,5 +1,4 @@
 # Optional driver bundle for the Web connection tester and task environments.
 -r requirements.txt
 psycopg[binary]==3.3.6
-oracledb==26.0.1
 clickhouse-connect[sqlalchemy]==1.11.0

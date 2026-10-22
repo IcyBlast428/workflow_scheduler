@@ -21,19 +21,6 @@ class PostgreSQLAdapter(SQLAlchemyAdapter):
         return options
 
 
-class SQLServerAdapter(SQLAlchemyAdapter):
-    def build_url(self):
-        c = self.config
-        return URL.create('mssql+pyodbc', username=c['user'], password=c['password'], host=c['host'],
-                          port=int(c.get('port') or 1433), database=c['database'], query={
-                              'driver': c.get('odbc_driver') or 'ODBC Driver 18 for SQL Server',
-                              'Encrypt': 'yes' if c.get('tls') == 'verify_identity' else 'no',
-                              'TrustServerCertificate': 'no', 'LongAsMax': 'Yes'})
-
-    def connection_options(self):
-        return {'timeout': 5}
-
-
 class SQLiteAdapter(SQLAlchemyAdapter):
     def build_url(self):
         database = self.config['database']

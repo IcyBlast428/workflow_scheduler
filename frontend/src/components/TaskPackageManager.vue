@@ -3,6 +3,7 @@
     <div class="panel-head"><div><h2>任务发布</h2><p>上传完整任务包，检查差异后发布。每个版本独立保存，代码保持只读。</p></div><div class="filter-actions"><button class="btn" :disabled="loading || busy" @click="refresh">{{ loading ? '刷新中…' : '刷新' }}</button><button class="btn primary" :disabled="busy" @click="newTask">新增任务</button></div></div>
     <LoadingStatus :active="loading || busy" :label="busyLabel || '正在更新任务与版本…'" />
     <div class="panel-body">
+      <TaskWritingGuide />
       <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div><div v-if="message" class="inline-alert success" role="status">{{ message }}</div>
       <div class="package-layout">
         <aside class="package-sidebar">
@@ -52,6 +53,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 import { timestamp } from '../timebase';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
+import TaskWritingGuide from './TaskWritingGuide.vue';
 const props = defineProps({ confirm: {type:Function,required:true}, initialPid: {type:String,default:''} });
 const emit = defineEmits(['changed','detail']);
 const tasks = ref([]), versions = ref([]), selected = ref(null), preview = ref(null);

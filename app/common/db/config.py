@@ -45,5 +45,4 @@ def load_database_config(db_id):
         'charset': (config.get('charset') or 'utf8').strip("'\""),
         'tls': config.get('tls') or 'disabled',
         'ssl_ca': config.get('ssl_ca') or '',
-        'odbc_driver': config.get('odbc_driver') or 'ODBC Driver 18 for SQL Server',
     }

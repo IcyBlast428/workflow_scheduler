@@ -6,7 +6,14 @@
 GaussDB 保留为历史平台内部接口；任务应使用独立的业务连接标识。
 """
 
-from app.bootstrap.database import GaussDB
 from app.common.db import NewDB, get_db
 
 __all__ = ['GaussDB', 'NewDB', 'get_db']
+
+
+def __getattr__(name):
+    # Business tasks need neither the platform driver nor its Nacos client.
+    if name == 'GaussDB':
+        from app.bootstrap.database import GaussDB
+        return GaussDB
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
