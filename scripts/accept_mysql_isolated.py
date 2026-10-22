@@ -124,6 +124,25 @@ def main():
                 from app.common.database import NewDB
                 with NewDB('mysql_orders') as business:
                     assert business.execute_query_sql('SELECT %(value)s',params={'value':'中文 @ / % ?'})[0][0] == '中文 @ / % ?'
+                NewDB.dispose_pool('mysql_orders')
+                from sqlalchemy import event
+                engine = NewDB('mysql_orders').get_engine()
+                physical = []
+                event.listen(engine,'connect',lambda connection,record:physical.append(1))
+                for index in range(50):
+                    with NewDB('mysql_orders') as business:
+                        assert business.query('SELECT ?', (index,))[0][0] == index
+                assert len(physical) == 1 and engine.pool.checkedout() == 0, physical
+                with NewDB('mysql_orders') as business:
+                    business.execute('CREATE TABLE newdb_probe(id int PRIMARY KEY) ENGINE=InnoDB')
+                    try:
+                        with business.transaction():
+                            business.execute('INSERT INTO newdb_probe VALUES(?)',(1,))
+                            raise RuntimeError('rollback acceptance')
+                    except RuntimeError:
+                        pass
+                    assert business.query('SELECT COUNT(*) FROM newdb_probe') == [(0,)]
+                print('NewDB MySQL: 50 handles reused one physical connection; transaction rollback PASSED.')
                 script.write_text('import os\nassert "WFS_SECRET_KEY" not in os.environ\nassert "WFS_CONNECTIONS_KEY" not in os.environ\nfrom app.common.database import NewDB\nwith NewDB("mysql_orders") as db:\n    assert db.execute_query_sql("SELECT 42")[0][0] == 42\nprint("child business connection passed")\n', encoding='utf-8')
                 assert execute_py(script, pid) == 0, operations.list_runs(pid)[0]
                 print(f'MySQL {result["version"]}: schema, profiles, transactions, concurrent completion, summaries, history/archive, matrix, login, roles and business factory PASSED.')

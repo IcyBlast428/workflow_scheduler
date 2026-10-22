@@ -29,8 +29,7 @@ class login(Resource):
         if not check_login_limit(username, request.remote_addr or ''):
             return error_msg('登录尝试过多，请在 15 分钟后重试。'), 429
         record = user_record(username)
-        portal_allowed = logininfo.get('portal') != 'admin' or record and record['role'] == 'admin'
-        if record and record['enabled'] and record['password_hash'] and isinstance(password, str) and len(password) <= 1024 and check_password_hash(record['password_hash'], password) and portal_allowed:
+        if record and record['enabled'] and record['password_hash'] and isinstance(password, str) and len(password) <= 1024 and check_password_hash(record['password_hash'], password):
             revoke_session(session.get('sid'))
             session_id = create_session(current_app.permanent_session_lifetime)
             session.clear()

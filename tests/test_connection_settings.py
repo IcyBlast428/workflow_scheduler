@@ -127,7 +127,7 @@ class ConnectionSettingsTests(unittest.TestCase):
         import pymysql
         with patch.object(settings, 'connect_mysql', side_effect=pymysql.OperationalError(1045, 'password=test-secret-password')):
             with self.assertRaises(ValueError) as error:
-                settings.probe(settings.validate(self.form))
+                settings.probe(settings.validate(dict(self.form, id='platform')))
         self.assertNotIn('test-secret-password', str(error.exception))
         self.assertIn('1045', str(error.exception))
 
@@ -149,7 +149,7 @@ class ConnectionSettingsTests(unittest.TestCase):
         self.assertNotIn(self.form['password'], listing.get_data(as_text=True))
         self.assertNotIn('password', listing.json['data']['profiles'][0])
 
-    def test_viewer_and_legacy_operator_cannot_enter_admin_or_modify_tasks(self):
+    def test_unified_login_keeps_viewers_and_legacy_operators_read_only(self):
         app = create_app()
         with GaussDB() as db:
             for name, role in [('portal-viewer', 'viewer'), ('portal-operator','operator')]:
@@ -158,7 +158,7 @@ class ConnectionSettingsTests(unittest.TestCase):
         for username in ['portal-viewer', 'portal-operator']:
             client = app.test_client()
             denied = client.post('/api/user/login', json={'username':username,'password':'test-password','portal':'admin'})
-            self.assertEqual(denied.status_code, 401)
+            self.assertEqual(denied.status_code, 200)
             login = client.post('/api/user/login', json={'username':username,'password':'test-password','portal':'viewer'})
             headers = {'X-CSRF-Token': login.json['data']['csrf_token']}
             self.assertEqual(client.get('/api/taskinfo/state').status_code, 200)

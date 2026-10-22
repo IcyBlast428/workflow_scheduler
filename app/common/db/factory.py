@@ -4,33 +4,51 @@ from app.common.db.config import load_database_config
 from app.common.db.mysql import MySQLAdapter
 from app.common.db.oracle import OracleAdapter
 from app.common.db.clickhouse import ClickHouseAdapter
+from app.common.db.adapters import PostgreSQLAdapter, SQLServerAdapter, SQLiteAdapter
+from app.common.db.catalog import DATABASES, normalize
+from contextlib import contextmanager
 
 
 ADAPTERS = {
     'mysql': MySQLAdapter,
     'oracle': OracleAdapter,
     'clickhouse': ClickHouseAdapter,
+    'postgresql': PostgreSQLAdapter,
+    'mssql': SQLServerAdapter,
+    'sqlite': SQLiteAdapter,
 }
 
 
-class NewDB:
-    """非高斯业务数据库连接入口。
+def adapter_for(config):
+    import importlib.util
+    dialect = normalize(config.get('dialect'))
+    if dialect not in ADAPTERS:
+        raise ValueError('暂不支持数据库类型：'+dialect)
+    spec = DATABASES[dialect]
+    if importlib.util.find_spec(spec['module']) is None:
+        raise RuntimeError('此环境尚未安装数据库驱动：'+spec['package'])
+    return ADAPTERS[dialect]({**config, 'dialect': dialect})
 
-    这个类保留历史 API，供任务和 common 公共函数继续使用。平台本体高斯库请使用
-    `app.bootstrap.database.GaussDB`，不要通过 NewDB 混用。
+
+class NewDB:
+    """One ID-based business database API; a handle belongs to one thread.
+
+    Engines/pools are shared within this process. close()/context exit returns
+    the handle's connection, and rolls back unfinished work, without destroying
+    its pool. Use transaction() for atomic multi-statement writes.
     """
 
     def __init__(self, db_id):
+        if db_id == 'platform':
+            raise ValueError('platform 是平台内部连接，请为任务配置独立的业务连接标识。')
         self.db_id = db_id
         self.config = load_database_config(db_id)
-        self.dialect = self.config.get('dialect')
+        self.dialect = normalize(self.config.get('dialect'))
+        self.config['dialect'] = self.dialect
         self._adapter = self._create_adapter()
 
     def _create_adapter(self):
-        adapter_cls = ADAPTERS.get(self.dialect)
-        if not adapter_cls:
-            raise NotImplementedError('暂不支持数据库类型：{}'.format(self.dialect))
-        return adapter_cls(self.config)
+        return adapter_for(self.config)
 
     def __enter__(self):
         self.get_engine()
@@ -63,6 +81,25 @@ class NewDB:
 
     def close_connection(self):
         self.close()
+
+    @contextmanager
+    def transaction(self):
+        with self._adapter.transaction():
+            yield self
+
+    @staticmethod
+    def dispose_pool(db_id=None):
+        from app.common.db.engine_pool import dispose
+        dispose(db_id)
+
+    def query(self, sql, params=None, *, as_dict=False):
+        return self.execute_query_sql(sql, return_json=as_dict, params=params)
+
+    def execute(self, sql, params=None):
+        return self.execute_single_sql(sql, params=params)
+
+    def executemany(self, sql, rows):
+        return self.insert_many(sql, rows)
 
     def execute_single_sql(self, sql, params=None):
         return self._adapter.execute_single_sql(sql, params=params)

@@ -1,5 +1,5 @@
 <template>
-  <LoadingStatus :active="dashboard.loading" label="正在更新总览…" />
+  <LoadingStatus v-if="dashboard.loading" class="dashboard-loading" :active="dashboard.loading" label="正在更新总览…" />
   <div v-if="dashboard.error" class="error-state">{{ dashboard.error }}</div>
   <template v-if="!dashboard.error || dashboard.loaded">
     <RuntimeOverview
@@ -63,3 +63,6 @@ const memoryCurrentText = computed(() =>
   percent(props.dashboard.cpu_timeline.current_memory),
 );
 </script>
+<style scoped>
+.dashboard-loading { position: absolute; top: 0; right: 22px; width: 160px; z-index: 1; pointer-events: none; }
+</style>

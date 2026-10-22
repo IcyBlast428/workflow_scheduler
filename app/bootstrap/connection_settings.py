@@ -130,16 +130,25 @@ def validate(form):
     if not isinstance(identifier, str) or not PROFILE_ID.fullmatch(identifier):
         raise ValueError('连接标识应以字母开头，最多 100 位，仅使用字母、数字、下划线或连字符。')
     previous = profiles().get(identifier, {})
-    result = {'id': identifier, 'dialect': 'mysql', 'charset': 'utf8mb4'}
+    from app.common.db.catalog import DATABASES, normalize
+    dialect = normalize(form.get('dialect', previous.get('dialect', 'mysql')))
+    if dialect not in DATABASES or identifier == 'platform' and dialect != 'mysql':
+        raise ValueError('平台库仅支持 MySQL/PolarDB；请为业务库选择已支持的数据库类型。')
+    local = dialect == 'sqlite'
+    result = {'id': identifier, 'dialect': dialect, 'charset': 'utf8mb4'}
     for key, maximum in [('host', 253), ('database', 64), ('user', 100)]:
-        value = form.get(key)
+        value = '' if local and key != 'database' else form.get(key)
+        if local and key != 'database':
+            result[key] = ''; continue
         if not isinstance(value, str) or not value.strip() or len(value) > maximum or any(ord(c) < 33 for c in value):
             raise ValueError('请填写有效的数据库地址、库名和用户名。')
         result[key] = value.strip()
-    if any(c in result['host'] for c in '/\\@?#') or not re.fullmatch(r'[A-Za-z0-9_$-]+', result['database']):
+    pattern = r'[A-Za-z0-9_][A-Za-z0-9_.-]*' if local else r'[A-Za-z0-9_$.-]+'
+    if any(c in result['host'] for c in '/\\@?#') or not re.fullmatch(pattern, result['database']) or local and '..' in result['database']:
         raise ValueError('地址请只填主机名或 IP；数据库名称请使用字母、数字、下划线、美元符号或连字符。')
     try:
-        port = int(form.get('port', 3306))
+        raw_port = form.get('port')
+        port = int(DATABASES[dialect]['port'] or 1) if raw_port in (None, '') else int(raw_port)
         revision = int(form.get('revision', 0))
     except (ValueError, TypeError):
         raise ValueError('端口或配置版本无效。') from None
@@ -148,18 +157,34 @@ def validate(form):
     password = form.get('password', '')
     if not isinstance(password, str) or len(password) > 1024:
         raise ValueError('密码格式或长度无效。')
-    result.update(port=port, revision=revision, password=password or previous.get('password', ''))
-    if not result['password']:
+    result.update(port=port, revision=revision, password='' if local else password or previous.get('password', ''))
+    if not result['password'] and not local:
         raise ValueError('新连接必须填写数据库密码。')
-    mode = form.get('tls', 'verify_identity')
+    mode = 'disabled' if local else form.get('tls', previous.get('tls', 'disabled'))
     if mode not in {'verify_identity', 'disabled'}:
         raise ValueError('TLS 配置无效。')
     ca = form.get('ssl_ca', '')
     if not isinstance(ca, str) or len(ca) > 1024 or '\x00' in ca:
         raise ValueError('CA 证书路径无效。')
-    if mode == 'verify_identity' and (not ca or not Path(ca).is_file()):
+    if mode == 'verify_identity' and dialect != 'mssql' and (not ca or not Path(ca).is_file()):
         raise ValueError('启用 TLS 时请填写此服务器上有效的 CA 证书文件路径。')
     result.update(tls=mode, ssl_ca=ca if mode == 'verify_identity' else '')
+    for key, default, minimum, maximum in [('pool_size',3,1,20),('max_overflow',2,0,20),('pool_recycle',600,30,3600),('pool_timeout',10,1,120)]:
+        try:
+            value = int(form.get(key, previous.get(key, default)))
+        except (TypeError, ValueError):
+            raise ValueError('连接池参数无效。') from None
+        if not minimum <= value <= maximum:
+            raise ValueError(f'{key} 应在 {minimum} 至 {maximum} 之间。')
+        result[key] = value
+    result['pool_enabled'] = form.get('pool_enabled', previous.get('pool_enabled', True))
+    if not isinstance(result['pool_enabled'], bool):
+        raise ValueError('连接池开关必须为布尔值。')
+    if dialect == 'mssql':
+        driver = form.get('odbc_driver') or previous.get('odbc_driver') or 'ODBC Driver 18 for SQL Server'
+        if not isinstance(driver, str) or len(driver)>100 or any(c in driver for c in ';{}\r\n'):
+            raise ValueError('SQL Server ODBC 驱动名称无效。')
+        result['odbc_driver'] = driver
     return result
 
 
@@ -213,6 +238,10 @@ def schema_check(connection):
 
 
 def probe(profile, initialize=False):
+    if profile['id'] != 'platform':
+        if initialize:
+            raise ValueError('初始化仅适用于平台库。')
+        return probe_business(profile)
     from contextlib import closing
     import pymysql
     try:
@@ -241,3 +270,26 @@ def probe(profile, initialize=False):
         # Driver text may include usernames, SQL or secrets. Never return it.
         code = exc.args[0] if exc.args and isinstance(exc.args[0], int) else 0
         raise ValueError(f'数据库连接或初始化失败（错误码 {code}）。请检查地址、白名单、账号权限和 TLS 配置；初始化失败时请先核对已建表。') from None
+
+
+def probe_business(profile):
+    import uuid
+    from app.common.db.factory import adapter_for
+    from app.common.db.engine_pool import dispose
+    identifier = '@probe-' + uuid.uuid4().hex
+    adapter = None
+    try:
+        adapter = adapter_for({**profile, 'id': identifier, 'pool_enabled': False})
+        sql = {'oracle': 'SELECT 1 FROM DUAL', 'mssql': 'SELECT @@VERSION',
+               'sqlite': 'SELECT sqlite_version()', 'mysql': 'SELECT VERSION()',
+               'postgresql': 'SELECT version()', 'clickhouse': 'SELECT version()'}[profile['dialect']]
+        version = adapter.execute_query_sql(sql)[0][0]
+        return {'connected': True, 'ready': True, 'version': str(version), 'database': profile['database'], 'missing': []}
+    except RuntimeError:
+        raise ValueError('当前服务缺少此数据库的驱动，请先按页面提示安装对应驱动。') from None
+    except Exception:
+        raise ValueError('数据库连接测试失败。请核对地址、网络、驱动、账户权限和加密设置。') from None
+    finally:
+        if adapter is not None:
+            adapter.close()
+        dispose(identifier)

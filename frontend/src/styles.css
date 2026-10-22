@@ -206,8 +206,6 @@ noscript {
 .login-brand-row { display:flex; align-items:center; gap:16px; }
 .login-brand-row > span { font:10px var(--mono); letter-spacing:2.4px; color:var(--login-muted); }
 .login-workflow { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:48px; padding:0 2px; }
-.login-workflow-line { position:absolute; top:23px; left:16.67%; right:16.67%; height:1px; background:rgba(153,246,228,.25); }
-.login-workflow-line::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,rgba(153,246,228,.5),transparent); }
 .login-workflow-step { position:relative; display:flex; flex-direction:column; align-items:center; gap:8px; }
 .login-workflow-step > span { display:grid; place-items:center; width:48px; height:48px; margin-bottom:5px; border:1px solid var(--login-glass-edge); border-radius:14px; background:rgba(15,118,110,.13); color:var(--login-text); box-shadow:inset 0 1px 0 var(--login-glass-glint),0 4px 12px rgba(0,0,0,.05); }
 .login-workflow-step svg { width:24px; height:24px; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
@@ -541,11 +539,12 @@ select:focus {
 }
 
 .content.dashboard-content {
+  position: relative;
   min-height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
   overflow: visible;
-  padding: 16px 22px 22px;
+  padding: 12px 22px 22px;
 }
 
 .summary-grid {

@@ -31,11 +31,16 @@ for (const username of ['browser-viewer','browser-operator']) {
   });
 }
 
-test('ordinary accounts cannot log in through the administrator entry', async ({page}) => {
+test('the same login page detects an ordinary account even at an administrator URL', async ({page}) => {
+  await page.goto('/admin/#dashboard');
+  await expect(page.getByRole('heading',{name:'登录工作区',exact:true})).toBeVisible();
+  await expect(page.locator('.login-tagline, .login-workflow-line')).toHaveCount(0);
+  await expect(page.getByRole('link', {name:'管理员入口 →'})).toHaveCount(0);
+  await page.screenshot({path:'../data/unified-login.jpg',fullPage:true});
   await login(page, 'browser-viewer', '/admin/#dashboard');
-  await expect(page.locator('.toast-root')).toContainText('用户名或密码错误');
-  await expect(page.locator('.app-shell')).toHaveCount(0);
-  await expect(page.getByRole('heading',{name:'管理员登录',exact:true})).toBeVisible();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  await expect(page).toHaveURL(/\/viewer\/#tasks/);
+  expect((await page.request.get('/api/admin/database-connections')).status()).toBe(403);
 });
 
 test('database settings switch scopes, report test failures and preserve masked passwords', async ({page}) => {
@@ -53,6 +58,11 @@ test('database settings switch scopes, report test failures and preserve masked 
   await login(page, 'admin', '/admin/#connections');
   await expect(page.locator('.connection-panel')).toBeVisible();
   await expect(page.getByLabel('连接标识',{exact:true})).toHaveValue('platform');
+  await expect(page.getByLabel('连接加密',{exact:true})).toHaveValue('disabled');
+  const boxes = await Promise.all(['连接标识','数据库地址','数据库用户名','数据库密码'].map(name => page.getByLabel(name,{exact:true}).boundingBox()));
+  expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThan(1);
+  expect(Math.abs(boxes[2].y - boxes[3].y)).toBeLessThan(1);
+  expect(boxes.every(box => Math.abs(box.height - 40) < 1)).toBe(true);
   await page.getByRole('button',{name:'任务业务数据库',exact:true}).click();
   await expect(page.getByLabel('连接标识',{exact:true})).toBeEditable();
   await page.getByLabel('连接标识',{exact:true}).fill('mysql_orders');
@@ -70,4 +80,26 @@ test('database settings switch scopes, report test failures and preserve masked 
   await expect(page.getByText('业务连接已保存，任务下次建立连接时生效。')).toBeVisible();
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('supported types, SQLite profiles and pool settings work with the real backend', async ({page}) => {
+  await login(page,'admin','/#connections');
+  await page.getByRole('button',{name:'任务业务数据库',exact:true}).click();
+  await expect(page.getByRole('region',{name:'支持的数据库'})).toContainText('PostgreSQL');
+  await expect(page.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveCount(6);
+  await page.getByLabel('数据库类型',{exact:true}).selectOption('sqlite');
+  await expect(page.getByLabel('数据库地址',{exact:true})).toHaveCount(0);
+  await expect(page.getByLabel('连接加密',{exact:true})).toHaveCount(0);
+  await page.getByLabel('连接标识',{exact:true}).fill('sqlite_browser');
+  await page.getByLabel('SQLite 文件名',{exact:true}).fill('browser.sqlite3');
+  await page.getByText('连接池设置',{exact:true}).click();
+  await expect(page.getByLabel('启用连接池',{exact:true})).toBeChecked();
+  await page.getByLabel('常驻连接上限',{exact:true}).fill('2');
+  await page.getByRole('button',{name:'测试并保存',exact:true}).click();
+  await expect(page.getByText('业务连接已保存，任务下次建立连接时生效。')).toBeVisible();
+  await page.reload();
+  await page.getByRole('button',{name:'任务业务数据库',exact:true}).click();
+  await expect(page.getByLabel('数据库类型',{exact:true})).toHaveValue('sqlite');
+  await page.getByText('连接池设置',{exact:true}).click();
+  await expect(page.getByLabel('常驻连接上限',{exact:true})).toHaveValue('2');
 });

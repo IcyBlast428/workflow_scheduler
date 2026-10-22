@@ -30,9 +30,9 @@
           <BrandLogo /><span>WORKFLOW SCHEDULER</span>
         </div>
         <h1>定时任务调度</h1>
-        <p>{{ loginPortal === 'admin' ? '管理员登录后可管理任务、调度、账户及数据库连接。' : '登录用户工作区，查看任务状态、执行计划和执行记录。' }}</p>
+        <p>使用已分配的账户登录，系统会根据账户权限进入相应工作区。</p>
         <div class="login-workflow" aria-hidden="true">
-          <div class="login-workflow-line" />
+
           <div class="login-workflow-step">
             <span
               ><svg viewBox="0 0 24 24" fill="none">
@@ -57,13 +57,13 @@
             ><strong>执行</strong><small>记录结果</small>
           </div>
         </div>
-        <p class="login-tagline">让每一次执行，都有迹可循。</p>
+
       </div>
       <form class="login-form" @submit.prevent="handleLogin">
         <div class="login-form-head">
           <div>
-            <h2>{{ loginPortal === 'admin' ? '管理员登录' : '用户登录' }}</h2>
-            <p class="hint">{{ loginPortal === 'admin' ? '仅管理员账户可以进入。' : '使用管理员分配的账户查看任务。' }}</p>
+            <h2>登录工作区</h2>
+            <p class="hint">管理员和普通用户使用同一个登录入口。</p>
           </div>
         </div>
         <div v-if="backendStatus.error" class="inline-alert danger">
@@ -113,7 +113,7 @@
           <span class="btn-icon">></span>
           {{ loginLoading ? '登录中...' : '登录' }}
         </button>
-        <a class="hint" :href="loginPortal === 'admin' ? '/viewer/#tasks' : '/admin/#dashboard'">{{ loginPortal === 'admin' ? '返回用户登录' : '管理员入口 →' }}</a>
+
       </form>
     </LiquidGlassPanel>
   </main>
@@ -579,10 +579,10 @@ const {
 } = useBackendStatus();
 
 const loginForm = reactive({
-  username: 'admin',
+  username: '',
   password: '',
 });
-const loginPortal = ref(window.location.pathname.startsWith('/admin') ? 'admin' : 'viewer');
+
 
 const user = reactive({
   project: '',
@@ -798,7 +798,7 @@ async function loadUser() {
   user.name = data.name || 'Admin';
   user.avatar = data.avatar || '/static/img/head.gif';
   user.roles = data.roles || [];
-  loginPortal.value = canManage.value ? 'admin' : 'viewer';
+
   if (data.csrf_token) {
     setToken(data.csrf_token);
     token.value = data.csrf_token;
@@ -818,8 +818,9 @@ async function handleLogin() {
 
   loginLoading.value = true;
   try {
-    const data = await api.login({ ...loginForm, portal: loginPortal.value });
+    const data = await api.login({ ...loginForm });
     loginForm.password = '';
+    user.roles = data.role ? [data.role] : [];
     markBackendHealthy('后端连接正常');
     setToken(data.csrf_token);
     token.value = data.csrf_token;
@@ -835,7 +836,7 @@ async function handleLogin() {
 }
 
 async function handleLogout() {
-  loginPortal.value = canManage.value ? 'admin' : 'viewer';
+
   try {
     await api.logout();
   } catch (error) {
@@ -843,6 +844,7 @@ async function handleLogout() {
   }
   clearToken();
   token.value = '';
+  user.roles = [];
   detailPid.value = '';
   executionRunId.value = '';
   scheduleDialog.open = false;

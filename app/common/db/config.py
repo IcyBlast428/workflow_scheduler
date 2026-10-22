@@ -20,11 +20,7 @@ def _decrypt_password(raw_password):
 
 
 def load_database_config(db_id):
-    """从环境对应的 INI 中读取业务数据库配置。
-
-    非高斯业务库属于公共/任务侧能力，暂时沿用 `app/config/database/*.ini`。
-    未来如果要改为 Nacos 或密钥服务，只需要替换这一层，不影响 adapter。
-    """
+    """优先读取管理员保存的加密配置，未配置的标识回退到旧 INI。"""
     from app.bootstrap.connection_settings import business_profile
     managed = business_profile(db_id)
     if managed:
@@ -37,13 +33,17 @@ def load_database_config(db_id):
         raise RuntimeError('missing database config section [{}] in {}'.format(db_id, ini))
 
     dialect = (config.get('dialect') or db_id.split('_', 1)[0]).strip("'\"").lower()
+    from app.common.db.catalog import normalize
     return {
         'id': db_id,
-        'dialect': dialect,
+        'dialect': normalize(dialect),
         'user': (config.get('user') or '').strip("'\""),
         'password': _decrypt_password((config.get('password') or '').strip("'\"")),
         'host': (config.get('host') or '').strip("'\""),
         'port': (config.get('port') or '').strip("'\""),
         'database': (config.get('database') or '').strip("'\""),
         'charset': (config.get('charset') or 'utf8').strip("'\""),
+        'tls': config.get('tls') or 'disabled',
+        'ssl_ca': config.get('ssl_ca') or '',
+        'odbc_driver': config.get('odbc_driver') or 'ODBC Driver 18 for SQL Server',
     }

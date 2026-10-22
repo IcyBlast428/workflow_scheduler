@@ -3,7 +3,7 @@
     <div class="panel-head">
       <div>
         <h2>数据库连接</h2>
-        <p>配置 PolarDB for MySQL / MySQL 8.0 及以上版本。</p>
+        <p>管理平台数据库与任务业务数据库，任务只需使用连接标识。</p>
       </div>
       <button class="btn" :disabled="busy || loading" @click="load">
         刷新
@@ -65,7 +65,7 @@
           :disabled="Boolean(busy)"
           @click="edit(profile)"
         >
-          {{ profile.id }}</button
+          {{ profile.id }} · {{ typeLabel(profile.dialect) }}</button
         ><button class="btn" :disabled="Boolean(busy)" @click="newBusiness">
           ＋ 新建业务连接
         </button>
@@ -77,9 +77,55 @@
             : '使用固定的连接标识关联任务。保存后，任务下次建立连接时读取新配置。'
         }}
       </p>
+      <section
+        v-if="scope === 'business'"
+        class="database-support"
+        aria-label="支持的数据库"
+      >
+        <strong>支持的数据库</strong>
+        <div class="filter-actions">
+          <span
+            v-for="item in databaseTypes"
+            :key="item.dialect"
+            class="tag"
+            :class="item.available ? 'success' : 'info'"
+            :title="item.package"
+            >{{ item.label }} ·
+            {{ item.available ? '驱动就绪' : '需安装驱动' }}</span
+          >
+        </div>
+        <p class="hint">
+          数据库类型由连接标识对应的配置自动选择；除 MySQL、SQLite
+          外，其余类型需在目标数据库上验收。SQL Server 还需系统 ODBC 驱动。
+        </p>
+      </section>
       <form class="connection-form" @submit.prevent="run('save')">
         <fieldset :disabled="busy || loading">
           <div class="filter-grid">
+            <div v-if="scope === 'business'" class="form-row connection-wide">
+              <label for="db-type">数据库类型</label
+              ><select
+                id="db-type"
+                v-model="form.dialect"
+                class="select"
+                @change="typeChanged"
+              >
+                <option
+                  v-for="item in databaseTypes"
+                  :key="item.dialect"
+                  :value="item.dialect"
+                >
+                  {{ item.label }}
+                </option></select
+              ><small class="hint"
+                >{{ selectedType?.package
+                }}{{
+                  selectedType?.available === false
+                    ? ' · 当前服务器尚未具备完整驱动'
+                    : ''
+                }}</small
+              >
+            </div>
             <div class="form-row">
               <label for="db-id">连接标识</label
               ><input
@@ -97,7 +143,7 @@
                   : '任务通过 NewDB(连接标识) 使用，既有标识无需改动脚本。'
               }}</small>
             </div>
-            <div class="form-row">
+            <div v-if="!isSQLite" class="form-row">
               <label for="db-host">数据库地址</label
               ><input
                 id="db-host"
@@ -108,7 +154,7 @@
                 placeholder="PolarDB 集群地址或主地址"
               />
             </div>
-            <div class="form-row">
+            <div v-if="!isSQLite" class="form-row">
               <label for="db-port">端口</label
               ><input
                 id="db-port"
@@ -121,17 +167,28 @@
               />
             </div>
             <div class="form-row">
-              <label for="db-name">数据库名称</label
+              <label for="db-name">{{
+                isSQLite
+                  ? 'SQLite 文件名'
+                  : form.dialect === 'oracle'
+                    ? 'Oracle 服务名'
+                    : '数据库名称'
+              }}</label
               ><input
                 id="db-name"
                 v-model.trim="form.database"
                 class="input"
                 required
                 maxlength="64"
-                placeholder="例如 workflow_scheduler"
+                :placeholder="
+                  isSQLite ? '例如 reports.sqlite3' : '例如 workflow_scheduler'
+                "
               />
+              <small v-if="isSQLite" class="hint"
+                >文件保存在服务数据目录 business-databases 下。</small
+              >
             </div>
-            <div class="form-row">
+            <div v-if="!isSQLite" class="form-row">
               <label for="db-user">数据库用户名</label
               ><input
                 id="db-user"
@@ -142,7 +199,7 @@
                 autocomplete="off"
               />
             </div>
-            <div class="form-row">
+            <div v-if="!isSQLite" class="form-row">
               <label for="db-password">数据库密码</label
               ><input
                 id="db-password"
@@ -159,14 +216,21 @@
                 "
               /><small class="hint">密码加密保存，接口不回传原文。</small>
             </div>
-            <div class="form-row">
+            <div v-if="!isSQLite" class="form-row">
               <label for="db-tls">连接加密</label
               ><select id="db-tls" v-model="form.tls" class="select">
                 <option value="verify_identity">TLS（校验证书和主机名）</option>
                 <option value="disabled">不使用 TLS</option>
               </select>
             </div>
-            <div v-if="form.tls === 'verify_identity'" class="form-row">
+            <div
+              v-if="
+                !isSQLite &&
+                form.tls === 'verify_identity' &&
+                form.dialect !== 'mssql'
+              "
+              class="form-row"
+            >
               <label for="db-ca">服务器 CA 证书路径</label
               ><input
                 id="db-ca"
@@ -178,7 +242,84 @@
                 >文件需在 Web、调度和任务运行环境的相同路径可读。</small
               >
             </div>
+            <div
+              v-if="form.dialect === 'mssql'"
+              class="form-row connection-wide"
+            >
+              <label for="db-odbc">SQL Server ODBC 驱动名称</label
+              ><input
+                id="db-odbc"
+                v-model.trim="form.odbc_driver"
+                class="input"
+                required
+              /><small class="hint"
+                >启用 TLS 时使用操作系统证书信任库，并校验服务器证书。</small
+              >
+            </div>
           </div>
+          <details v-if="scope === 'business'" class="disclosure pool-options">
+            <summary>连接池设置</summary>
+            <p class="hint">
+              同一进程按连接标识共享连接池，关闭 NewDB
+              会归还连接。不同任务子进程不共享连接池。
+            </p>
+            <label class="checkbox-row"
+              ><input
+                v-model="form.pool_enabled"
+                type="checkbox"
+              />启用连接池</label
+            >
+            <div v-if="form.pool_enabled" class="filter-grid">
+              <div class="form-row">
+                <label for="db-pool-size">常驻连接上限</label
+                ><input
+                  id="db-pool-size"
+                  v-model.number="form.pool_size"
+                  type="number"
+                  class="input"
+                  min="1"
+                  max="20"
+                  required
+                />
+              </div>
+              <div class="form-row">
+                <label for="db-pool-overflow">临时额外连接上限</label
+                ><input
+                  id="db-pool-overflow"
+                  v-model.number="form.max_overflow"
+                  type="number"
+                  class="input"
+                  min="0"
+                  max="20"
+                  required
+                />
+              </div>
+              <div class="form-row">
+                <label for="db-pool-recycle">连接回收周期（秒）</label
+                ><input
+                  id="db-pool-recycle"
+                  v-model.number="form.pool_recycle"
+                  type="number"
+                  class="input"
+                  min="30"
+                  max="3600"
+                  required
+                />
+              </div>
+              <div class="form-row">
+                <label for="db-pool-timeout">等待空闲连接（秒）</label
+                ><input
+                  id="db-pool-timeout"
+                  v-model.number="form.pool_timeout"
+                  type="number"
+                  class="input"
+                  min="1"
+                  max="120"
+                  required
+                />
+              </div>
+            </div>
+          </details>
           <div class="filter-actions">
             <button class="btn" type="button" @click="run('test')">
               {{ busy === 'test' ? '测试中…' : '测试连接' }}</button
@@ -249,6 +390,7 @@ const state = ref({}),
   editing = ref(false),
   confirmDatabase = ref('');
 const empty = () => ({
+  dialect: 'mysql',
   id: '',
   host: '',
   port: 3306,
@@ -256,11 +398,44 @@ const empty = () => ({
   user: '',
   password: '',
   password_set: false,
-  tls: 'verify_identity',
+  tls: 'disabled',
   ssl_ca: '',
   revision: 0,
+  pool_enabled: true,
+  pool_size: 3,
+  max_overflow: 2,
+  pool_recycle: 600,
+  pool_timeout: 10,
+  odbc_driver: 'ODBC Driver 18 for SQL Server',
 });
 const form = reactive(empty());
+const databaseTypes = computed(
+  () =>
+    state.value.supported_databases || [
+      {
+        dialect: 'mysql',
+        label: 'MySQL / PolarDB / MariaDB',
+        port: 3306,
+        available: true,
+        package: 'PyMySQL',
+      },
+    ],
+);
+const selectedType = computed(() =>
+  databaseTypes.value.find((item) => item.dialect === form.dialect),
+);
+const isSQLite = computed(() => form.dialect === 'sqlite');
+function typeLabel(dialect) {
+  return (
+    databaseTypes.value.find((item) => item.dialect === (dialect || 'mysql'))
+      ?.label || dialect
+  );
+}
+function typeChanged() {
+  form.port = selectedType.value?.port || 3306;
+  form.tls = 'disabled';
+  form.ssl_ca = '';
+}
 const businessProfiles = computed(() =>
   (state.value.profiles || []).filter((item) => item.id !== 'platform'),
 );
@@ -378,6 +553,36 @@ onMounted(() => load());
 .connection-form .filter-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 20px;
+}
+.connection-form .form-row {
+  grid-template-rows: 20px 40px auto;
+  align-content: start;
+  gap: 8px;
+}
+.connection-form .form-row label {
+  align-self: start;
+  line-height: 20px;
+}
+.connection-form .input,
+.connection-form .select {
+  height: 40px;
+  min-height: 40px;
+  align-self: start;
+  box-sizing: border-box;
+}
+.connection-form .form-row small {
+  margin: 0;
+  line-height: 18px;
+}
+.connection-wide {
+  grid-column: 1 / -1;
+}
+.database-support {
+  display: grid;
+  gap: 10px;
+}
+.database-support p {
+  margin: 0;
 }
 .connection-form .disclosure {
   margin: 24px 0;

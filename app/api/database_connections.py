@@ -13,10 +13,11 @@ def connections():
         active = settings.active_platform()
         profiles = settings.profiles()
         pending = profiles.get('platform')
+        from app.common.db.catalog import capabilities
         return success_msg({'profiles': [settings.public_profile(item) for item in profiles.values()],
                             'active': settings.public_profile(active) if active else None,
                             'active_dialect': 'MySQL' if active else ('SQLite' if os.environ.get('WFS_LOCAL_DB_PATH') else 'GaussDB/PostgreSQL'),
-                            'restart_required': pending != active})
+                            'restart_required': pending != active, 'supported_databases': capabilities()})
     except ValueError as exc:
         return error_msg(str(exc)), 400
 

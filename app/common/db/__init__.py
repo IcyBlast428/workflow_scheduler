@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """公共数据库连接工厂。
 
-`app.bootstrap.database` 只服务 WFS 平台本体高斯库；这里服务 jobs 任务和公共
-工具函数需要访问的业务数据库。当前平台主环境已内置 MySQL 适配器，其它数据库
-保留适配器位置，使用时由对应任务环境安装驱动。
+NewDB 是任务和公共工具的统一业务数据库入口，按连接标识选择数据库类型。
+驱动适配、连接池及连接生命周期由本包管理；平台内部数据库由 bootstrap 维护。
 """
 
 from app.common.db.factory import NewDB, get_db
