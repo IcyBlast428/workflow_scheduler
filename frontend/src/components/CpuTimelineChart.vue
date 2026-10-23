@@ -117,7 +117,7 @@ const TASK_AREA_PADDING = 10;
 const MAX_TASK_LANES = 20;
 const MIN_TASK_BLOCK_WIDTH = 4;
 const palette = [
-  '#0f766e',
+  '#a9813c',
   '#2563eb',
   '#7c3aed',
   '#be123c',
@@ -743,13 +743,13 @@ function taskTitle(block) {
 }
 
 .cpu-area {
-  fill: rgba(56, 189, 248, 0.14);
+  fill: var(--brand-soft);
   pointer-events: none;
 }
 
 .cpu-line {
   fill: none;
-  stroke: #38bdf8;
+  stroke: var(--brand);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.4;
@@ -758,7 +758,7 @@ function taskTitle(block) {
 
 .memory-line {
   fill: none;
-  stroke: #facc15;
+  stroke: var(--ink-strong);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.2;
@@ -771,13 +771,13 @@ function taskTitle(block) {
 }
 
 .cpu-hover circle {
-  fill: #38bdf8;
+  fill: var(--brand);
   stroke: var(--panel);
   stroke-width: 2;
 }
 
 .cpu-hover .memory-dot {
-  fill: #facc15;
+  fill: var(--ink-strong);
 }
 
 .cpu-tooltip {
