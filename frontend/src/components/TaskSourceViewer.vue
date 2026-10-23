@@ -23,7 +23,7 @@
           <template v-if="source.kind === 'text'">
             <div class="source-toolbar"><label for="source-search">搜索文件内容<input id="source-search" v-model="search" class="input" placeholder="输入内容定位行" @input="matchIndex = 0; locate()"></label><span aria-live="polite">{{ search ? `${matches.length ? matchIndex + 1 : 0} / ${matches.length} 处` : `共 ${lines.length} 行` }}</span><button class="btn" :disabled="!matches.length" @click="jumpMatch(-1)">上一处</button><button class="btn" :disabled="!matches.length" @click="jumpMatch(1)">下一处</button></div>
             <div ref="codeView" class="source-code" :class="{ 'source-wrapped': wrap }" aria-label="只读文件内容">
-              <div v-for="(line,index) in pageLines" :key="page * PAGE_SIZE + index" class="source-line" :class="{ 'source-match': matches.includes((page - 1) * PAGE_SIZE + index), 'source-focused': focusedLine === (page - 1) * PAGE_SIZE + index + 1 }"><span class="source-line-number" aria-hidden="true">{{ (page - 1) * PAGE_SIZE + index + 1 }}</span><code>{{ line || ' ' }}</code></div>
+              <div v-for="(line,index) in pageLines" :key="page * PAGE_SIZE + index" class="source-line" :class="{ 'source-match': matches.includes((page - 1) * PAGE_SIZE + index), 'source-focused': focusedLine === (page - 1) * PAGE_SIZE + index + 1 }"><span class="source-line-number" aria-hidden="true">{{ (page - 1) * PAGE_SIZE + index + 1 }}</span><code class="syntax-highlight hljs" v-html="highlightedLines[(page - 1) * PAGE_SIZE + index] || ' '"></code></div>
             </div>
             <div class="source-pagination"><span>第 {{ page }} / {{ pageCount }} 页 · 每页 {{ PAGE_SIZE }} 行</span><button class="btn" :disabled="page === 1" @click="changePage(-1)">上一页内容</button><button class="btn" :disabled="page === pageCount" @click="changePage(1)">下一页内容</button></div>
           </template>
@@ -38,6 +38,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
+import { highlightCodeLines, languageForFilename } from '../syntaxHighlight';
 const props = defineProps({ pid: { type: String, required: true }, showLoadingStatus: { type: Boolean, default: true }, location:{type:Object,default:null} });
 const emit = defineEmits(['loading']);
 const entries = ref([]), directory = ref(''), selected = ref(''), source = ref(null), loading = ref(false), error = ref('');
@@ -51,6 +52,8 @@ const PAGE_SIZE = 200;
 let generation = 0;
 const parentDirectory = computed(() => directory.value.split('/').slice(0,-1).join('/'));
 const lines = computed(() => source.value?.content?.split('\n') || []);
+const highlightedLines = computed(() => source.value?.kind === 'text'
+  ? highlightCodeLines(source.value.content, languageForFilename(source.value.path)) : []);
 const pageCount = computed(() => Math.max(1, Math.ceil(lines.value.length / PAGE_SIZE)));
 const pageLines = computed(() => lines.value.slice((page.value-1)*PAGE_SIZE, page.value*PAGE_SIZE));
 const matches = computed(() => search.value ? lines.value.flatMap((line,index) => line.toLowerCase().includes(search.value.toLowerCase()) ? [index] : []) : []);

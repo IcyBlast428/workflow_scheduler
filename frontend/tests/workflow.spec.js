@@ -217,6 +217,41 @@ test('detail tabs retain code state and slow refresh keeps content and geometry'
   await expect(dialog.getByRole('button',{name:'刷新详情',exact:true})).toBeEnabled();
 });
 
+test('source highlighting retains multi-line strings across pages and escapes HTML', async ({page}) => {
+  const content = [...Array.from({length:198}, (_,index) => `# line ${index+1}`),
+    'message = """first', 'middle', 'last"""', 'print(message)', '# <img src=x onerror=alert(1)>'].join('\n');
+  await page.route('**/api/taskinfo/source?**', async route => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.data.content = content;
+    await route.fulfill({json:payload});
+  });
+  await page.goto('/#tasks');
+  await page.getByLabel('用户名').fill('admin');
+  await page.getByLabel('密码').fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'}).getByRole('button',{name:'详情',exact:true}).click();
+  const dialog = page.locator('.task-detail-modal');
+  await dialog.getByRole('tab',{name:'查看代码',exact:true}).click();
+  const code = dialog.locator('.source-code');
+  await expect(code.locator('.source-line').last().locator('.hljs-string')).toHaveText('middle');
+  const refresh = dialog.locator('.source-files').getByRole('button',{name:'刷新文件',exact:true});
+  const before = await refresh.boundingBox();
+  await refresh.hover();
+  await expect(refresh).toHaveCSS('transform','none');
+  const after = await refresh.boundingBox();
+  expect(after.y).toBe(before.y);
+  const directory = await dialog.locator('.source-files').boundingBox();
+  expect(after.y - directory.y).toBeGreaterThanOrEqual(5);
+  await dialog.getByRole('button',{name:'下一页内容',exact:true}).click();
+  await expect(code.locator('.source-line').first().locator('.hljs-string')).toHaveText('last"""');
+  await expect(code.locator('.hljs-built_in')).toHaveText('print');
+  await expect(code).toContainText('<img src=x onerror=alert(1)>');
+  await expect(code.locator('img, script')).toHaveCount(0);
+  await dialog.getByLabel('搜索文件内容').fill('middle');
+  await expect(code.locator('.source-match .hljs-string')).toHaveText('middle');
+});
+
 test('account dropdown supports keyboard, outside dismissal and logout on mobile', async ({page}) => {
   await page.setViewportSize({width:390,height:844});
   await page.goto('/');

@@ -1,6 +1,6 @@
 {
   "index.html": {
-    "file": "static/index-CdEnSB-s.js",
+    "file": "static/index-C0ub9yHr.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -11,11 +11,11 @@
       "src/components/ExecutionMatrix.vue"
     ],
     "css": [
-      "static/index-DwjDIL-c.css"
+      "static/index-BTWfAxB4.css"
     ]
   },
   "src/components/AdminPanel.vue": {
-    "file": "static/AdminPanel-CG4vzsnD.js",
+    "file": "static/AdminPanel-BKZ83UHw.js",
     "name": "AdminPanel",
     "src": "src/components/AdminPanel.vue",
     "isDynamicEntry": true,
@@ -24,7 +24,7 @@
     ]
   },
   "src/components/DatabaseConnections.vue": {
-    "file": "static/DatabaseConnections-BzSxyDrr.js",
+    "file": "static/DatabaseConnections-g8_Sr7Fp.js",
     "name": "DatabaseConnections",
     "src": "src/components/DatabaseConnections.vue",
     "isDynamicEntry": true,
@@ -36,7 +36,7 @@
     ]
   },
   "src/components/ExecutionMatrix.vue": {
-    "file": "static/ExecutionMatrix-QQH2cwAw.js",
+    "file": "static/ExecutionMatrix-DEBYdhtU.js",
     "name": "ExecutionMatrix",
     "src": "src/components/ExecutionMatrix.vue",
     "isDynamicEntry": true,
@@ -48,7 +48,7 @@
     ]
   },
   "src/components/TaskPackageManager.vue": {
-    "file": "static/TaskPackageManager-D0cYgOf6.js",
+    "file": "static/TaskPackageManager-CI-rDkej.js",
     "name": "TaskPackageManager",
     "src": "src/components/TaskPackageManager.vue",
     "isDynamicEntry": true,
@@ -56,7 +56,7 @@
       "index.html"
     ],
     "css": [
-      "static/TaskPackageManager-B8G3QRRe.css"
+      "static/TaskPackageManager-C8vVE7bs.css"
     ]
   }
 }

@@ -1,0 +1,7 @@
+.syntax-highlight { color: var(--ink); }
+.syntax-highlight .hljs-keyword, .syntax-highlight .hljs-literal { color: #c4a1ff; }
+.syntax-highlight .hljs-string, .syntax-highlight .hljs-doctag { color: #a7dca0; }
+.syntax-highlight .hljs-comment { color: #90a4b8; font-style: italic; }
+.syntax-highlight .hljs-title, .syntax-highlight .hljs-built_in, .syntax-highlight .hljs-tag { color: #74c9ed; }
+.syntax-highlight .hljs-number, .syntax-highlight .hljs-attr, .syntax-highlight .hljs-attribute { color: #edc58d; }
+.syntax-highlight .hljs-subst, .syntax-highlight .hljs-params { color: var(--ink); }

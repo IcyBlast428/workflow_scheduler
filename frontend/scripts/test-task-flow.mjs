@@ -51,7 +51,7 @@ try{
   const sourcePath=new URL(`.task-flow-source-${process.pid}.mjs`,import.meta.url);
   const sourceDescriptor=parse(await readFile(new URL('../src/components/TaskSourceViewer.vue',import.meta.url),'utf8')).descriptor;
   await writeFile(sourcePath,compileScript(sourceDescriptor,{id:'flow-source-regression',inlineTemplate:false}).content
-    .replace("'../api'",JSON.stringify(mockPath.href)).replace("import LoadingStatus from './LoadingStatus.vue';",'const LoadingStatus = {render:()=>null};'));
+    .replace("'../api'",JSON.stringify(mockPath.href)).replace("'../syntaxHighlight'", "'../src/syntaxHighlight.js'").replace("import LoadingStatus from './LoadingStatus.vue';",'const LoadingStatus = {render:()=>null};'));
   try {
     const SourceComponent=(await import(sourcePath.href)).default;let sourceState;
     await renderToString(createSSRApp({setup(){sourceState=SourceComponent.setup({pid:'first',location:null},{expose(){},emit(){}});return()=>null;}}));

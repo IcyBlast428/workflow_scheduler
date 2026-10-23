@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import App from './App.vue';
 import './styles.css';
+import './syntaxHighlight.css';
 import './workspace.css';
 import { glassSurface } from './glassSurface';
 

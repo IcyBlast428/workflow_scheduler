@@ -76,7 +76,7 @@
         <div
           v-else
           class="inline-alert"
-          :class="backendStatus.ready ? 'success' : 'warning'"
+          :class="backendStatus.ready ? 'login-ready' : 'warning'"
         >
           <strong>{{
             backendStatus.ready ? '服务已就绪' : '接口已连接，服务尚未就绪'
