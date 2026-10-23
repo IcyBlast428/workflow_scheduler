@@ -16,6 +16,7 @@ READ_POSTS = {'/api/user/logout', '/api/taskinfo/taskLogs', '/api/taskinfo/taskL
 VIEWER_GETS = {'/api/user/info', '/api/taskinfo/state', '/api/taskinfo/events',
                '/api/taskinfo/detail', '/api/taskinfo/matrix', '/api/taskinfo/runs',
                '/api/taskinfo/run', '/api/taskinfo/run-download', '/api/taskinfo/schedule'}
+VIEWER_GETS.update({'/api/taskinfo/artifacts', '/api/taskinfo/artifact-download'})
 VIEWER_POSTS = {'/api/user/logout', '/api/taskinfo/taskLogs', '/api/taskinfo/taskLogDetail',
                 '/api/taskinfo/taskids', '/api/taskinfo/groups', '/api/taskinfo/logview'}
 

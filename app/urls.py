@@ -19,3 +19,5 @@ def init_api(app):
     app.register_blueprint(connections_blueprint)
     from app.api.task_publishing import blueprint as publishing_blueprint
     app.register_blueprint(publishing_blueprint)
+    from app.api.task_artifacts import blueprint as artifacts_blueprint
+    app.register_blueprint(artifacts_blueprint)

@@ -35,7 +35,7 @@ test('publishing guide provides executable examples, downloads and mobile layout
   await guide
     .getByRole('button', { name: '生成报表文件', exact: true })
     .click();
-  await expect(code).toContainText('WFS_TASK_DATA_DIR');
+  await expect(code).toContainText('WFS_OUTPUT_DIR');
   await guide
     .getByRole('button', { name: '离线依赖准备', exact: true })
     .click();

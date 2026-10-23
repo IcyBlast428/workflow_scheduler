@@ -34,8 +34,8 @@
     "filename": "main.py",
     "language": "python",
     "source": "file_output/main.py",
-    "description": "将 CSV 保存到平台提供的任务数据目录，使用独立文件名处理并发执行。",
-    "note": "无需第三方依赖。输出请写入任务数据目录，不要向已发布的代码目录写文件。"
+    "description": "每次执行生成 CSV、JSON 和日志文件，自动隔离并发运行的输出。",
+    "note": "无需第三方依赖。输出写入 WFS_OUTPUT_DIR，在查看执行的输出文件中预览和下载。"
   },
   {
     "id": "nexus",

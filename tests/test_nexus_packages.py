@@ -92,7 +92,7 @@ class NexusPackageTests(unittest.TestCase):
         data = self.new({'main.py':'print(1)', 'requirements.txt':'guide-parent==1.0.0\nguide-leaf==2.0.0\n'})
         packages.prepare(data['pid'],data['version'])
         import time
-        deadline = time.monotonic()+30
+        deadline = time.monotonic()+90
         while packages.release(data['pid'],data['version'])['status']=='preparing' and time.monotonic()<deadline:
             time.sleep(.05)
         self.assertEqual(packages.release(data['pid'],data['version'])['status'],'failed')

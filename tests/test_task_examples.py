@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 
 import test_local_integration
@@ -33,6 +34,8 @@ class TaskExampleTests(unittest.TestCase):
 
     def run_example(self, name, *, success=True):
         environment = dict(os.environ, WFS_TASK_DATABASE_KEY=settings.task_database_key())
+        run_id = uuid.uuid4().hex
+        environment.update(WFS_RUN_ID=run_id, WFS_OUTPUT_DIR=str(self.root/'output'/run_id))
         for key in ('WFS_SECRET_KEY', 'WFS_CONNECTIONS_KEY'):
             environment.pop(key, None)
         result = subprocess.run([sys.executable, str(EXAMPLES / name / 'main.py')],
@@ -48,7 +51,7 @@ class TaskExampleTests(unittest.TestCase):
         self.assertIn('5050', self.run_example('hello').stdout)
         self.run_example('file_output')
         self.run_example('file_output')
-        reports = list((self.root / 'output').glob('report-*.csv'))
+        reports = list((self.root / 'output').glob('*/report.csv'))
         self.assertEqual(len(reports), 2)
         with reports[0].open(encoding='utf-8-sig', newline='') as stream:
             self.assertEqual(list(csv.reader(stream)), [['名称', '数量'], ['示例', '100']])

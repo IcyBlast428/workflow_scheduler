@@ -71,7 +71,8 @@ class PackageTests(unittest.TestCase):
 
     def ready(self, data):
         packages.prepare(data['pid'], data['version'], data['main_file'])
-        deadline = time.monotonic() + 30
+        # Windows ensurepip and antivirus scans can exceed 30 seconds.
+        deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             result = packages.release(data['pid'], data['version'])
             if result['status'] != 'preparing':

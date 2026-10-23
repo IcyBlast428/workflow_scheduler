@@ -109,6 +109,11 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
             state, output = -15, 'Task stopped before execution.'
         else:
             entry = Path(path).resolve()
+            task_root = entry.parent
+            if provenance.get('task_release'):
+                from app.bootstrap.task_packages import storage_root
+                relative_entry = entry.relative_to(storage_root().resolve())
+                task_root = storage_root().resolve().joinpath(*relative_entry.parts[:4])
             child_env = os.environ.copy()
             child_env['PYTHONIOENCODING'] = 'utf-8'
             if provenance.get('task_release'):
@@ -121,6 +126,12 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 data_dir.mkdir(parents=True, exist_ok=True)
                 child_env['WFS_TASK_DATA_DIR'] = str(data_dir.resolve())
                 child_env['WFS_TASK_ID'] = PID
+                from app.bootstrap.task_artifacts import output_directory
+                _, _, output_dir = output_directory(PID, run_id, create=True)
+                child_env['WFS_OUTPUT_DIR'] = str(output_dir.resolve())
+                child_env['WFS_RUN_ID'] = run_id
+                child_env['WFS_TASK_ROOT'] = str(task_root)
+                update_run(run_id, output_layout='per-run-v1')
             from app.bootstrap.connection_settings import task_database_key
             database_key = task_database_key()
             for key in ('WFS_SECRET_KEY', 'WFS_CONNECTIONS_KEY', 'WFS_TASK_DATABASE_KEY', 'WFS_ADMIN_PASSWORD_HASH', 'WFS_USERS_JSON'):
@@ -131,9 +142,10 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
             command = [python_executable or sys.executable, '-u', str(Path(__file__).with_name('worker.py')),
                        '--memory-mb', str(_resource_limit(limits, 'memory_mb', 'WFS_TASK_MEMORY_MB', 0)),
                        '--cpu-seconds', str(_resource_limit(limits, 'cpu_seconds', 'WFS_TASK_CPU_SECONDS', 0)),
-                       '--file-mb', str(_resource_limit(limits, 'file_mb', 'WFS_TASK_FILE_MB', 100)), str(entry)]
+                       '--file-mb', str(_resource_limit(limits, 'file_mb', 'WFS_TASK_FILE_MB', 100)),
+                       '--task-root', str(task_root), str(entry)]
             kwargs = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP, 'executable': command[0]} if os.name == 'nt' else {'start_new_session': True}
-            process = subprocess.Popen(command, cwd=str(entry.parent), stdin=subprocess.DEVNULL,
+            process = subprocess.Popen(command, cwd=str(task_root), stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0, shell=False, env=child_env, **kwargs)
             runnings.set_process(reservation, PID, process.pid)
             identity = Path(f'/proc/{process.pid}/stat').read_text().split()[21] if os.name != 'nt' else ''

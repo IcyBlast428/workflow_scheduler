@@ -16,16 +16,24 @@
         <p v-if="record.reason" class="inline-alert warning">{{ record.reason }}</p>
         <p v-if="record.log_truncated" class="hint">保留日志已达到容量上限，后续输出已丢弃。</p>
         <button v-if="canOperate && record.status && !['queued','running'].includes(record.status)" class="btn" :disabled="retrying" @click="$emit('retry',record)">再执行一次</button>
+        <div class="filter-actions" aria-label="执行内容切换">
+          <button class="btn" :class="contentView === 'logs' ? 'primary' : ''" :aria-pressed="contentView === 'logs'" @click="contentView='logs'">执行日志</button>
+          <button class="btn" :class="contentView === 'outputs' ? 'primary' : ''" :aria-pressed="contentView === 'outputs'" @click="outputsVisited=true;contentView='outputs'">输出文件</button>
+        </div>
+        <div v-show="contentView === 'logs'" class="execution-log-panel">
         <p v-if="displayTruncated" class="hint">页面显示最近 256 KiB；下载可获取容量上限内的保留日志。</p>
         <div class="filter-actions"><input v-model="search" class="input" placeholder="搜索日志内容" aria-label="搜索日志内容">
           <label><input v-model="follow" type="checkbox">自动滚动</label>
           <a class="btn" :href="`/api/taskinfo/run-download?run_id=${runId}`" download>下载保留日志</a></div>
         <pre ref="logElement" class="log-pre execution-output">{{ filtered || emptyExecutionLog(record.status, search) }}</pre>
+        </div>
+        <TaskArtifacts v-if="outputsVisited" v-show="contentView === 'outputs'" :key="runId" :run-id="runId" :status="record.status" />
       </div>
   </ModalShell>
 </template>
 <script setup>
 import ModalShell from './ModalShell.vue';
+import TaskArtifacts from './TaskArtifacts.vue';
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
@@ -33,7 +41,7 @@ import { statusLabel, statusClass, emptyExecutionLog } from '../executionLabels'
 const props = defineProps({ runId: { type: String, default: '' }, canOperate:Boolean, retrying:Boolean });
 defineEmits(['close','retry']);
 const record = ref({}), content = ref(''), error = ref(''), search = ref(''), follow = ref(true), logElement = ref(null), displayTruncated = ref(false);
-const initialLoading = ref(false);
+const initialLoading = ref(false), contentView=ref('logs'),outputsVisited=ref(false);
 let timer, offset = 0, generation = 0, inFlight = false;
 const filtered = computed(() => search.value ? content.value.split('\n').filter(line => line.toLowerCase().includes(search.value.toLowerCase())).join('\n') : content.value);
 async function refresh() {
@@ -55,6 +63,7 @@ async function refresh() {
   finally { inFlight = false; if (seq === generation) initialLoading.value = false; }
 }
 watch(() => props.runId, () => {
+  contentView.value='logs';outputsVisited.value=false;
   generation++; window.clearInterval(timer); offset = 0; content.value = ''; record.value = {}; error.value = ''; displayTruncated.value = false;
   initialLoading.value = Boolean(props.runId);
   if (props.runId) { timer = window.setInterval(refresh, 1500); refresh(); }

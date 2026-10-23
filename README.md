@@ -174,6 +174,10 @@ bash scripts/local_service.sh start .env.postgres.local
 
 测试使用 `WFS_DB_DRIVER=PostgreSQL Unicode`；生产默认仍为 `DWS`。`WFS_DB_QUERY_TIMEOUT_SECONDS` 控制服务端单语句超时，默认 10 秒，允许 1–3600 秒。PostgreSQL 测试验证通用 SQL、ODBC、事务和锁；真正 GaussDB 的驱动、分布式行为与执行计划仍需在目标环境验收。
 
+## 复杂项目与输出文件
+
+任务发布支持完整项目 ZIP、多层目录和子目录 Python 入口，可选择保留目录或移除一层外目录。已发布任务以包根目录为工作目录，支持 Python 包相对导入及 src/ 布局。任务输出写入每次执行独立的 `WFS_OUTPUT_DIR`，在「查看执行 → 输出文件」中预览 CSV、JSON、日志并下载；长期检查点仍使用 `WFS_TASK_DATA_DIR`。使用方法与限制见[复杂项目与输出文件](docs/task-outputs-and-projects.md)。
+
 ## 任务与调度
 
 ### 在线只读查看任务文件

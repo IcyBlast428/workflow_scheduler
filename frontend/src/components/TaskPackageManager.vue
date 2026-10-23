@@ -4,6 +4,7 @@
     <LoadingStatus :active="loading || busy" :label="busyLabel || '正在更新任务与版本…'" />
     <div class="panel-body">
       <TaskWritingGuide />
+      <div class="filter-actions" aria-label="完整项目示例"><a class="btn" href="/api/taskinfo/packages/example?kind=outputs" download>下载文件输出示例 ZIP</a><a class="btn" href="/api/taskinfo/packages/example?kind=nested" download>下载多层目录示例 ZIP</a><span class="hint">包含完整源码与资源；复杂项目可保留目录结构并选择子目录入口。</span></div>
       <PackageRepositorySettings />
       <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div><div v-if="message" class="inline-alert success" role="status">{{ message }}</div>
       <div class="package-layout">
@@ -20,7 +21,7 @@
               <div class="form-row"><label for="package-group">任务分类</label><input id="package-group" v-model.trim="form.group_name" class="input" list="package-groups" maxlength="80" required placeholder="如：报表"><datalist id="package-groups"><option v-for="group in groups" :key="group" :value="group" /></datalist></div>
               <div class="form-row"><label for="package-folder">目录名称</label><input id="package-folder" v-model.trim="form.folder_name" class="input" maxlength="80" required placeholder="如：daily_report"><small class="hint">文字、数字、下划线或连字符；同分类内唯一。</small></div>
               <div class="form-row"><label for="new-package-note">版本说明</label><input id="new-package-note" v-model="form.note" class="input" maxlength="1000" placeholder="简要记录本次变更"></div>
-              <div class="package-upload full"><label for="new-package-file">完整任务包（ZIP）</label><input id="new-package-file" type="file" accept=".zip,application/zip" required @change="chooseFile"><p class="hint">支持多个代码、SQL、说明和资源文件，上限 {{ maxMB }} MiB。请移除 .git、.venv、.env、身份文件和缓存目录。</p></div>
+              <div class="form-row full"><label :for="creating ? 'new-archive-layout' : 'update-archive-layout'">ZIP 目录处理</label><select :id="creating ? 'new-archive-layout' : 'update-archive-layout'" v-model="form.archive_layout" class="select"><option value="auto">自动识别外层目录</option><option value="preserve">保留全部目录层级</option><option value="strip">移除一层外部目录</option></select><small class="hint">复杂项目建议保留全部层级。上传后核对文件清单，再选择 Python 入口；requirements.txt 放在处理后的包根目录。</small></div><div class="package-upload full"><label for="new-package-file">完整任务包（ZIP）</label><input id="new-package-file" type="file" accept=".zip,application/zip" required @change="chooseFile"><p class="hint">支持多个代码、SQL、说明和资源文件，上限 {{ maxMB }} MiB。请移除 .git、.venv、.env、身份文件和缓存目录。</p></div>
               <div class="filter-actions full"><button class="btn primary" :disabled="busy || !file">上传并检查文件</button><button class="btn" type="button" :disabled="busy" @click="creating = false">取消</button></div>
             </form>
           </section>
@@ -30,7 +31,7 @@
               <div class="filter-actions"><span class="tag" :class="selected.deleted_at ? 'warning' : 'info'">{{ selected.deleted_at ? '回收站' : selected.active_version ? `当前版本 ${short(selected.active_version)}` : '未发布' }}</span><button v-if="selected.deleted_at" class="btn primary" :disabled="busy" @click="restore">恢复任务（暂停）</button><button v-else class="btn danger" :disabled="busy" @click="remove">移入回收站</button><button v-if="!selected.deleted_at && selected.active_version" class="btn" @click="$emit('detail',selected.pid)">任务详情与调度配置</button></div>
               <p v-if="selected.deleted_at" class="hint">代码、配置和日志都已保留；删除前已排队或运行的实例继续完成。恢复后保持暂停。</p><p v-else class="hint">代码发布与回滚保留当前调度配置；调度配置可在任务详情的配置历史中单独恢复。</p>
             </section>
-            <section v-if="!selected.deleted_at" class="surface-card"><details class="package-upload-disclosure"><summary>上传新版本</summary><form class="package-form" @submit.prevent="upload"><div class="package-upload full"><label for="update-package-file">完整任务包（ZIP）</label><input id="update-package-file" type="file" accept=".zip,application/zip" required @change="chooseFile"><p class="hint">完整替换代码文件；缺少的文件会列入删除清单。上限 {{ maxMB }} MiB。</p></div><div class="form-row full"><label for="update-package-note">版本说明</label><input id="update-package-note" v-model="form.note" class="input" maxlength="1000" placeholder="本次修复或新增内容"></div><button class="btn primary" :disabled="busy || !file">上传并预览差异</button></form></details></section>
+            <section v-if="!selected.deleted_at" class="surface-card"><details class="package-upload-disclosure"><summary>上传新版本</summary><form class="package-form" @submit.prevent="upload"><div class="form-row full"><label :for="creating ? 'new-archive-layout' : 'update-archive-layout'">ZIP 目录处理</label><select :id="creating ? 'new-archive-layout' : 'update-archive-layout'" v-model="form.archive_layout" class="select"><option value="auto">自动识别外层目录</option><option value="preserve">保留全部目录层级</option><option value="strip">移除一层外部目录</option></select><small class="hint">复杂项目建议保留全部层级。上传后核对文件清单，再选择 Python 入口；requirements.txt 放在处理后的包根目录。</small></div><div class="package-upload full"><label for="update-package-file">完整任务包（ZIP）</label><input id="update-package-file" type="file" accept=".zip,application/zip" required @change="chooseFile"><p class="hint">完整替换代码文件；缺少的文件会列入删除清单。上限 {{ maxMB }} MiB。</p></div><div class="form-row full"><label for="update-package-note">版本说明</label><input id="update-package-note" v-model="form.note" class="input" maxlength="1000" placeholder="本次修复或新增内容"></div><button class="btn primary" :disabled="busy || !file">上传并预览差异</button></form></details></section>
             <section v-if="versions.length" class="surface-card"><div class="section-heading"><h3>版本历史</h3><p>显示最近 50 个版本；已有代码和历史执行不会被覆盖。</p></div><div class="package-version-list" aria-label="版本历史"><button v-for="item in versions" :key="item.version" class="package-version" :class="preview?.release.version === item.version ? 'selected' : ''" :disabled="busy" @click="inspect(item.version)"><div><strong class="mono">{{ short(item.version) }}</strong><span class="tag" :class="stateClass(item.status)">{{ selected.active_version === item.version ? '当前使用' : stateLabel(item.status) }}</span></div><p>{{ item.note || '未填写说明' }}</p><small>{{ item.created_at.split('.')[0] }} · {{ item.actor }} · {{ item.file_count }} 个文件</small></button></div></section>
             <section v-if="preview" class="surface-card package-preview" aria-label="版本预览">
               <div class="section-heading"><h3>版本 {{ short(preview.release.version) }}</h3><p>{{ preview.against_version ? `与当前版本 ${short(preview.against_version)} 比较` : '初始版本文件清单' }}</p></div>
@@ -62,7 +63,7 @@ const tasks = ref([]), versions = ref([]), selected = ref(null), preview = ref(n
 const loading = ref(false), busy = ref(false), busyLabel = ref(''), error = ref(''), message = ref('');
 const creating = ref(false), trash = ref(false), search = ref(''), file = ref(null), entry = ref('');
 const path = ref(''), diff = ref(''), diffLoading = ref(false), maxMB = ref(64);
-const form = reactive({task_name:'',group_name:'',folder_name:'',note:''});
+const form = reactive({task_name:'',group_name:'',folder_name:'',note:'',archive_layout:'auto'});
 const preparationSeconds = computed(() => preview.value?.release.prepare_started_at ? Math.max(0,Math.floor((Date.now()-timestamp(preview.value.release.prepare_started_at))/1000)) : 0);
 let timer, generation = 0, stopped = false;
 const short = value => value?.slice(0,8) || '—';
@@ -75,7 +76,7 @@ const fileList = computed(() => { if (!preview.value) return []; const changes =
 const canPublish = computed(() => preview.value && !selected.value?.deleted_at && ['ready','applied'].includes(preview.value.release.status) && selected.value?.active_version !== preview.value.release.version);
 const downloadUrl = computed(() => '/api/taskinfo/packages/download?' + new URLSearchParams({pid:selected.value?.pid || '',version:preview.value?.release.version || ''}));
 function resetPreview() { generation++; clearTimeout(timer); preview.value = null; path.value = ''; diff.value = ''; diffLoading.value = false; loading.value = false; }
-function newTask() { if (busy.value) return; resetPreview(); selected.value = null; versions.value = []; creating.value = true; error.value = ''; message.value = ''; file.value = null; Object.assign(form,{task_name:'',group_name:'',folder_name:'',note:''}); }
+function newTask() { if (busy.value) return; resetPreview(); selected.value = null; versions.value = []; creating.value = true; error.value = ''; message.value = ''; file.value = null; Object.assign(form,{task_name:'',group_name:'',folder_name:'',note:'',archive_layout:'auto'}); }
 function chooseFile(event) { file.value = event.target.files[0] || null; if (file.value && file.value.size > maxMB.value * 1024**2) { error.value = `任务包不能超过 ${maxMB.value} MiB。`; file.value = null; } }
 async function work(label, action) { if (busy.value) return; busy.value = true; busyLabel.value = label; error.value = ''; message.value = ''; try { await action(); } catch (err) { error.value = err.message; } finally { busy.value = false; busyLabel.value = ''; } }
 async function refresh() {
@@ -109,7 +110,7 @@ function poll(token) {
 }
 async function upload() {
   if (!file.value) return;
-  await work('正在上传并检查任务文件…',async () => { const body = new FormData(); body.append('package',file.value); body.append('note',form.note); if (creating.value) for (const key of ['task_name','group_name','folder_name']) body.append(key,form[key]); else body.append('pid',selected.value.pid);
+  await work('正在上传并检查任务文件…',async () => { const body = new FormData(); body.append('package',file.value); body.append('note',form.note); body.append('archive_layout',form.archive_layout); if (creating.value) for (const key of ['task_name','group_name','folder_name']) body.append(key,form[key]); else body.append('pid',selected.value.pid);
     const data = await api.uploadPackage(body); creating.value = false; file.value = null; selected.value = {pid:data.pid}; await refresh(); await inspect(data.version); message.value = '任务包已保存，请选择入口并检查依赖环境。'; });
 }
 async function prepare() { await work('正在提交依赖检查…',async () => { await api.packageAction({action:'prepare',pid:selected.value.pid,version:preview.value.release.version,main_file:entry.value}); await inspect(preview.value.release.version); }); }

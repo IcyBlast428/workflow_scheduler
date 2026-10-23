@@ -156,7 +156,7 @@ def _path(name):
     return '/'.join(unicodedata.normalize('NFC', p) for p in parts)
 
 
-def _unpack(blob, code, entry=''):
+def _unpack(blob, code, entry='', archive_layout='auto'):
     bound = limits()
     if len(blob) > bound['upload_bytes']:
         raise PackageError('任务包超过上传大小限制。', 413)
@@ -182,7 +182,12 @@ def _unpack(blob, code, entry=''):
                 raise PackageError('任务包为空或文件数超过限制。')
             # A single wrapper directory is conventional ZIP export structure.
             prefix = files[0][1].split('/')[0]
-            strip = entry not in {name for _, name in files} and all('/' in name and name.split('/')[0] == prefix for _, name in files)
+            common_wrapper = all('/' in name and name.split('/')[0] == prefix for _, name in files)
+            if archive_layout == 'strip' and not common_wrapper:
+                raise PackageError('移除外层目录需要全部文件位于同一个外层目录中。')
+            names = {name for _, name in files}
+            strip = archive_layout == 'strip' or (archive_layout == 'auto' and common_wrapper and
+                     entry not in names and prefix + '/__init__.py' not in names)
             total = 0
             for entry, name in files:
                 name = name.split('/', 1)[1] if strip else name
@@ -233,6 +238,8 @@ def _requirements(code):
     from packaging.requirements import Requirement, InvalidRequirement
     path = code / 'requirements.txt'
     if not path.exists():
+        if any(code.rglob('requirements.txt')):
+            raise PackageError('检测到子目录 requirements.txt，请将本任务依赖合并到任务包根目录。')
         return []
     if path.stat().st_size > 65536:
         raise PackageError('requirements.txt 太大。')
@@ -271,7 +278,9 @@ def _entry(manifest, selected=''):
     return entry
 
 
-def _create(record, blob=None, source=None, entry='', actor='admin', note=''):
+def _create(record, blob=None, source=None, entry='', actor='admin', note='', archive_layout='auto'):
+    if archive_layout not in ('auto', 'preserve', 'strip'):
+        raise PackageError('请选择有效的目录处理方式。')
     version = uuid.uuid4().hex
     destination = release_dir(record['pid'], version)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -307,7 +316,7 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note=''):
                     output.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(path, output)
         else:
-            _unpack(blob, code, entry)
+            _unpack(blob, code, entry, archive_layout)
         manifest = _manifest(code)
         requirements = _requirements(code)
         selected = _entry(manifest, entry)
@@ -315,7 +324,7 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note=''):
                 'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '',
                 'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest),
                 'requirements': requirements, 'base_version': record.get('active_version'),
-                'base_revision': record['revision']}
+                'base_revision': record['revision'], 'archive_layout': archive_layout}
         temporary.rename(destination)
         _write_release(data, insert=True)
         return data
@@ -352,7 +361,8 @@ def stage(blob, fields, actor):
                       'created_at': str(business_now()), 'created_by': actor, 'revision': 0}
             selected = fields.get('main_file', '')
         # Validate before creating the registry row: a rejected upload adds no task.
-        data = _create(record, blob=blob, entry=selected, actor=actor, note=fields.get('note', ''))
+        data = _create(record, blob=blob, entry=selected, actor=actor, note=fields.get('note', ''),
+                       archive_layout=fields.get('archive_layout', 'auto'))
         if not pid:
             try:
                 record = _write_task(record, expected=0)

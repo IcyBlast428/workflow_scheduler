@@ -1105,6 +1105,18 @@ async function openTaskLog(row) {
   const serial = ++logDetailSerial;
   showModal(`任务日志：${row.id}`, '正在加载日志...');
   try {
+    if (/^[a-f0-9]{32}$/.test(row.logid)) {
+      try {
+        await api.execution(row.logid);
+        if (serial !== logDetailSerial || !modal.open) return;
+        closeModal();
+        openExecution(row.logid);
+        return;
+      } catch (error) {
+        if (!['HTTP_400', 'HTTP_404'].includes(error.code)) throw error;
+        // Archived and legacy history may only retain the database log.
+      }
+    }
     const content = await api.taskLogDetail({
       id: row.logid,
       end_time: row.datetime,

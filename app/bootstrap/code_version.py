@@ -36,15 +36,20 @@ def execution_version(entry, python_executable=''):
             if lock.is_file() and lock.stat().st_size<=2*1024*1024:
                 requirements.append((name,hashlib.sha256(lock.read_bytes()).hexdigest()))
     task_version = {}
+    entry_label = path.name
     from app.bootstrap.task_packages import storage_root
     try:
         relative = path.relative_to(storage_root())
         if len(relative.parts) >= 5 and relative.parts[1] == 'releases' and relative.parts[3] == 'code':
             marker = storage_root().joinpath(*relative.parts[:3]) / '.release.json'
             task_version = json.loads(marker.read_text(encoding='utf-8'))
+            entry_label = '/'.join(relative.parts[4:])
+            package_requirements = storage_root().joinpath(*relative.parts[:4]) / 'requirements.txt'
+            if package_requirements.is_file() and package_requirements.stat().st_size <= 2*1024*1024:
+                requirements.append(('task/requirements.txt', hashlib.sha256(package_requirements.read_bytes()).hexdigest()))
     except (OSError, ValueError):
         pass
     return {**task_version, 'release':cached('release-revision',30,_release,mutable=False),
-            'entry':path.name,'entry_sha256':digest,'python':cached(('python-version',executable),300,runtime,mutable=False),
+            'entry':entry_label,'entry_sha256':digest,'python':cached(('python-version',executable),300,runtime,mutable=False),
             'dependency_sha256':hashlib.sha256(repr(requirements).encode()).hexdigest(),
             'immutable_release':(BASE_DIR.parent/'.release-revision').is_file()}

@@ -166,6 +166,8 @@ export const api = {
   taskSource(pid, file) { return request('/api/taskinfo/source', { params: { pid, file } }); },
   runs(pid) { return request('/api/taskinfo/runs', { params: { pid } }); },
   execution(run_id, offset = 0) { return request('/api/taskinfo/run', { params: { run_id, offset } }); },
+  artifacts(run_id, dir = '', offset = 0) { return request('/api/taskinfo/artifacts', {params:{run_id,dir,offset}}); },
+  artifactPreview(run_id, file) { return request('/api/taskinfo/artifacts', {params:{run_id,file}}); },
   restore(payload) { return request('/api/taskinfo/restore', { method: 'POST', body: payload }); },
   users() { return request('/api/admin/users'); },
   saveUser(payload) { return request('/api/admin/users', { method: 'POST', body: payload }); },

@@ -37,7 +37,7 @@ def guard_and_forward():
         return error_msg('调度服务暂时不可用，请稍后重试。'), 503
     if response.headers.get('Content-Type', '').startswith('application/json'):
         return response.json(), response.status_code
-    if request.path.endswith('/download') and response.ok:
+    if request.path.endswith(('/download', '/example')) and response.ok:
         return Response(response.content, status=response.status_code, headers={
             key: value for key, value in response.headers.items() if key.lower() in ('content-type', 'content-disposition')})
     return error_msg('调度服务返回了无效内容。'), 502
@@ -51,6 +51,25 @@ def package_error(exc):
 @blueprint.get(BASE)
 def index():
     return success_msg(packages.overview(request.args.get('pid')))
+
+
+@blueprint.get(BASE + '/example')
+def example_package():
+    import io
+    import zipfile
+    from pathlib import Path
+    examples = {'outputs': 'file_output', 'nested': 'nested_report'}
+    kind = request.args.get('kind', 'outputs')
+    if kind not in examples:
+        raise packages.PackageError('示例类型不存在。', 404)
+    root = Path(__file__).resolve().parents[2] / 'examples/tasks' / examples[kind]
+    result = io.BytesIO()
+    with zipfile.ZipFile(result, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(root.rglob('*')):
+            if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts:
+                archive.write(path, path.relative_to(root).as_posix())
+    result.seek(0)
+    return send_file(result, mimetype='application/zip', as_attachment=True, download_name=f'{kind}-task-example.zip')
 
 
 @blueprint.get(BASE + '/preview')

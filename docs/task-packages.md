@@ -40,17 +40,9 @@ requirements.txt 每个有效行必须为 `package==version`。需要列出全�
 
 ## 数据输出与部署
 
-Linux 上准备好的代码文件和目录设置为只读，并禁止运行时生成 Python 缓存。业务输出请使用独立目录：
+Linux 上准备好的代码文件和目录设置为只读，并禁止运行时生成 Python 缓存。本次执行的 CSV、JSON 和日志写入 `WFS_OUTPUT_DIR`，可在「查看执行 → 输出文件」浏览、预览和下载；跨执行检查点使用固定 `WFS_TASK_DATA_DIR`。
 
-```python
-import os
-from pathlib import Path
-
-data = Path(os.environ['WFS_TASK_DATA_DIR'])
-(data / 'result.txt').write_text('业务输出', encoding='utf-8')
-```
-
-`WFS_TASK_DATA_DIR` 固定为 `<WFS_DATA_DIR>/task-data/<PID>`，更新、回滚和恢复都不改此目录。入口的工作目录仍为入口文件所在目录，便于读取相邻 SQL、模板和资源。需要写入相对目录的旧任务，应在导入发布前改成独立数据目录。
+入口工作目录为包根目录 `WFS_TASK_ROOT`，支持有 __init__.py 的包入口、src/ 布局和相对导入。多层目录发布、目录处理选项、输出保留与权限详见[复杂项目与输出文件](task-outputs-and-projects.md)。
 
 版本放在 `<WFS_DATA_DIR>/task-packages/<PID>/releases/<版本>/`，与平台 Git 发布目录分开。每个排队或自动调度实例固定代码路径和解释器路径，发布切换不会让旧实例读到新模块。解释器使用服务器已安装的 Python 基础运行时；跨 Python 大版本升级仍需按部署计划验证。
 
