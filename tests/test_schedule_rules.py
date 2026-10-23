@@ -16,6 +16,7 @@ class ScheduleRuleTests(unittest.TestCase):
             {'schedule_type':'interval_minutes','interval_minutes':3},
             {'schedule_type':'interval_hours','interval_hours':2},
             {'schedule_type':'daily_fixed','fixed_time':'08:15'},
+            {'schedule_type':'daily_times','daily_times':['05:05','06:55']},
             {'schedule_type':'weekly_fixed','weekday':'mon','fixed_time':'08:15'},
             {'schedule_type':'monthly_fixed','month_day':31},
             {'schedule_type':'monthly_last_day'},
@@ -41,6 +42,58 @@ class ScheduleRuleTests(unittest.TestCase):
         past = (dt.datetime.now(SCHEDULER_TZ)-dt.timedelta(seconds=60)).strftime('%Y-%m-%d %H:%M:%S')
         rules = {'RUN_DATE':past}
         self.assertEqual(preview_schedule(trigger='date',rules=rules), [])
+
+    def test_daily_times_preserve_pairs_deduplicate_and_advance_across_days(self):
+        trigger, rules, _ = build_schedule_payload({
+            'schedule_type': 'daily_times', 'daily_times': ['06:55', '5:05', '05:05']})
+        self.assertEqual(rules, {'TIMES': ['05:05', '06:55']})
+        plan = build_scheduler_trigger(trigger, rules)
+        now = SCHEDULER_TZ.localize(dt.datetime(2030, 1, 1, 0, 0))
+        expected = ['2030-01-01 05:05', '2030-01-01 06:55',
+                    '2030-01-02 05:05', '2030-01-02 06:55']
+        previous = None
+        for value in expected:
+            upcoming = plan.get_next_fire_time(previous, now)
+            self.assertEqual(upcoming.strftime('%Y-%m-%d %H:%M'), value)
+            previous, now = upcoming, upcoming + dt.timedelta(seconds=1)
+        rows = preview_schedule(trigger=trigger, rules=rules)
+        self.assertEqual({row['time'] for row in rows}, {'05:05:00', '06:55:00'})
+        # Recovery after restarting partway through the day skips past time points.
+        after = SCHEDULER_TZ.localize(dt.datetime(2030, 1, 1, 5, 6))
+        self.assertEqual(plan.get_next_fire_time(None, after).strftime('%H:%M'), '06:55')
+
+    def test_invalid_daily_times_are_rejected(self):
+        for values in [None, [], '05:05,06:55', ['25:00'], [''], ['12:00:30'],
+                       ['05:05'] * 49, [None], [['05:05']]]:
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                build_schedule_payload({'schedule_type': 'daily_times', 'daily_times': values})
+
+    def test_daily_times_save_reload_and_scheduler_registration(self):
+        from app.bootstrap.schedule_config import save_schedule, load_schedule, schedule_to_form
+        shared.LocalIntegrationTests.setUpClass()
+        pid = 'testJob__test_job1'
+        saved = save_schedule(pid, {'schedule_type': 'daily_times', 'enabled': False,
+                                   'daily_times': ['06:55', '05:05', '05:05']})
+        try:
+            loaded = load_schedule(pid)
+            self.assertEqual(loaded['form']['daily_times'], ['05:05', '06:55'])
+            self.assertEqual(loaded['form']['schedule_family'], 'fixed')
+            self.assertFalse(loaded['form']['enabled'])
+            inferred = schedule_to_form('daily_times', loaded['rules'])
+            self.assertEqual(inferred['daily_times'], ['05:05', '06:55'])
+            self.assertEqual(inferred['schedule_family'], 'fixed')
+            # Register the restored trigger in a real APScheduler instance, without executing it.
+            from apscheduler.schedulers.background import BackgroundScheduler
+            scheduler = BackgroundScheduler(timezone=SCHEDULER_TZ)
+            scheduler.start(paused=True)
+            try:
+                job = scheduler.add_job(lambda: None, build_scheduler_trigger(loaded['trigger'], loaded['rules']))
+                self.assertIn(job.next_run_time.strftime('%H:%M'), ['05:05', '06:55'])
+            finally:
+                scheduler.shutdown(wait=False)
+        finally:
+            save_schedule(pid, {'schedule_type': 'every_hour', 'enabled': False,
+                                'version': saved['version']})
 
     def test_expired_once_is_not_registered_again(self):
         past = (dt.datetime.now(SCHEDULER_TZ)-dt.timedelta(seconds=60)).strftime('%Y-%m-%d %H:%M:%S')

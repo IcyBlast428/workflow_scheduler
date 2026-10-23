@@ -16,3 +16,7 @@ assert.equal(scheduleRequest('second',form).version,0);
 resetScheduleForm(form,defaults,{version:9,enabled:true,interval_minutes:5});
 assert.equal(scheduleRequest('second',form).version,9,'Existing versions must remain intact for conflict checks');
 console.log('Cross-task form reset, request identity and configuration version regression passed.');
+const saved = {daily_times: ['05:05', '06:55']};
+resetScheduleForm(form, {daily_times: ['09:00']}, saved);
+form.daily_times[0] = '07:00';
+assert.deepEqual(saved.daily_times, ['05:05', '06:55'], 'Editing a draft must not mutate the loaded schedule');

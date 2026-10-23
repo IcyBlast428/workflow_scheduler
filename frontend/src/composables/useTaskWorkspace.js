@@ -36,6 +36,7 @@ export function useTaskWorkspace(
     identity,
     () => {
       taskRequestSerial++;
+      tasks.loading = false;
       tasks.items = [];
       tasks.total = 0;
       const saved = readPreference(key(), {});
@@ -107,7 +108,8 @@ export function useTaskWorkspace(
       if (serial === taskRequestSerial)
         await handleRequestFailure(error, { state: tasks });
     } finally {
-      if (serial === taskRequestSerial && !options.silent) {
+      // The latest response also owns completion of a foreground load it superseded.
+      if (serial === taskRequestSerial) {
         tasks.loading = false;
       }
     }

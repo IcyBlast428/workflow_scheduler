@@ -80,6 +80,12 @@ def _time_text(hour, minute):
         return '09:00'
 
 
+def _daily_times(values):
+    if not isinstance(values, list) or not 1 <= len(values) <= 48:
+        raise ValueError('每天需要配置 1 至 48 个时间点（HH:MM）。')
+    return sorted({_time_text(*_time_parts(value, 'daily_times')) for value in values})
+
+
 def _normalize_datetime(value):
     value = str(value or '').strip()
     if not value:
@@ -153,6 +159,8 @@ def build_schedule_payload(form):
     if schedule_type == 'daily_fixed':
         hour, minute = _time_parts(form.get('fixed_time') or '09:00', 'fixed_time')
         return 'cron', _cron_rules(hour=hour, minute=minute), schedule_type
+    if schedule_type == 'daily_times':
+        return 'daily_times', {'TIMES': _daily_times(form.get('daily_times'))}, schedule_type
     if schedule_type == 'weekly_fixed':
         hour, minute = _time_parts(form.get('fixed_time') or '09:00', 'fixed_time')
         day_of_week = str(form.get('weekday') or 'wed').strip().lower()
@@ -221,6 +229,11 @@ def _window_times_by_hour(rules):
 
 
 def build_scheduler_trigger(trigger, rules):
+    if trigger == 'daily_times':
+        triggers = [CronTrigger(hour=int(value[:2]), minute=int(value[3:]), second=0,
+                                timezone=SCHEDULER_TZ)
+                    for value in _daily_times((rules or {}).get('TIMES'))]
+        return triggers[0] if len(triggers) == 1 else OrTrigger(triggers)
     if trigger == 'interval':
         return IntervalTrigger(timezone=SCHEDULER_TZ, **_parse_rules_for_trigger(trigger, rules))
     if trigger == 'cron':
@@ -286,6 +299,7 @@ def _default_form(enabled=True):
         'interval_minutes': 1,
         'interval_hours': 1,
         'fixed_time': '09:00',
+        'daily_times': ['09:00'],
         'weekday': 'wed',
         'month_day': 1,
         'window_start': '09:30',
@@ -304,7 +318,7 @@ def _default_form(enabled=True):
 def _family_for_type(schedule_type):
     if schedule_type in {'every_minute', 'every_hour', 'interval_minutes', 'interval_hours'}:
         return 'interval'
-    if schedule_type in {'daily_fixed', 'weekly_fixed', 'monthly_fixed', 'monthly_last_day', 'once_at'}:
+    if schedule_type in {'daily_fixed', 'daily_times', 'weekly_fixed', 'monthly_fixed', 'monthly_last_day', 'once_at'}:
         return 'fixed'
     if schedule_type == 'window_minutes':
         return 'window'
@@ -322,6 +336,9 @@ def schedule_to_form(trigger, rules, schedule_type=None, saved_form=None, spec=N
         })
     if saved_form:
         form.update(saved_form)
+    if trigger == 'daily_times':
+        form['schedule_type'] = 'daily_times'
+        form['daily_times'] = _daily_times((rules or {}).get('TIMES'))
     rules = {str(key).upper(): _as_text(value) for key, value in (rules or {}).items()}
     if schedule_type:
         form['schedule_type'] = schedule_type
@@ -584,10 +601,12 @@ def apply_persisted_schedule(spec):
 
 
 def save_schedule(pid, form):
-    form = form or {}
+    form = dict(form or {})
     spec = resolve_task_spec(pid=pid)
 
     trigger, rules, schedule_type = build_schedule_payload(form)
+    if schedule_type == 'daily_times':
+        form['daily_times'] = rules['TIMES']
     build_scheduler_trigger(trigger, rules)
     _save_schedule_record(spec, trigger, rules, schedule_type, form)
     return load_schedule(spec.get('pid'))

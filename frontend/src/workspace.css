@@ -37,6 +37,12 @@
 .task-table th:last-child, .task-table .action-cell { position: sticky; right: 0; z-index: 2; background: var(--panel); box-shadow: -7px 0 12px -12px rgba(0,0,0,.7); }
 .task-table .task-actions { display: flex; gap: 6px; justify-content: flex-start; flex-wrap: nowrap; }
 .task-table .task-actions > .btn { min-width: 0; padding: 8px 10px; white-space: nowrap; }
+.task-table tbody tr { background: var(--panel); }
+.task-table tbody tr > td, .task-table tbody tr > .task-name-cell, .task-table tbody tr > .action-cell { background: inherit; transition: background-color .15s ease; }
+.task-table tbody tr:hover, .task-table tbody tr:focus-within { background: #252119; }
+.task-secondary-actions { display: flex; margin-top: 8px; }
+.task-secondary-actions .favorite-button { min-height: 28px; padding: 4px 8px; gap: 6px; color: var(--muted); font-size: 12px; }
+.task-secondary-actions .favorite-button.is-favorite { color: var(--brand-strong); background: var(--brand-soft); }
 .task-name-link { background: none; border: 0; padding: 0; font: inherit; color: var(--ink); font-weight: 600; text-align: left; cursor: pointer; }
 .task-name-link:hover { text-decoration: underline; text-underline-offset: 4px; }
 .task-identity { align-items: center; gap: 7px; }

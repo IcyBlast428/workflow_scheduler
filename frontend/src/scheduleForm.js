@@ -2,7 +2,8 @@
 export function resetScheduleForm(target, defaults, source = {}) {
   for (const key of Object.keys(target)) delete target[key];
   for (const key of Object.keys(defaults)) {
-    target[key] = Object.hasOwn(source, key) ? source[key] : defaults[key];
+    const value = Object.hasOwn(source, key) ? source[key] : defaults[key];
+    target[key] = Array.isArray(value) ? [...value] : value;
   }
 }
 
