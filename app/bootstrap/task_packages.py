@@ -230,6 +230,7 @@ def _manifest(code):
 
 
 def _requirements(code):
+    from packaging.requirements import Requirement, InvalidRequirement
     path = code / 'requirements.txt'
     if not path.exists():
         return []
@@ -244,9 +245,15 @@ def _requirements(code):
         line = line.split('#', 1)[0].strip()
         if not line:
             continue
-        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*', line):
-            raise PackageError('依赖必须逐行写成 package==version；不接受网络地址、脚本或其他路径。')
+        try:
+            requirement = Requirement(line)
+        except InvalidRequirement:
+            raise PackageError('依赖应逐行填写包名和版本；不接受安装参数、脚本或文件路径。') from None
+        if requirement.url or len(line) > 1000:
+            raise PackageError('依赖不接受直接下载地址；请使用管理员配置的仓库。')
         requirements.append(line)
+        if len(requirements) > 500:
+            raise PackageError('最多声明 500 项直接依赖。')
     return requirements
 
 
@@ -393,7 +400,7 @@ def prepare(pid, version, entry=''):
             data['main_file'] = _entry(data['manifest'], entry or data['main_file'])
             if not data['main_file']:
                 raise PackageError('请先选择 Python 入口。')
-            data.update(status='preparing', message='正在创建独立环境并检查离线依赖。', prepare_token=uuid.uuid4().hex)
+            data.update(status='preparing', message='正在创建独立环境并检查任务依赖。', prepare_token=uuid.uuid4().hex)
             _write_release(data)
             _preparing[(pid, version)] = data['prepare_token']
             thread = threading.Thread(target=_prepare_worker, args=(pid, version, data['prepare_token']), daemon=True, name='task-package-prepare')
@@ -405,19 +412,77 @@ def prepare(pid, version, entry=''):
         return data
 
 
-def _command(command, root, timeout):
+def _command(command, root, timeout, *, environment=None, secrets=()):
     env = os.environ.copy()
     for key in list(env):
         if key.startswith(('WFS_', 'PIP_', 'PYTHON')):
             env.pop(key, None)
-    # Don't send pip diagnostics through the UI; they can contain machine paths.
-    with (root / 'prepare.log').open('ab') as log:
-        result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, env=env,
-                                executable=command[0] if os.name == 'nt' else None,
-                                cwd=Path(__file__).resolve().parents[2] if os.name == 'nt' else root,
-                                timeout=timeout, stdin=subprocess.DEVNULL, check=False)
+    # Disable inherited pip configuration (including public extra indexes) and
+    # credentials. Nexus credentials use an ephemeral netrc, never argv or venv.
+    env.update(PIP_CONFIG_FILE=os.devnull, NETRC=os.devnull)
+    env.update(environment or {})
+    with tempfile.TemporaryFile() as capture:
+        try:
+            result = subprocess.run(command, stdout=capture, stderr=subprocess.STDOUT, env=env,
+                                    executable=command[0] if os.name == 'nt' else None,
+                                    cwd=Path(__file__).resolve().parents[2] if os.name == 'nt' else root,
+                                    timeout=timeout, stdin=subprocess.DEVNULL, check=False)
+        finally:
+            capture.seek(0)
+            output = capture.read(512 * 1024).decode('utf-8', errors='replace')
+            for secret in secrets:
+                if secret:
+                    output = output.replace(secret, '***')
+            with (root / 'prepare.log').open('a', encoding='utf-8') as log:
+                log.write(output)
     if result.returncode:
-        raise PackageError('依赖准备失败，请确认离线 wheel 与 Python/操作系统版本匹配。管理员可查看版本目录中的 prepare.log。')
+        raise PackageError('依赖准备失败，请检查仓库连通性、依赖版本及 wheel 与 Python/系统的兼容性。管理员可查看版本目录中的 prepare.log。')
+    return output
+
+
+def _install_requirements(python, code, root, requirements, repository, timeout):
+    from urllib.parse import urlsplit
+    common = [str(python), '-I', '-m', 'pip', '--isolated', '--disable-pip-version-check', '--no-input']
+    if repository['mode'] == 'offline':
+        # Preserve the deterministic offline contract, without index fallback.
+        for line in requirements:
+            if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*', line):
+                raise PackageError('离线模式要求全部直接及间接依赖使用 package==version，并提供匹配 wheels；版本范围请使用 Nexus 模式。')
+        arguments = common + ['install', '--no-index', '--no-deps', '--only-binary=:all:', '--no-cache-dir']
+        wheels = [code / 'wheels']
+        if os.environ.get('WFS_TASK_WHEELHOUSE'):
+            wheels.append(Path(os.environ['WFS_TASK_WHEELHOUSE']).resolve())
+        for wheelhouse in wheels:
+            if wheelhouse.is_dir():
+                arguments += ['--find-links', str(wheelhouse)]
+        _command(arguments + ['-r', str(code / 'requirements.txt')], root, timeout)
+    else:
+        arguments = common + ['install', '--index-url', repository['index_url'], '--only-binary=:all:',
+            '--retries', '1', '--timeout', '15', '--no-cache-dir']
+        if urlsplit(repository['index_url']).scheme == 'http':
+            arguments += ['--trusted-host', urlsplit(repository['index_url']).netloc]
+        if repository.get('ca_bundle'):
+            arguments += ['--cert', repository['ca_bundle']]
+        with tempfile.TemporaryDirectory(prefix='wfs-pip-auth-') as temporary:
+            netrc = Path(temporary) / 'credentials'
+            username, password = repository.get('username', ''), repository.get('password', '')
+            credentials = ''
+            if username:
+                credentials = ('machine ' + urlsplit(repository['index_url']).hostname +
+                    ' login ' + json.dumps(username, ensure_ascii=False) +
+                    ' password ' + json.dumps(password, ensure_ascii=False) + '\n')
+            netrc.write_text(credentials, encoding='utf-8')
+            if os.name != 'nt':
+                netrc.chmod(0o600)
+            from urllib.parse import quote
+            import base64
+            redactions = (password, quote(password, safe='') if password else '',
+                          base64.b64encode(f'{username}:{password}'.encode()).decode() if username else '')
+            _command(arguments + ['-r', str(code / 'requirements.txt')], root, timeout,
+                     environment={'NETRC': str(netrc)}, secrets=redactions)
+    _command(common + ['check'], root, timeout)
+    locked = _command(common + ['freeze', '--all'], root, timeout)
+    (root / 'dependencies.lock.txt').write_text(locked, encoding='utf-8')
 
 
 def _prepare_worker(pid, version, token):
@@ -442,19 +507,12 @@ def _prepare_worker(pid, version, token):
         _command([sys.executable, '-I', '-m', 'venv', '--without-pip', str(env)], root, timeout)
         python = env / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         if data['requirements']:
+            from app.bootstrap.task_publishing import repository
+            source = repository()
+            data['dependency_source'] = {key: source[key] for key in ('mode', 'index_url', 'revision')}
             _command([str(python), '-I', '-m', 'ensurepip', '--default-pip'], root, timeout)
-            wheels = [code / 'wheels']
-            if os.environ.get('WFS_TASK_WHEELHOUSE'):
-                wheels.append(Path(os.environ['WFS_TASK_WHEELHOUSE']).resolve())
-            arguments = [str(python), '-I', '-m', 'pip', '--isolated', '--disable-pip-version-check', 'install',
-                         '--no-index', '--no-deps', '--only-binary=:all:', '--no-cache-dir']
-            for wheelhouse in wheels:
-                if wheelhouse.is_dir():
-                    arguments += ['--find-links', str(wheelhouse)]
-            stage('安装离线依赖')
-            _command(arguments + data['requirements'], root, timeout)
-            stage('校验依赖')
-            _command([str(python), '-I', '-m', 'pip', 'check'], root, timeout)
+            stage('从 Nexus 安装依赖' if source['mode'] == 'nexus' else '安装离线依赖')
+            _install_requirements(python, code, root, data['requirements'], source, timeout)
         # Marker is outside user code; it follows nested entry files as well.
         marker = {'task_release': version, 'package_sha256': data['checksum'], 'pid': pid}
         (root / '.release.json').write_text(json.dumps(marker), encoding='utf-8')
@@ -462,7 +520,7 @@ def _prepare_worker(pid, version, token):
             for path in code.rglob('*'):
                 path.chmod(0o555 if path.is_dir() else 0o444)
             code.chmod(0o555)
-        data.update(status='ready', prepare_stage='环境检查通过', message='语法与离线依赖检查通过；尚未执行业务代码。', python=env.name + '/' + ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))
+        data.update(status='ready', prepare_stage='环境检查通过', message='语法与依赖环境检查通过；尚未执行业务代码。', python=env.name + '/' + ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))
         if release(pid, version).get('prepare_token') == token:
             _write_release(data)
     except Exception as exc:

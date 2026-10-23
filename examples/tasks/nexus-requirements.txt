@@ -1,0 +1,10 @@
+# 文件名：requirements.txt，放在任务 ZIP 根目录。
+# 以下是使用 NewDB 连接 MySQL / PolarDB 的最小直接依赖。
+SQLAlchemy==2.0.46
+configobj==5.0.8
+cryptography==50.0.2
+PyMySQL==1.1.0
+
+# Nexus 模式自动解析间接依赖；建议直接依赖固定版本。
+# PostgreSQL 兼容库：将 PyMySQL 换为 psycopg[binary]==3.3.6。
+# GaussDB 按实际产品和驱动验收；纯标准库任务不需要本文件。

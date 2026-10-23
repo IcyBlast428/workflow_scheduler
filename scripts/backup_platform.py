@@ -66,6 +66,7 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
                         archive.write(path,'jobs/'+relative.as_posix())
                 add_task_storage(archive, data, releases, output)
                 encrypted_settings = add_connection_settings(archive, data, temporary)
+                add_connection_settings(archive, data, temporary, 'task-publishing.sqlite3')
                 archive.writestr('manifest.json',json.dumps({'format':'wfs-platform-1','database':database,'schema':schema,
                     'dump_tool':tool,'created_at':dt.datetime.now().isoformat(' '),'dump_sha256':digest.hexdigest(),
                     'connection_passwords_included':False,'encrypted_connections_included':encrypted_settings,'restore_target':'new database only'},indent=2))

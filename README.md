@@ -58,7 +58,7 @@ with NewDB('mysql_orders') as db:
 
 高频任务若在同一进程内重复创建 NewDB，会复用物理连接；每次任务执行使用独立 Python 子进程，所以不同执行之间不能共享 Python 连接池。单次任务应合并重复数据库操作、使用批量写入或在一个事务内完成相关写操作。不要为了复用连接把活跃连接传给其它进程。
 
-Web 测试连接的环境可用 `pip install -r requirements-databases.txt` 安装驱动合集。任务使用独立环境，不继承 Web 已安装的包；按[任务编写示例](examples/tasks/README.md)准备最小依赖、完整版本锁定和离线 wheels。未安装驱动时前端会明确标识，不会将“已接入类型”等同于目标数据库已通过验收。MySQL/SQLite 有真实本地验收，其余类型仍需对应数据库实例验收。
+Web 测试连接的环境可用 `pip install -r requirements-databases.txt` 安装驱动合集。任务使用独立环境，不继承 Web 已安装的包；按[任务编写示例](examples/tasks/README.md)准备 requirements.txt，通过管理员配置的 Nexus 安装，或完整锁定后准备离线 wheels。未安装驱动时前端会明确标识，不会将“已接入类型”等同于目标数据库已通过验收。MySQL/SQLite 有真实本地验收，其余类型仍需对应数据库实例验收。
 
 连接配置保存在共享 `WFS_DATA_DIR/database-connections.sqlite3`，内容使用 Fernet 认证加密。默认从高强度 `WFS_SECRET_KEY` 派生独立密钥；生产可另设固定的 `WFS_CONNECTIONS_KEY`，所有服务保持一致。平台和业务连接使用不同的派生密钥；任务仅获得业务连接的派生密钥，不获得会话签名密钥、主配置密钥或平台连接解密能力。使用 NewDB 的任务独立环境需要 SQLAlchemy、configobj、cryptography、目标数据库驱动及其间接依赖；仅使用 NewDB 不会加载平台数据库与 Nacos 组件。
 
@@ -72,7 +72,9 @@ MySQL 的显式平台写事务先锁定 `wfs_platform_lock` 中的单行，以�
 
 ## 任务入门与部署选型
 
-任务发布页可展开“任务编写示例”，查看、复制或下载入门、数据库查询、事务批量写入、报表输出和离线依赖准备示例。展示源码来自 [examples/tasks](examples/tasks/README.md)，示例已用隔离 SQLite 验证查询、提交、失败回滚与重复执行。
+任务发布页可展开“任务编写示例”，查看高亮代码、复制或下载；管理员可以编辑既有示例或新增示例类型，选择 Python / SQL / Shell / JSON / 纯文本。初始内容来自 [examples/tasks](examples/tasks/README.md)，编辑内容保存在共享 `WFS_DATA_DIR/task-publishing.sqlite3`，重启与前端重新构建后保留。示例更新有版本冲突检查，不会执行管理员填写的代码；普通用户不能访问维护接口。
+
+同页的“任务依赖仓库”可选择 Nexus 或离线安装。预填生产仓库为 `http://nexus.immp.icbc/repository/pypi-hosted/simple/`，无需认证；初次部署保持离线模式，管理员保存选择后，新版本检查依赖时生效。Nexus 模式自动解析间接依赖，支持标准版本约束和环境标记，建议直接依赖固定版本；离线模式继续要求所有依赖精确锁定并提供 wheel。详细流程见[任务环境与 Nexus](docs/task-environments-and-nexus.md)。
 
 平台与业务数据库拆分、容器交付的取舍和日志增长治理见[部署与平台数据库建议](docs/deployment-and-storage.md)。优先独立事务型平台库，长期日志分析再按需求接入 ClickHouse，不将其直接作为平台主库。
 

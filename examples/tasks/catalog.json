@@ -1,0 +1,58 @@
+[
+  {
+    "id": "hello",
+    "title": "第一个任务",
+    "filename": "main.py",
+    "language": "python",
+    "source": "hello/main.py",
+    "description": "只用 Python 标准库，无需 requirements.txt。将此文件直接放在 ZIP 根目录即可开始。",
+    "note": "成功执行会输出合计 5050。任务按普通 Python 脚本运行，不需要定义平台装饰器。"
+  },
+  {
+    "id": "query",
+    "title": "数据库查询",
+    "filename": "main.py",
+    "language": "python",
+    "source": "database_query/main.py",
+    "database": true,
+    "description": "使用管理员保存的连接标识查询数据库，不在代码中填写地址或密码。",
+    "note": "先按 Nexus 依赖安装示例准备 requirements.txt。请先用演示表测试，再改为实际业务表与过滤条件。"
+  },
+  {
+    "id": "transaction",
+    "title": "事务与批量写入",
+    "filename": "main.py",
+    "language": "python",
+    "source": "database_transaction/main.py",
+    "database": true,
+    "description": "在一个事务里处理一批更新，失败时整批回滚。只在演示业务库中准备测试数据。",
+    "note": "数据库账号需有对应表的 UPDATE 权限。ClickHouse 不支持此事务示例；事务内不要做耗时网络请求。"
+  },
+  {
+    "id": "output",
+    "title": "生成报表文件",
+    "filename": "main.py",
+    "language": "python",
+    "source": "file_output/main.py",
+    "description": "将 CSV 保存到平台提供的任务数据目录，使用独立文件名处理并发执行。",
+    "note": "无需第三方依赖。输出请写入任务数据目录，不要向已发布的代码目录写文件。"
+  },
+  {
+    "id": "nexus",
+    "title": "Nexus 依赖安装",
+    "filename": "requirements.txt",
+    "language": "plaintext",
+    "source": "nexus-requirements.txt",
+    "description": "将此 requirements.txt 与 main.py 一起放在 ZIP 根目录。管理员启用 Nexus 后，无需上传 wheels。",
+    "note": "检查依赖环境时自动创建该版本的虚拟环境，从指定仓库解析并安装直接及间接依赖，安装失败不可发布。仓库需要提供所有依赖对应的兼容 wheel。"
+  },
+  {
+    "id": "dependencies",
+    "title": "离线依赖准备",
+    "filename": "prepare-dependencies.txt",
+    "language": "bash",
+    "source": "prepare-dependencies.txt",
+    "description": "供完全离线的部署使用。在匹配目标系统和 Python 的联网环境准备 wheels。",
+    "note": "离线模式要求所有间接依赖也精确锁定并提供 wheel。命令说明不是任务入口。"
+  }
+]

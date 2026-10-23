@@ -4,16 +4,16 @@ from pathlib import Path
 import sys
 
 
-def add_connection_settings(archive, data, temporary):
+def add_connection_settings(archive, data, temporary, filename='database-connections.sqlite3'):
     """Consistent encrypted settings snapshot. Encryption keys stay external."""
     import contextlib
     import sqlite3
-    source_path = Path(data) / 'database-connections.sqlite3'
+    source_path = Path(data) / filename
     if not source_path.exists():
         return False
     if source_path.is_symlink():
         raise ValueError('Connection settings must be a real local file')
-    snapshot = Path(temporary) / 'database-connections.sqlite3'
+    snapshot = Path(temporary) / filename
     with contextlib.closing(sqlite3.connect(f'file:{source_path.as_posix()}?mode=ro', uri=True)) as source:
         with contextlib.closing(sqlite3.connect(snapshot)) as target:
             source.backup(target)
@@ -21,7 +21,7 @@ def add_connection_settings(archive, data, temporary):
                 raise RuntimeError('Connection settings integrity check failed')
     if os.name != 'nt':
         snapshot.chmod(0o600)
-    archive.write(snapshot, 'data/database-connections.sqlite3')
+    archive.write(snapshot, 'data/' + filename)
     return True
 
 

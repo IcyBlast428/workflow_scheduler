@@ -1,5 +1,5 @@
 <template>
-  <details class="task-guide surface-card">
+  <details class="task-guide surface-card" @toggle="opened">
     <summary>
       任务编写示例 <span class="hint">从第一个任务到数据库访问</span>
     </summary>
@@ -8,7 +8,137 @@
         选一个示例，复制或下载为 main.py。任务每次执行使用独立 Python
         环境，入口运行结束即完成一次执行。
       </p>
-      <div class="guide-layout">
+      <p v-if="loading" role="status">正在读取示例…</p>
+      <div v-if="error" class="inline-alert danger" role="alert">
+        {{ error }}
+        <button v-if="!editing" class="btn" @click="load">重新读取</button>
+      </div>
+      <div v-if="message" class="inline-alert success" role="status">
+        {{ message }}
+      </div>
+      <div class="filter-actions">
+        <button
+          class="btn"
+          :disabled="loading || editing || !example"
+          @click="edit"
+        >
+          编辑此示例</button
+        ><button
+          class="btn"
+          :disabled="loading || editing || !examples.length"
+          @click="create"
+        >
+          新增示例类型</button
+        ><span class="hint"
+          >管理员保存后立即生效，服务重启后保留；不会执行示例代码。</span
+        >
+      </div>
+      <form
+        v-if="editing"
+        class="guide-editor"
+        aria-label="编辑任务示例"
+        @submit.prevent="save"
+      >
+        <fieldset :disabled="saving">
+          <div class="filter-grid">
+            <div class="form-row">
+              <label for="example-title">示例类型名称</label
+              ><input
+                id="example-title"
+                v-model.trim="draft.title"
+                class="input"
+                required
+                maxlength="60"
+              />
+            </div>
+            <div class="form-row">
+              <label for="example-filename">下载文件名</label
+              ><input
+                id="example-filename"
+                v-model.trim="draft.filename"
+                class="input"
+                required
+                maxlength="100"
+              />
+            </div>
+            <div class="form-row">
+              <label for="example-language">代码语言</label
+              ><select
+                id="example-language"
+                v-model="draft.language"
+                class="select"
+              >
+                <option value="python">Python</option>
+                <option value="sql">SQL</option>
+                <option value="bash">Shell</option>
+                <option value="json">JSON</option>
+                <option value="plaintext">纯文本 / requirements</option>
+              </select>
+            </div>
+            <label class="checkbox-row"
+              ><input
+                v-model="draft.database"
+                type="checkbox"
+              />显示数据库使用说明</label
+            >
+          </div>
+          <div class="form-row">
+            <label for="example-description">示例说明</label
+            ><input
+              id="example-description"
+              v-model="draft.description"
+              class="input"
+              maxlength="1000"
+            />
+          </div>
+          <div class="form-row">
+            <label for="example-note">补充提示</label
+            ><input
+              id="example-note"
+              v-model="draft.note"
+              class="input"
+              maxlength="2000"
+            />
+          </div>
+          <div class="form-row">
+            <label for="example-code">示例源码</label
+            ><textarea
+              id="example-code"
+              v-model="draft.code"
+              class="input guide-source"
+              rows="15"
+              maxlength="65536"
+              required
+              spellcheck="false"
+            ></textarea>
+          </div>
+          <details class="disclosure">
+            <summary>预览代码高亮</summary>
+            <CodeBlock
+              class="guide-code"
+              :code="draft.code"
+              :language="draft.language"
+              label="编辑预览代码"
+            />
+          </details>
+          <div class="filter-actions">
+            <button class="btn primary" :disabled="saving">
+              {{ saving ? '保存中…' : '保存示例' }}</button
+            ><button
+              class="btn"
+              type="button"
+              :disabled="saving"
+              @click="
+                editing = false;
+                error = '';
+              "
+            >
+              取消编辑
+            </button>
+          </div>
+        </fieldset>
+      </form>
+      <div v-if="example && !editing" class="guide-layout">
         <div class="guide-topics" role="group" aria-label="任务示例类型">
           <button
             v-for="item in examples"
@@ -38,11 +168,11 @@
             orders(id, status) 表；事务示例使用独立演示表 task_demo_items(id,
             status)。任务不能使用保留标识 platform。
           </p>
-          <pre
+          <CodeBlock
             class="guide-code"
-            tabindex="0"
-            aria-label="示例代码"
-          ><code>{{ example.code }}</code></pre>
+            :code="example.code"
+            :language="example.language"
+          />
           <p v-if="copyMessage" class="hint" role="status">{{ copyMessage }}</p>
           <p class="hint">{{ example.note }}</p>
         </section>
@@ -55,8 +185,9 @@
               ZIP 根目录放 main.py；其他模块、SQL、资源文件按相对目录一起打包。
             </li>
             <li>
-              使用第三方库时，加入完整锁定的 requirements.txt 和
-              wheels/。独立任务环境不继承平台已安装的库。
+              使用第三方库时，将 requirements.txt 放在 ZIP 根目录。Nexus
+              模式自动解析间接依赖；离线模式需完整锁定并提供
+              wheels/。任务不继承平台已安装的库。
             </li>
             <li>
               新增任务 → 上传 ZIP → 选择 main.py → 检查依赖环境 →
@@ -92,67 +223,76 @@
   </details>
 </template>
 <script setup>
-import { computed, ref } from 'vue';
-import hello from '../../../examples/tasks/hello/main.py?raw';
-import query from '../../../examples/tasks/database_query/main.py?raw';
-import transaction from '../../../examples/tasks/database_transaction/main.py?raw';
-import output from '../../../examples/tasks/file_output/main.py?raw';
-import dependencies from '../../../examples/tasks/prepare-dependencies.txt?raw';
-
-const examples = [
-  {
-    id: 'hello',
-    title: '第一个任务',
-    filename: 'main.py',
-    code: hello,
-    description:
-      '只用 Python 标准库，无需 requirements.txt。将此文件直接放在 ZIP 根目录即可开始。',
-    note: '成功执行会输出合计 5050。任务按普通 Python 脚本运行，不需要定义平台装饰器。',
-  },
-  {
-    id: 'query',
-    title: '数据库查询',
-    filename: 'main.py',
-    code: query,
-    database: true,
-    description:
-      '使用管理员保存的连接标识查询数据库，不在代码中填写地址或密码。',
-    note: '先查看“离线依赖准备”，安装 NewDB 所需库和对应驱动。先用演示表测试，再改为实际业务表与过滤条件。',
-  },
-  {
-    id: 'transaction',
-    title: '事务与批量写入',
-    filename: 'main.py',
-    code: transaction,
-    database: true,
-    description:
-      '在一个事务里处理一批更新，失败时整批回滚。只在演示业务库中准备测试数据。',
-    note: '数据库账号需有对应表的 UPDATE 权限。ClickHouse 不支持此事务示例；事务内不要做耗时网络请求。',
-  },
-  {
-    id: 'output',
-    title: '生成报表文件',
-    filename: 'main.py',
-    code: output,
-    description:
-      '将 CSV 保存到平台提供的任务数据目录，使用独立文件名处理并发执行。',
-    note: '无需第三方依赖。任务数据目录用于持久化输出；不要向已发布的代码目录写文件。',
-  },
-  {
-    id: 'dependencies',
-    title: '离线依赖准备',
-    filename: 'prepare-dependencies.txt',
-    code: dependencies,
-    description:
-      '以下是准备依赖的命令说明，供联网的构建环境使用，不是任务入口。',
-    note: 'Web 页“驱动就绪”只表示平台测试连接的环境具备驱动；任务自己的环境也必须安装。GaussDB 的驱动需按实际型号验收。',
-  },
-];
+import { computed, reactive, ref } from 'vue';
+import { api } from '../api';
+import CodeBlock from './CodeBlock.vue';
+const examples = ref([]),
+  loading = ref(false),
+  error = ref(''),
+  message = ref(''),
+  editing = ref(false),
+  saving = ref(false);
+const draft = reactive({});
 const selected = ref('hello'),
   copyMessage = ref('');
 const example = computed(() =>
-  examples.find((item) => item.id === selected.value),
+  examples.value.find((item) => item.id === selected.value),
 );
+function opened(event) {
+  if (event.target.open && !examples.value.length && !loading.value) load();
+}
+async function load() {
+  loading.value = true;
+  error.value = '';
+  try {
+    examples.value = (await api.taskExamples()).items;
+    if (!example.value) selected.value = examples.value[0]?.id || '';
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    loading.value = false;
+  }
+}
+function edit() {
+  Object.assign(draft, { database: false }, example.value);
+  editing.value = true;
+  error.value = '';
+  message.value = '';
+}
+function create() {
+  Object.keys(draft).forEach((key) => delete draft[key]);
+  Object.assign(draft, {
+    title: '',
+    filename: 'main.py',
+    language: 'python',
+    description: '',
+    note: '',
+    code: "def main():\n    print('Hello', flush=True)\n\n\nif __name__ == '__main__':\n    main()\n",
+    database: false,
+    revision: 0,
+  });
+  editing.value = true;
+  error.value = '';
+  message.value = '';
+}
+async function save() {
+  if (saving.value) return;
+  saving.value = true;
+  error.value = '';
+  try {
+    const saved = await api.saveTaskExample({ ...draft });
+    const index = examples.value.findIndex((item) => item.id === saved.id);
+    if (index < 0) examples.value.push(saved);
+    else examples.value[index] = saved;
+    selected.value = saved.id;
+    editing.value = false;
+    message.value = '示例已保存。';
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    saving.value = false;
+  }
+}
 function select(id) {
   selected.value = id;
   copyMessage.value = '';
@@ -199,6 +339,40 @@ function download() {
 .guide-content p {
   margin: 0;
   line-height: 1.8;
+}
+.guide-editor {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.guide-editor fieldset {
+  display: grid;
+  gap: 16px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.guide-editor .filter-grid .form-row {
+  grid-template-rows: 20px 40px;
+  align-content: start;
+  gap: 8px;
+}
+.guide-editor .filter-grid .input,
+.guide-editor .filter-grid .select {
+  height: 40px;
+  min-height: 40px;
+  box-sizing: border-box;
+}
+.guide-source {
+  font-family: var(--mono);
+  min-height: 300px;
+  line-height: 1.7;
+  resize: vertical;
+  white-space: pre;
+}
+.guide-editor .filter-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .guide-layout {
   display: grid;
@@ -254,6 +428,9 @@ function download() {
   line-height: 1.9;
 }
 @media (max-width: 760px) {
+  .guide-editor .filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .guide-layout,
   .guide-notes {
     grid-template-columns: minmax(0, 1fr);

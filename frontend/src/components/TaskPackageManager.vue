@@ -4,6 +4,7 @@
     <LoadingStatus :active="loading || busy" :label="busyLabel || '正在更新任务与版本…'" />
     <div class="panel-body">
       <TaskWritingGuide />
+      <PackageRepositorySettings />
       <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div><div v-if="message" class="inline-alert success" role="status">{{ message }}</div>
       <div class="package-layout">
         <aside class="package-sidebar">
@@ -36,7 +37,7 @@
               <div class="package-steps" aria-label="发布步骤"><span class="tag success">1 文件已检查</span><span class="tag" :class="stateClass(preview.release.status)">2 {{ preview.release.status === 'applied' ? '环境检查通过' : stateLabel(preview.release.status) }}</span><span class="tag" :class="selected.active_version === preview.release.version ? 'success' : 'info'">3 {{ selected.active_version === preview.release.version ? '调度器已确认' : '等待发布' }}</span></div>
               <p v-if="preview.release.message" class="inline-alert" :class="preview.release.status === 'failed' ? 'danger' : 'info'">{{ preview.release.message }}</p>
               <div class="form-row"><label for="package-entry">Python 入口</label><select id="package-entry" v-model="entry" class="select" :disabled="busy || !['staged','failed'].includes(preview.release.status)"><option value="" disabled>请选择入口</option><option v-for="item in preview.release.manifest.filter(f => f.path.endsWith('.py'))" :key="item.path" :value="item.path">{{ item.path }}</option></select></div>
-              <div class="package-dependencies"><strong>独立依赖环境</strong><p class="hint">{{ preview.release.requirements.length ? preview.release.requirements.join('，') : '未声明第三方依赖，使用独立的 Python 标准库环境。' }}</p><p class="hint">所有第三方依赖及其间接依赖逐行写入 requirements.txt（package==version），并提供 wheels/ 或服务端离线依赖库。不继承原任务或平台环境，检查时不会执行业务代码。</p><p class="hint">代码目录只读；业务输出请写入 WFS_TASK_DATA_DIR 指定的目录，更新与回滚都会保留。</p></div>
+              <div class="package-dependencies"><strong>独立依赖环境</strong><p class="hint">{{ preview.release.requirements.length ? preview.release.requirements.join('，') : '未声明第三方依赖，使用独立的 Python 标准库环境。' }}</p><p class="hint">requirements.txt 放在 ZIP 根目录。管理员选择 Nexus 后自动解析并安装间接依赖；离线模式需要完整版本锁定和 wheels/。每个发布版本使用独立环境，不继承平台安装的包；检查依赖时不运行任务入口。</p><p v-if="preview.release.dependency_source" class="hint">此版本依赖来源：{{ preview.release.dependency_source.mode === 'nexus' ? 'Nexus' : '离线 wheels' }}；安装结果保存在版本目录 dependencies.lock.txt。</p><p class="hint">代码目录只读；业务输出请写入 WFS_TASK_DATA_DIR 指定的目录，更新与回滚都会保留。</p></div>
               <p class="hint mono package-checksum">包校验 SHA256：{{ preview.release.checksum }}</p>
               <div class="filter-actions"><button v-if="['staged','failed'].includes(preview.release.status) && !selected.deleted_at" class="btn primary" :disabled="busy || !entry" @click="prepare">检查依赖环境</button><button v-if="canPublish" class="btn primary" :disabled="busy" @click="activate">{{ preview.release.published_at ? '回滚到此版本' : '发布此版本' }}</button><span v-if="preview.release.status === 'preparing'" class="tag warning" role="status">{{ preview.release.prepare_stage || '准备依赖中' }} · 已用 {{ preparationSeconds }} 秒</span><a class="btn" :href="downloadUrl" download>下载此任务包</a></div>
               <div class="package-diff-layout"><div class="package-files" aria-label="文件清单"><div class="section-heading"><h4>文件与变更</h4><p>新增 {{ counts.added }} · 修改 {{ counts.modified }} · 删除 {{ counts.deleted }}</p></div><button v-for="item in fileList" :key="item.path" class="package-file" :class="path === item.path ? 'selected' : ''" :disabled="diffLoading" @click="inspectFile(item.path)"><span class="tag" :class="{added:'success',modified:'warning',deleted:'danger'}[item.kind] || 'info'">{{ {added:'新增',modified:'修改',deleted:'删除'}[item.kind] || '相同' }}</span><span>{{ item.path }}</span></button></div><div class="package-diff"><div class="section-heading"><h4>{{ path || '选择文件查看' }}</h4><p>代码只读；+ 表示新增行，− 表示删除行。</p></div><LoadingStatus :active="diffLoading" label="正在读取文件差异…" /><pre class="log-pre" tabindex="0">{{ diff || '从左侧选择文件，查看文本内容或版本差异。' }}</pre></div></div>
@@ -54,6 +55,7 @@ import { timestamp } from '../timebase';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
 import TaskWritingGuide from './TaskWritingGuide.vue';
+import PackageRepositorySettings from './PackageRepositorySettings.vue';
 const props = defineProps({ confirm: {type:Function,required:true}, initialPid: {type:String,default:''} });
 const emit = defineEmits(['changed','detail']);
 const tasks = ref([]), versions = ref([]), selected = ref(null), preview = ref(null);

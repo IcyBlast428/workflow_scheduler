@@ -87,6 +87,10 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  taskExamples() { return request('/api/admin/task-publishing/examples'); },
+  saveTaskExample(body) { return request('/api/admin/task-publishing/examples', {method:'POST', body}); },
+  packageRepository() { return request('/api/admin/task-publishing/repository'); },
+  savePackageRepository(body) { return request('/api/admin/task-publishing/repository', {method:'POST', body}); },
   databaseConnections() { return request('/api/admin/database-connections'); },
   changeDatabaseConnection(action, body) { return request(`/api/admin/database-connections/${action}`, {method: 'POST', body, timeout: 65000}); },
   attention() { return request('/api/taskinfo/attention'); },
