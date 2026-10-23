@@ -198,31 +198,8 @@
           >
             {{ lowEffects ? '恢复特效' : '简化特效' }}
           </button>
-          <button
-            v-if="canManage"
-            class="btn warning"
-            type="button"
-            :disabled="busy"
-            @click="handleUpdateCode"
-          >
-            <span class="btn-icon">^</span>
-            检查更新
-          </button>
           <ServiceStatus :status="backendStatus" />
-          <div
-            v-if="!['dashboard', 'matrix', 'admin', 'packages', 'connections'].includes(view)"
-            class="status-chip"
-            :class="liveState.connected ? 'online' : 'offline'"
-          >
-            <strong>{{
-              liveState.connected
-                ? '实时同步'
-                : liveState.lastEvent
-                  ? '正在重连'
-                  : '等待同步'
-            }}</strong>
-            <span>{{ liveState.lastEvent || '等待连接' }}</span>
-          </div>
+
         </div>
       </header>
 
@@ -279,7 +256,6 @@
             @batch="batchTaskAction"
             @clear-selection="selectedTasks = []"
             @packages="openPackages('')"
-            @reload="reloadTasks"
             @favorite="toggleFavorite"
             @select="toggleSelected"
             @detail="detailPid = $event"
@@ -515,7 +491,7 @@ const navItems = [
       'M16 10v4',
       'M11 15.5v4',
     ],
-    description: '任务扫描、调度状态与运行控制。',
+    description: '已发布任务、调度状态与运行控制。',
   },
   {
     id: 'matrix',
@@ -643,7 +619,7 @@ const {
   setSystemLogPage,
   setSystemLogPageSize,
 } = useLogWorkspace({ markBackendHealthy, handleRequestFailure, syncRoute });
-const { liveState, startLiveEvents, stopLiveEvents } = useLiveUpdates({
+const { startLiveEvents, stopLiveEvents } = useLiveUpdates({
   token,
   view,
   tasks,
@@ -1122,70 +1098,6 @@ async function openLatestLog(row) {
     if (serial !== logDetailSerial || !modal.open) return;
     modal.content = error.message;
     await handleRequestFailure(error, { toastTitle: '日志读取失败' });
-  }
-}
-
-async function reloadTasks(fullReload) {
-  const label = fullReload ? '全量重载' : '同步任务';
-  if (fullReload) {
-    const confirmed = await requestConfirm({
-      title: '全量重载调度器',
-      message: '全量重载会清空当前调度器内的任务，并按 app/jobs 目录重新注册。',
-      details: [
-        '正在执行中的子进程不会自动回滚业务数据。',
-        '建议在任务低峰期操作，并关注平台事件。',
-      ],
-      confirmText: '全量重载',
-      danger: true,
-    });
-    if (!confirmed) {
-      return;
-    }
-  }
-  tasks.loading = true;
-  busy.value = true;
-  try {
-    const message = await api.reload(fullReload ? { refresh: '1' } : {});
-    markBackendHealthy('后端连接正常');
-    pushToast('success', label, message);
-    await Promise.all([loadTasks(), loadGroups()]);
-  } catch (error) {
-    await handleRequestFailure(error, { toastTitle: `${label}失败` });
-  } finally {
-    tasks.loading = false;
-    busy.value = false;
-  }
-}
-
-async function handleUpdateCode() {
-  const confirmed = await requestConfirm({
-    title: '检查服务器版本',
-    message: '从远端读取最新提交，查看当前服务是否需要发布新版本。',
-    details: [
-      '检查不会修改正在运行的代码或调度配置。',
-      '发现新版本后，请按部署流程发布并重启服务。',
-    ],
-    confirmText: '检查更新',
-    danger: false,
-  });
-  if (!confirmed) {
-    return;
-  }
-  busy.value = true;
-  try {
-    const message = await api.updateCode();
-    markBackendHealthy('后端连接正常');
-    showModal('版本检查结果', message);
-    pushToast('success', '版本检查完成', '请查看检查结果。');
-    await Promise.all([
-      loadTasks(),
-      loadGroups(),
-      loadDashboard({ silent: true }),
-    ]);
-  } catch (error) {
-    await handleRequestFailure(error, { toastTitle: '检查更新失败' });
-  } finally {
-    busy.value = false;
   }
 }
 

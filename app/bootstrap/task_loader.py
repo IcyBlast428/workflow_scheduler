@@ -295,12 +295,8 @@ def discover_task_specs(task_root=None):
 def _discover_task_specs(task_root=TASK_DIR):
     specs = []
     records_by_pid = _record_maps()
-    for group_name, folder_name, task_dir in iter_task_directories(task_root):
-        spec = load_task_spec(group_name, folder_name, task_dir, records_by_pid)
-        specs.append(spec)
-
     from app.bootstrap.task_packages import discovery
-    specs = discovery(records_by_pid, specs)
+    specs = discovery(records_by_pid)
 
     pid_locations = {}
     for spec in specs:

@@ -29,12 +29,8 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests -v
 npm --prefix frontend ci --no-audit --no-fund
 npm --prefix frontend run build
-# Build declared per-task and per-group environments inside this release.
-while IFS= read -r requirements; do
-  task_directory="$(dirname "$requirements")"
-  python3 -m venv "$task_directory/.venv"
-  "$task_directory/.venv/bin/python" -m pip install -r "$requirements"
-done < <(find app/jobs -mindepth 2 -maxdepth 3 -name requirements.txt -type f)
+# Business code and environments live only in shared/data/task-packages.
+# A platform release must never build or discover tasks from app/jobs.
 set -a
 source /etc/wfs/wfs.env
 set +a
@@ -46,6 +42,7 @@ export ODBCSYSINI="$RELEASE/app/config/driver/dws_odbc/etc"
 export ODBCINI="$ODBCSYSINI/odbc.ini"
 sed -i "s|/data/wfs/current|$RELEASE|g" "$ODBCSYSINI/odbcinst.ini"
 .venv/bin/python scripts/migrate.py
+.venv/bin/python scripts/migrate_legacy_tasks.py --verify-only
 chown -R root:wfs "$RELEASE"
 chmod -R g-w,o-rwx "$RELEASE"
 chown -R wfs:wfs "$BASE/shared/logs" "$BASE/shared/data"

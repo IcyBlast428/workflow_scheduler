@@ -170,12 +170,23 @@ class LocalIntegrationTests(unittest.TestCase):
         from scripts.migrate import MIGRATIONS
         self.assertEqual({row[0] for row in names}, {path.name for path in MIGRATIONS.glob('[0-9][0-9][0-9]_*.sql')})
 
-    def test_update_check_only_reads_versions(self):
-        with patch('pathlib.Path.is_file', return_value=False), patch.object(task_views, '_run_git_command', side_effect=[(0, 'a' * 40, ''), (0, 'b' * 40 + '\trefs/heads/main', '')]) as git:
-            ok, message = task_views._update_code_to_configured_branch()
-        self.assertTrue(ok)
-        self.assertIn('发现新版本', message)
-        self.assertEqual([call.args[0][0] for call in git.call_args_list], ['rev-parse', 'ls-remote'])
+    def test_retired_online_deployment_endpoints_do_not_load_tasks(self):
+        client = self.app.test_client()
+        login = client.post('/api/user/login', json={'username': 'admin', 'password': 'test-password'})
+        headers = {'X-CSRF-Token': login.json['data']['csrf_token']}
+        with patch.object(task_views, 'aps_start') as start:
+            for endpoint in ('overloading', 'updatecode'):
+                self.assertEqual(client.post('/api/taskinfo/' + endpoint, headers=headers).status_code, 410)
+        start.assert_not_called()
+
+
+# The integration fixtures are published baselines, exactly like production tasks.
+# This is test setup only; runtime discovery must never scan app/jobs.
+create_app()
+from scripts.migrate_legacy_tasks import legacy_specs, migrate_task
+from app.bootstrap.global_vars import TASK_DIR
+for _spec in legacy_specs(TASK_DIR):
+    migrate_task(_spec)
 
 
 if __name__ == '__main__':

@@ -36,6 +36,9 @@ with GaussDB() as db:
                        params=(username,os.environ['WFS_ADMIN_PASSWORD_HASH'],role))
 if scheduler.get_job('MAIN_TASK_JOB'):
     scheduler.remove_job('MAIN_TASK_JOB')
+from scripts.migrate_legacy_tasks import legacy_specs, migrate_task
+for fixture_spec in legacy_specs(global_vars.TASK_DIR):
+    migrate_task(fixture_spec, actor='browser-fixture')
 save_schedule('acceptance__slow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})
 if os.environ.get('WFS_BROWSER_FLOW_FIXTURE') == '1':
     save_schedule('acceptance__flow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})

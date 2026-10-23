@@ -26,7 +26,13 @@
     <div class="panel-head">
       <div>
         <h2>任务列表</h2>
-        <p>{{ canManage ? '查看已发布任务和 Git 任务，维护调度策略与运行状态。' : '查看任务状态、执行计划和执行记录。' }}</p>
+        <p>
+          {{
+            canManage
+              ? '查看已发布任务，维护调度策略与运行状态。'
+              : '查看任务状态、执行计划和执行记录。'
+          }}
+        </p>
       </div>
       <div class="filter-actions">
         <button
@@ -36,26 +42,6 @@
           @click="$emit('packages')"
         >
           任务发布 / 新增
-        </button>
-        <button
-          v-if="canManage"
-          class="btn"
-          type="button"
-          :disabled="tasks.loading"
-          @click="$emit('reload', false)"
-        >
-          <span class="btn-icon">+</span>
-          同步任务
-        </button>
-        <button
-          v-if="canManage"
-          class="btn danger"
-          type="button"
-          :disabled="tasks.loading"
-          @click="$emit('reload', true)"
-        >
-          <span class="btn-icon">!</span>
-          全量重载
         </button>
       </div>
     </div>
@@ -156,7 +142,9 @@
       <span>{{
         tasks.loading
           ? '正在更新结果，请稍候。'
-          : canManage ? '可以清空筛选条件，或点击“同步任务”同步 app/jobs 目录。' : '可以清空筛选条件后重试。'
+          : canManage
+            ? '可以清空筛选条件，或前往“任务发布”发布新任务。'
+            : '可以清空筛选条件后重试。'
       }}</span>
     </div>
     <TaskTable
@@ -211,7 +199,6 @@ defineEmits([
   'batch',
   'clear-selection',
   'packages',
-  'reload',
   'favorite',
   'select',
   'detail',

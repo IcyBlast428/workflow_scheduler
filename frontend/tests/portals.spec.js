@@ -19,7 +19,7 @@ for (const username of ['browser-viewer','browser-operator']) {
       await expect(page.getByRole('button', {name:label,exact:true})).toHaveCount(0);
     const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
     await row.getByRole('button', {name:'更多',exact:true}).click();
-    await expect(page.locator('.action-menu').getByRole('button')).toHaveText(['最新输出']);
+    await expect(page.locator('.action-menu').getByRole('button')).toHaveText(['最新输出', /收藏/]);
     await page.keyboard.press('Escape');
     await row.getByRole('button', {name:'详情',exact:true}).click();
     await expect(page.getByRole('dialog').getByRole('tab')).toHaveText(['说明与配置','执行记录']);

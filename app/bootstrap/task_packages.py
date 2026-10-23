@@ -365,25 +365,6 @@ def stage(blob, fields, actor):
         return data
 
 
-def import_task(pid, actor):
-    from app.bootstrap.core import _configuration_lock
-    from app.bootstrap.task_loader import discover_task_specs
-    with _configuration_lock:
-        if pid in registry():
-            raise PackageError('任务已经纳入版本管理。', 409)
-        spec = next((s for s in discover_task_specs() if s['pid'] == pid), None)
-        if not spec or spec.get('error') or spec.get('main_file_error'):
-            raise PackageError('任务不存在或入口配置无效。', 404)
-        record = {'pid': pid, 'group_name': spec['group_name'], 'folder_name': spec['folder_name'],
-                  'task_name': spec.get('task_name') or spec['folder_name'], 'active_version': None,
-                  'deleted_at': None, 'origin': 'git', 'created_at': str(business_now()),
-                  'created_by': actor, 'revision': 0, 'legacy': True}
-        data = _create(record, source=spec['task_dir'], entry=spec['main_file'], actor=actor, note='从现有任务导入初始版本')
-        record = _write_task(record, expected=0)
-        data['base_revision'] = record['revision']
-        return _write_release(data)
-
-
 def prepare(pid, version, entry=''):
     from app.bootstrap.core import _configuration_lock
     with _configuration_lock, _prepare_lock:
@@ -649,7 +630,7 @@ def recover():
                     _write_release(data)
 
 
-def discovery(records_by_pid, legacy_specs):
+def discovery(records_by_pid):
     from app.bootstrap.task_loader import load_task_spec
     managed = registry()
     active = [(pid, r['active_version']) for pid, r in managed.items() if r.get('active_version') and not r.get('deleted_at')]
@@ -662,9 +643,7 @@ def discovery(records_by_pid, legacy_specs):
             rows = db.execute_query_sql('SELECT pid,payload FROM wfs_task_releases WHERE ' + where,
                                         params=tuple(value for pair in batch for value in pair))
         releases.update({row[0]: json.loads(row[1]) for row in rows})
-    # An imported baseline stays on its original path until explicitly published.
-    result = [s for s in legacy_specs if s['pid'] not in managed or
-              (managed[s['pid']].get('legacy') and not managed[s['pid']].get('deleted_at'))]
+    result = []
     for pid, record in managed.items():
         if record.get('deleted_at') or not record.get('active_version'):
             continue
@@ -707,10 +686,6 @@ def overview(pid=None):
             data['file_count'] = len(data.pop('manifest', []))
         return {'task': record, 'versions': versions, 'limits': limits()}
     summaries = [display(record) for record in managed.values()]
-    for spec in discover_task_specs():
-        if spec['pid'] not in managed:
-            summaries.append({'pid': spec['pid'], 'group_name': spec['group_name'], 'folder_name': spec['folder_name'],
-                              'task_name': spec.get('task_name') or spec['folder_name'], 'origin': 'git', 'unmanaged': True, 'revision': 0})
     return {'tasks': summaries, 'limits': limits()}
 
 

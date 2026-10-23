@@ -10,7 +10,7 @@
         <aside class="package-sidebar">
           <div class="form-row"><label for="package-search">查找任务</label><input id="package-search" v-model="search" class="input" placeholder="名称、分类或编号"></div>
           <div class="filter-actions"><button class="btn" :class="!trash ? 'primary' : ''" :aria-pressed="!trash" @click="trash = false">任务 {{ tasks.filter(t => !t.deleted_at).length }}</button><button class="btn" :class="trash ? 'primary' : ''" :aria-pressed="trash" @click="trash = true">回收站 {{ tasks.filter(t => t.deleted_at).length }}</button></div>
-          <div class="package-task-list" aria-label="任务发布列表"><button v-for="item in filtered" :key="item.pid" class="package-task" :class="selected?.pid === item.pid ? 'selected' : ''" :disabled="busy" @click="select(item)"><strong>{{ item.task_name }}</strong><span>{{ item.group_name }} / {{ item.folder_name }}</span><small>{{ item.deleted_at ? '已删除' : item.unmanaged ? 'Git 任务 · 可导入' : item.active_version ? `当前 ${short(item.active_version)}` : item.legacy ? '仍使用原 Git 代码' : '待首次发布' }}</small></button><p v-if="!filtered.length" class="hint package-empty">{{ trash ? '回收站为空' : '没有符合条件的任务' }}</p></div>
+          <div class="package-task-list" aria-label="任务发布列表"><button v-for="item in filtered" :key="item.pid" class="package-task" :class="selected?.pid === item.pid ? 'selected' : ''" :disabled="busy" @click="select(item)"><strong>{{ item.task_name }}</strong><span>{{ item.group_name }} / {{ item.folder_name }}</span><small>{{ item.deleted_at ? '已删除' : item.active_version ? `当前 ${short(item.active_version)}` : '待首次发布' }}</small></button><p v-if="!filtered.length" class="hint package-empty">{{ trash ? '回收站为空' : '没有符合条件的任务' }}</p></div>
         </aside>
         <div class="package-workspace">
           <section v-if="creating" class="surface-card">
@@ -27,10 +27,10 @@
           <template v-else-if="selected">
             <section class="surface-card package-overview">
               <div class="section-heading"><h3>{{ selected.task_name }}</h3><p>{{ selected.group_name }} / {{ selected.folder_name }}</p><p class="mono">{{ selected.pid }}</p></div>
-              <div class="filter-actions"><span class="tag" :class="selected.deleted_at ? 'warning' : 'info'">{{ selected.deleted_at ? '回收站' : selected.active_version ? `当前版本 ${short(selected.active_version)}` : selected.unmanaged || selected.legacy ? '使用原 Git 代码' : '未发布' }}</span><button v-if="selected.unmanaged" class="btn primary" :disabled="busy" @click="importExisting">导入版本管理</button><button v-else-if="selected.deleted_at" class="btn primary" :disabled="busy" @click="restore">恢复任务（暂停）</button><button v-else class="btn danger" :disabled="busy" @click="remove">移入回收站</button><button v-if="!selected.deleted_at && (selected.active_version || selected.legacy || selected.unmanaged)" class="btn" @click="$emit('detail',selected.pid)">任务详情与调度配置</button></div>
-              <p v-if="selected.unmanaged" class="hint">导入复制完整代码并保留编号、配置和日志。检查并发布初始版本之前，任务继续使用原 Git 代码。</p><p v-else-if="selected.deleted_at" class="hint">代码、配置和日志都已保留；删除前已排队或运行的实例继续完成。恢复后保持暂停。</p><p v-else class="hint">代码发布与回滚保留当前调度配置；调度配置可在任务详情的配置历史中单独恢复。</p>
+              <div class="filter-actions"><span class="tag" :class="selected.deleted_at ? 'warning' : 'info'">{{ selected.deleted_at ? '回收站' : selected.active_version ? `当前版本 ${short(selected.active_version)}` : '未发布' }}</span><button v-if="selected.deleted_at" class="btn primary" :disabled="busy" @click="restore">恢复任务（暂停）</button><button v-else class="btn danger" :disabled="busy" @click="remove">移入回收站</button><button v-if="!selected.deleted_at && selected.active_version" class="btn" @click="$emit('detail',selected.pid)">任务详情与调度配置</button></div>
+              <p v-if="selected.deleted_at" class="hint">代码、配置和日志都已保留；删除前已排队或运行的实例继续完成。恢复后保持暂停。</p><p v-else class="hint">代码发布与回滚保留当前调度配置；调度配置可在任务详情的配置历史中单独恢复。</p>
             </section>
-            <section v-if="!selected.unmanaged && !selected.deleted_at" class="surface-card"><details class="package-upload-disclosure"><summary>上传新版本</summary><form class="package-form" @submit.prevent="upload"><div class="package-upload full"><label for="update-package-file">完整任务包（ZIP）</label><input id="update-package-file" type="file" accept=".zip,application/zip" required @change="chooseFile"><p class="hint">完整替换代码文件；缺少的文件会列入删除清单。上限 {{ maxMB }} MiB。</p></div><div class="form-row full"><label for="update-package-note">版本说明</label><input id="update-package-note" v-model="form.note" class="input" maxlength="1000" placeholder="本次修复或新增内容"></div><button class="btn primary" :disabled="busy || !file">上传并预览差异</button></form></details></section>
+            <section v-if="!selected.deleted_at" class="surface-card"><details class="package-upload-disclosure"><summary>上传新版本</summary><form class="package-form" @submit.prevent="upload"><div class="package-upload full"><label for="update-package-file">完整任务包（ZIP）</label><input id="update-package-file" type="file" accept=".zip,application/zip" required @change="chooseFile"><p class="hint">完整替换代码文件；缺少的文件会列入删除清单。上限 {{ maxMB }} MiB。</p></div><div class="form-row full"><label for="update-package-note">版本说明</label><input id="update-package-note" v-model="form.note" class="input" maxlength="1000" placeholder="本次修复或新增内容"></div><button class="btn primary" :disabled="busy || !file">上传并预览差异</button></form></details></section>
             <section v-if="versions.length" class="surface-card"><div class="section-heading"><h3>版本历史</h3><p>显示最近 50 个版本；已有代码和历史执行不会被覆盖。</p></div><div class="package-version-list" aria-label="版本历史"><button v-for="item in versions" :key="item.version" class="package-version" :class="preview?.release.version === item.version ? 'selected' : ''" :disabled="busy" @click="inspect(item.version)"><div><strong class="mono">{{ short(item.version) }}</strong><span class="tag" :class="stateClass(item.status)">{{ selected.active_version === item.version ? '当前使用' : stateLabel(item.status) }}</span></div><p>{{ item.note || '未填写说明' }}</p><small>{{ item.created_at.split('.')[0] }} · {{ item.actor }} · {{ item.file_count }} 个文件</small></button></div></section>
             <section v-if="preview" class="surface-card package-preview" aria-label="版本预览">
               <div class="section-heading"><h3>版本 {{ short(preview.release.version) }}</h3><p>{{ preview.against_version ? `与当前版本 ${short(preview.against_version)} 比较` : '初始版本文件清单' }}</p></div>
@@ -82,7 +82,7 @@ async function refresh() {
   if (loading.value || stopped) return; loading.value = true; const token = generation;
   try { const data = await api.packages(); if (stopped || token !== generation) return; tasks.value = data.tasks; maxMB.value = data.limits.upload_bytes / 1024**2;
     const pid = selected.value?.pid || props.initialPid;
-    if (pid && !creating.value && token === generation) { const item = tasks.value.find(t => t.pid === pid); if (item) { selected.value = item; if (!item.unmanaged) { const detail = await api.packages(pid); if (token === generation) { selected.value = detail.task; versions.value = detail.versions;
+    if (pid && !creating.value && token === generation) { const item = tasks.value.find(t => t.pid === pid); if (item) { selected.value = item; { const detail = await api.packages(pid); if (token === generation) { selected.value = detail.task; versions.value = detail.versions;
       const version = preview.value?.release.version || detail.versions[0]?.version;
       if (version) { const data = await api.packagePreview(pid,version); if (token === generation && !stopped) { if (preview.value?.against_version !== data.against_version) { path.value = ''; diff.value = ''; } preview.value = data; entry.value = data.release.main_file; if (data.release.status === 'preparing') poll(token); } }
     } } } }
@@ -90,7 +90,7 @@ async function refresh() {
 }
 async function select(item) {
   resetPreview(); const token = generation; selected.value = item; creating.value = false; versions.value = []; error.value = ''; message.value = ''; file.value = null; form.note = '';
-  if (item.unmanaged) return; loading.value = true;
+  loading.value = true;
   try { const detail = await api.packages(item.pid); if (token !== generation || stopped) return; selected.value = detail.task; versions.value = detail.versions; await inspect(detail.versions[0]?.version); } catch (err) { if (token === generation && !stopped) error.value = err.message; } finally { if (token === generation && !stopped) loading.value = false; }
 }
 async function inspect(version) {
@@ -112,7 +112,6 @@ async function upload() {
   await work('正在上传并检查任务文件…',async () => { const body = new FormData(); body.append('package',file.value); body.append('note',form.note); if (creating.value) for (const key of ['task_name','group_name','folder_name']) body.append(key,form[key]); else body.append('pid',selected.value.pid);
     const data = await api.uploadPackage(body); creating.value = false; file.value = null; selected.value = {pid:data.pid}; await refresh(); await inspect(data.version); message.value = '任务包已保存，请选择入口并检查依赖环境。'; });
 }
-async function importExisting() { await work('正在复制现有任务代码…',async () => { const data = await api.packageAction({action:'import',pid:selected.value.pid}); await refresh(); await inspect(data.version); message.value = '初始版本已导入。原任务继续运行，检查依赖后可发布。'; }); }
 async function prepare() { await work('正在提交依赖检查…',async () => { await api.packageAction({action:'prepare',pid:selected.value.pid,version:preview.value.release.version,main_file:entry.value}); await inspect(preview.value.release.version); }); }
 async function activate() {
   const version = preview.value.release.version, rollback = Boolean(preview.value.release.published_at);

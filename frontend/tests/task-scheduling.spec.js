@@ -17,7 +17,25 @@ test('task row styling and daily paired times survive saving and reopening', asy
     'false',
   );
   await expect(row).not.toContainText('尚未配置调度策略');
-  await expect(row.locator('.action-cell .favorite-button')).toBeVisible();
+  await expect(row.locator('.action-cell .favorite-button')).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: /检查更新|同步任务|全量重载/ }),
+  ).toHaveCount(0);
+  await expect(page.locator('.status-chip')).toHaveCount(0);
+  const headingColors = await page
+    .locator('.task-table thead th')
+    .evaluateAll((nodes) =>
+      nodes.map((el) => getComputedStyle(el).backgroundColor),
+    );
+  expect(new Set(headingColors).size).toBe(1);
+  const nameBox = await row.locator('.task-name-link').boundingBox();
+  const idBox = await row.locator('.task-name-copy > .mono').boundingBox();
+  expect(Math.abs(nameBox.x - idBox.x)).toBeLessThan(1);
+  expect(
+    await row
+      .locator('.task-name-link')
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+  ).toBeGreaterThanOrEqual(16);
   await expect(row.locator('.task-name-cell .favorite-button')).toHaveCount(0);
   await row.hover();
   await expect

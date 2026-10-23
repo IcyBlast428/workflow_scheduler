@@ -85,7 +85,7 @@ app/api/                 登录、任务控制、查询接口
 app/bootstrap/           任务发现、调度、执行、数据库、会话与指标
 app/common/              公共业务工具与数据库适配器
 app/config/              非敏感配置模板与 ODBC 驱动
-app/jobs/<group>/<task>/  任务代码
+app/jobs/<group>/<task>/  旧任务示例，仅供一次性迁移，不参与运行时发现
 app/dist/                已构建前端
 frontend/                Vue 源码
 migrations/              编号数据库迁移
@@ -184,19 +184,11 @@ bash scripts/local_service.sh start .env.postgres.local
 
 任务目录中的配置文件也属于可读范围；平台凭据配置继续存放于任务目录外的环境配置或密钥配置中。
 
-任务目录为 `app/jobs/<group>/<task>/`，PID 为 `<group>__<task>`，默认入口 `main.py`。目录名确定后应保持稳定。
+业务任务仅通过「任务发布」上传完整 ZIP、检查独立依赖环境并确认发布。任务编号由平台生成，代码与环境保存在共享 `WFS_DATA_DIR/task-packages` 中，独立于平台版本目录。修改或新增 `app/jobs` 文件不会新增或更新运行任务。
 
-```text
-app/jobs/<group>/<task>/
-├── main.py
-├── README.md              说明、负责人、运行手册
-├── requirements.txt       可选，任务专属依赖
-└── .venv/                 可选，任务专属 Python 环境
-```
+旧目录任务需在停服窗口通过 [一次性迁移工具](docs/platform-releases.md#旧任务的一次性迁移) 转为发布版本，保留编号、配置和历史记录；在线 Git 导入、目录同步、全量重载和版本检查入口均已停用。
 
-解释器优先级：任务 `.venv` → 任务组 `.venv` → 平台 Python。业务任务应维护自己的依赖、幂等逻辑和合理超时；任务组也可以提供 `requirements.txt` 与共享 `.venv`。
-
-新增任务后点击“同步任务”，再配置入口、展示名称、并发、超时和调度。配置保存在 `wfs_task_config`；任务目录的旧 `config.ini` 不作为当前调度依据。支持每分钟/小时、每 N 分钟/小时、每日/周/月、月末、单次、时间窗口及高级 Cron。interval 首轮注册会随机错峰，错峰不写入数据库。
+在任务列表配置入口、展示名称、并发、超时和调度。配置保存在 `wfs_task_config`；支持每分钟/小时、每 N 分钟/小时、每日/周/月、每天多个时间点、月末、单次、时间窗口及高级 Cron。interval 首轮注册会随机错峰，错峰不写入数据库。
 
 暂停自动调度后仍可手动运行一次。强停会取消该任务已排队和正在运行的所有实例；实例真正结束后才释放并发名额。每次运行的输出最多保留 63 KiB，超出部分仍持续读取并丢弃，日志标明截断。输出包括合并后的标准输出和错误输出。
 
@@ -226,7 +218,6 @@ app/jobs/<group>/<task>/
 | `WFS_MPCM_ACCESS_TOKEN` | 对应业务集成的外部凭据 |
 | `WFS_LOCAL_DB_PATH` | 独立本地 SQLite；生产发布脚本会清除此值 |
 | `WFS_DEV_RUN_ALL` | 开发环境发现所有任务 |
-| `WFS_CODE_REMOTE/BRANCH` | 检查更新时比较的远端和分支；生产 archive 目录需使用仓库 URL，而不是 origin 别名 |
 
 仓库模板中的历史凭据已清空。历史版本中暴露的真实密码和 token 必须在对应系统轮换；清空当前文件不会使旧凭据失效，也不会删除 Git 历史。
 
@@ -285,13 +276,13 @@ sudo systemctl enable wfs-scheduler wfs
 sudo journalctl -u wfs -u wfs-scheduler -f
 ```
 
-发布脚本加锁，导出指定提交到 `/data/wfs/releases/<sha>`，安装平台和声明的任务/任务组依赖，执行测试、前端构建和数据库迁移，再原子切换 current 并重启服务。健康检查失败时恢复旧版本链接。已存在的版本目录不覆盖，以便检查失败产物。初次迁移旧目录时应先备份并移开现有 current 普通目录。
+发布脚本加锁，导出指定提交到 `/data/wfs/releases/<sha>`，只安装平台依赖，执行测试、前端构建、数据库迁移和旧任务迁移检查，再原子切换 current 并重启服务。健康检查失败时恢复旧版本链接。已存在的版本目录不覆盖，以便检查失败产物。初次迁移旧目录时应先备份并移开现有 current 普通目录。
 
 自定义部署根目录时，必须同步修改两个 systemd 文件中的路径。ODBC 配置由脚本改为当前 release 的绝对路径。生产服务的 Scheduler 始终保持单 worker；不要横向扩容调度器。
 
 执行日志、运行状态、指标统一放在 `/data/wfs/shared/data`，服务日志放在 `shared/logs`，发布不切换数据目录。代码归 root:wfs 所有，服务不能修改代码；业务文件请写入 `WFS_DATA_DIR` 或明确的外部目录。旧版本 `current/data` 有数据时，发布会要求先停服务、备份并迁移到 `shared/data`，避免自动复制正在写入的数据。
 
-页面上的“检查更新”通过 ls-remote 比较 Git 版本，不修改在线工作目录、不执行 reset、不自动发布。生产版本目录保存 `.release-revision`；环境中的 `WFS_CODE_REMOTE` 需设置可读取的仓库 URL，不包含密码。代码发布通过上面的版本目录流程完成。
+平台版本由运维发布流程管理，不在业务页面连接 Git 或升级服务。平台自身与业务任务的发布和回滚分开，详见[平台与业务任务投产](docs/platform-releases.md)。
 
 ## 验证与开发
 
@@ -375,10 +366,10 @@ bash scripts/local_service.sh start
 ```
 
 备份包含 SQLite 快照、执行状态/日志、审计待写文件和指标，并检查数据库完整性。恢复时停止服务，将 `database.sqlite3` 放回原数据库路径，将归档内 `data` 内容放回原 `WFS_DATA_DIR`；保留原 `.env.local`，其中的签名密钥和管理员摘要不在备份内。备份包含业务日志和账户摘要，请限制访问。GaussDB 需另行执行目标数据库支持的一致备份，再备份共享数据目录；此本地工具不备份生产数据库。
-- `POST /api/taskinfo/updatecode`：检查 Git 更新。
+- `POST /api/taskinfo/updatecode` 与 `overloading` 已停用，返回 410；平台版本交给运维发布，业务代码通过任务发布管理。
 
 ### 任务代码发布
 
-新增「任务发布」页面，支持多文件 ZIP 上传、只读差异预览、离线依赖检查、发布、代码回滚和回收站。原 Git 任务可保留编号导入，现有调度配置和日志延续使用。部署前应用 `007_task_packages.sql`；操作方式、离线依赖和数据目录见 [任务包管理说明](docs/task-packages.md)。
+新增「任务发布」页面，支持多文件 ZIP 上传、只读差异预览、离线依赖检查、发布、代码回滚和回收站。旧目录任务通过停服迁移工具保留编号转为发布版本，现有调度配置和日志延续使用。部署前应用 `007_task_packages.sql`；操作方式、离线依赖和数据目录见 [任务包管理说明](docs/task-packages.md)。
 
 任务详情新增「执行流程」，可离线分析 Python 分支、循环和本地函数调用，展开跨文件流程并定位源码。使用方式与分析边界见 [任务执行流程说明](docs/task-flow.md)。

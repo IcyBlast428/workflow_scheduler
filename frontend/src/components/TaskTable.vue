@@ -33,27 +33,30 @@
                 :aria-label="`选择任务 ${row.id}`"
                 :checked="selected.includes(row.id)"
                 @change="$emit('select', row.id)"
-              /><button
-                class="task-name-link clip"
-                :title="row.name"
-                @click="$emit('detail', row)"
-              >
-                {{ row.name }}
-              </button>
+              />
+              <div class="task-name-copy">
+                <button
+                  class="task-name-link clip"
+                  :title="row.name"
+                  @click="$emit('detail', row)"
+                >
+                  {{ row.name }}
+                </button>
+                <div class="mono muted clip" :title="row.id">{{ row.id }}</div>
+                <div
+                  v-if="row.config_error"
+                  class="muted clip"
+                  :title="row.config_error"
+                >
+                  {{ row.config_error }}
+                </div>
+                <small
+                  v-if="row.application?.status === 'failed'"
+                  class="cell-subtitle danger-text"
+                  >配置生效失败：{{ row.application.message }}</small
+                >
+              </div>
             </div>
-            <div class="mono muted clip" :title="row.id">{{ row.id }}</div>
-            <div
-              v-if="row.config_error"
-              class="muted clip"
-              :title="row.config_error"
-            >
-              {{ row.config_error }}
-            </div>
-            <small
-              v-if="row.application?.status === 'failed'"
-              class="cell-subtitle danger-text"
-              >配置生效失败：{{ row.application.message }}</small
-            >
           </td>
           <td class="mono clip" :title="row.group_name || '-'">
             {{ row.group_name || '-' }}
@@ -154,21 +157,19 @@
                 >
                   强停
                 </button>
+                <button
+                  class="btn favorite-button"
+                  :class="{ 'is-favorite': favorites.includes(row.id) }"
+                  :aria-pressed="favorites.includes(row.id)"
+                  :aria-label="`${favorites.includes(row.id) ? '取消收藏' : '收藏'}任务 ${row.id}`"
+                  @click="$emit('favorite', row.id)"
+                >
+                  <span aria-hidden="true">{{
+                    favorites.includes(row.id) ? '★' : '☆'
+                  }}</span>
+                  {{ favorites.includes(row.id) ? '已收藏' : '收藏' }}
+                </button>
               </ActionMenu>
-            </div>
-            <div class="task-secondary-actions">
-              <button
-                class="btn favorite-button"
-                :class="{ 'is-favorite': favorites.includes(row.id) }"
-                :aria-pressed="favorites.includes(row.id)"
-                :aria-label="`${favorites.includes(row.id) ? '取消收藏' : '收藏'}任务 ${row.id}`"
-                @click="$emit('favorite', row.id)"
-              >
-                <span aria-hidden="true">{{
-                  favorites.includes(row.id) ? '★' : '☆'
-                }}</span>
-                {{ favorites.includes(row.id) ? '已收藏' : '收藏' }}
-              </button>
             </div>
           </td>
         </tr>

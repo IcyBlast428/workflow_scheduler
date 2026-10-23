@@ -115,11 +115,14 @@ test('favorites persist and batch controls preview effects before applying', asy
   await page.getByRole('button',{name:'登录',exact:true}).click();
   const row=page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
   await expect(row).toBeVisible();
-  await row.getByRole('button',{name:'收藏任务 acceptance__slow',exact:true}).click();
+  await row.getByRole('button',{name:'更多',exact:true}).click();
+  await page.locator('.action-menu').getByRole('button',{name:'收藏任务 acceptance__slow',exact:true}).click();
   await page.getByLabel('仅看收藏').check();
   await page.reload();
   await expect(page.getByLabel('仅看收藏')).toBeChecked();
-  await expect(row.getByRole('button',{name:'取消收藏任务 acceptance__slow',exact:true})).toBeVisible();
+  await row.getByRole('button',{name:'更多',exact:true}).click();
+  await expect(page.locator('.action-menu').getByRole('button',{name:'取消收藏任务 acceptance__slow',exact:true})).toBeVisible();
+  await page.keyboard.press('Escape');
   await row.getByRole('checkbox',{name:'选择任务 acceptance__slow'}).check();
   await page.getByRole('button',{name:'批量启用调度',exact:true}).click();
   await expect(page.locator('.confirm-modal')).toContainText('正在执行的实例继续运行');

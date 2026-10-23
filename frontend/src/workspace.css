@@ -40,13 +40,17 @@
 .task-table tbody tr { background: var(--panel); }
 .task-table tbody tr > td, .task-table tbody tr > .task-name-cell, .task-table tbody tr > .action-cell { background: inherit; transition: background-color .15s ease; }
 .task-table tbody tr:hover, .task-table tbody tr:focus-within { background: #252119; }
-.task-secondary-actions { display: flex; margin-top: 8px; }
-.task-secondary-actions .favorite-button { min-height: 28px; padding: 4px 8px; gap: 6px; color: var(--muted); font-size: 12px; }
-.task-secondary-actions .favorite-button.is-favorite { color: var(--brand-strong); background: var(--brand-soft); }
+.task-table thead th, .task-table thead th:first-child, .task-table thead th:last-child { background: var(--panel-soft); color: var(--ink); font-size: 14px; font-weight: 700; padding-block: 15px; }
+.task-name-copy { display: grid; gap: 6px; min-width: 0; }
+.task-name-copy > .mono { font-size: 11px; }
+.task-table .task-name-link { font-size: 16px; line-height: 24px; }
+.task-table .task-identity { align-items: flex-start; min-height: 0; }
+.task-table .task-identity > input { flex: none; margin: 5px 0 0; }
+.action-menu .favorite-button { width: 100%; gap: 8px; }
+.action-menu .favorite-button.is-favorite { color: var(--brand-strong); background: var(--brand-soft); }
 .task-name-link { background: none; border: 0; padding: 0; font: inherit; color: var(--ink); font-weight: 600; text-align: left; cursor: pointer; }
 .task-name-link:hover { text-decoration: underline; text-underline-offset: 4px; }
 .task-identity { align-items: center; gap: 7px; }
-.task-name-cell > .mono { padding-left: 28px; font-size: 11px; margin-top: 4px; }
 .action-menu { position: fixed; z-index: 90; display: grid; gap: 4px; width: 180px; max-height: calc(100dvh - 16px); overflow-y: auto; background-color: var(--panel); padding: 8px; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 35px rgba(0,0,0,.35); }
 .action-menu > button { text-align: left; justify-content: flex-start; border-color: transparent; }
 .action-menu > button:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }

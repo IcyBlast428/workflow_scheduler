@@ -153,12 +153,6 @@ export const api = {
   systemIds() {
     return request('/api/taskinfo/systemids', { method: 'POST' });
   },
-  reload(params = {}) {
-    return request('/api/taskinfo/overloading', { method: 'POST', params });
-  },
-  updateCode() {
-    return request('/api/taskinfo/updatecode', { method: 'POST', timeout: 65000 });
-  },
   detailLog(params) {
     return request('/api/taskinfo/logview', { method: 'POST', params });
   },

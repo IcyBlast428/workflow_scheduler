@@ -1,7 +1,6 @@
 import os
 from app.bootstrap.timebase import business_now
 
-import subprocess
 import datetime
 import time
 import threading
@@ -22,9 +21,6 @@ from app.bootstrap.execution_state import FAILURE_SQL, NON_FAILURE, is_failure
 from app.bootstrap.run_summary import coverage
 from app.bootstrap.snapshot_cache import cached
 from app.settings import (
-    CODE_UPDATE_BRANCH,
-    CODE_UPDATE_PATH,
-    CODE_UPDATE_REMOTE,
     WFS_ENABLE_SCHEDULER,
     WFS_SCHEDULER_CONTROL_URL,
 )
@@ -168,46 +164,6 @@ def _scheduler_json(resource_path, params=None, timeout=10):
     if payload.get('code') != 20000:
         raise RuntimeError(payload.get('message') or 'scheduler returned error')
     return payload.get('data') or {}
-
-
-def _run_git_command(args):
-    proc = subprocess.Popen(
-        ["git"] + args,
-        cwd=CODE_UPDATE_PATH,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = proc.communicate(timeout=60)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
-        return 124, '', 'git command timed out'
-    output = stdout.decode('utf-8', errors='ignore')
-    error_output = stderr.decode('utf-8', errors='ignore')
-    return proc.returncode, output, error_output
-
-
-def _update_code_to_configured_branch():
-    """检查远端版本；运行中的工作树只能通过部署流程更新。"""
-    revision = BASE_DIR.parent / '.release-revision'
-    if revision.is_file():
-        current = revision.read_text(encoding='utf-8').strip()
-    else:
-        code, current, error = _run_git_command(['rev-parse', 'HEAD'])
-        if code:
-            return False, error
-    code, remote, error = _run_git_command(['ls-remote', '--heads', CODE_UPDATE_REMOTE, 'refs/heads/{}'.format(CODE_UPDATE_BRANCH)])
-    if code:
-        return False, error
-    if not remote.strip():
-        return False, 'configured remote branch does not exist'
-    available = remote.split()[0]
-    if current.strip() == available.strip():
-        return True, '当前已是最新版本：{}'.format(current.strip()[:12])
-    return True, '发现新版本：{}。请通过部署流程发布并重启服务；当前版本：{}。'.format(
-        available.strip()[:12], current.strip()[:12]
-    )
 
 
 _failure_totals_cache = {}
@@ -852,36 +808,12 @@ class SystemIds(Resource):
 
 class Reload(Resource):
     def post(self):
-        if _scheduler_control_enabled():
-            return _proxy_scheduler_resource('/api/taskinfo/overloading')
-
-        refresh = request.args.get("refresh")
-        if refresh:
-            try:
-                for job in scheduler.get_jobs():
-                    if not str(job.id).startswith('manual_'):
-                        scheduler.remove_job(job.id)
-                aps_start()
-            except Exception as exc:
-                return error_msg('tasks reload failed: ' + str(exc))
-            return success_msg('tasks reloaded')
-
-        try:
-            aps_start()
-        except Exception as exc:
-            return error_msg('tasks reload failed: ' + str(exc))
-        return success_msg('new tasks loaded')
+        return error_msg('目录同步与全量重载已停用，请使用任务发布管理业务任务。'), 410
 
 
 class Code(Resource):
     def post(self):
-        try:
-            ok, message = _update_code_to_configured_branch()
-            if ok:
-                return success_msg(message)
-            return error_msg('检查更新失败：' + message)
-        except Exception as exp:
-            return error_msg('code update exception: ' + str(exp))
+        return error_msg('平台版本发布由运维部署流程管理，在线版本检查已停用。'), 410
 
 
 class DetailLog(Resource):

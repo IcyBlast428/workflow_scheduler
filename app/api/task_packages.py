@@ -94,7 +94,7 @@ def action():
     version = body.get('version', '')
     actor = g.identity['username']
     if action == 'import':
-        result = packages.import_task(pid, actor)
+        raise packages.PackageError('Git 任务导入入口已停用，请上传任务包。旧任务请使用一次性迁移工具。', 410)
     elif action == 'prepare':
         result = packages.prepare(pid, version, body.get('main_file', ''))
     elif action in ('publish', 'rollback', 'trash', 'restore'):
