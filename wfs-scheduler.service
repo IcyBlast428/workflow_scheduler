@@ -1,31 +1,34 @@
+# Managed by workflow_scheduler/scripts/install_systemd.py
 [Unit]
-Description=Workflow Scheduler Control Process
+Description=Workflow Scheduler Scheduler
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=10
 
 [Service]
-Type=simple
+Type=exec
 User=wfs
 Group=wfs
 EnvironmentFile=/etc/wfs/wfs.env
-Environment="WFS_ENV=production"
-Environment="WFS_ENABLE_SCHEDULER=true"
-Environment="WFS_COOKIE_SECURE=true"
-Environment="PYTHONPATH=/data/wfs/current"
-Environment="WFS_LOG_DIR=/data/wfs/shared/logs"
-Environment="WFS_DATA_DIR=/data/wfs/shared/data"
-Environment="PYTHONDONTWRITEBYTECODE=1"
-UMask=0077
-NoNewPrivileges=true
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/data/wfs/current
 Environment="ODBCSYSINI=/data/wfs/current/app/config/driver/dws_odbc/etc"
 Environment="ODBCINI=/data/wfs/current/app/config/driver/dws_odbc/etc/odbc.ini"
-WorkingDirectory=/data/wfs/current
-ExecStart=/data/wfs/current/.venv/bin/gunicorn -c gunicorn.conf.py --workers 1 --worker-class gthread --threads 8 --timeout 120 --keep-alive 75 --bind 127.0.0.1:8009 --access-logfile - --error-logfile - run:app
+UnsetEnvironment=GUNICORN_CMD_ARGS GUNICORN_FD WFS_DEV_RUN_ALL WFS_LOCAL_DB_PATH WFS_POSTGRES_TEST
+ExecStart="/data/wfs/current/.venv/bin/python" "-m" "gunicorn" "-c" "/data/wfs/current/gunicorn.conf.py" "--workers" "1" "--worker-class" "gthread" "--threads" "8" "--timeout" "120" "--graceful-timeout" "60" "--keep-alive" "75" "--bind" "127.0.0.1:8009" "--access-logfile" "-" "--error-logfile" "-" "--env" "WFS_ENV=production" "--env" "WFS_ENABLE_SCHEDULER=true" "--env" "WFS_SCHEDULER_CONTROL_URL=" "--env" "WFS_DATA_DIR=/data/wfs/shared/data" "--env" "WFS_LOG_DIR=/data/wfs/shared/logs" "--env" "PYTHONPATH=/data/wfs/current" "--env" "WFS_COOKIE_SECURE=true" "run:app"
+ExecStartPost="/data/wfs/current/.venv/bin/python" "/etc/wfs/wait_ready.py" "--url" "http://127.0.0.1:8009/api/user/ready" "--timeout" "90"
+UMask=0077
+NoNewPrivileges=true
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStartSec=100
+TimeoutStopSec=90
 Restart=on-failure
 RestartSec=5
-SyslogIdentifier=workflow-scheduler-control
-KillSignal=SIGTERM
-TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wfs-scheduler
 
 [Install]
 WantedBy=multi-user.target

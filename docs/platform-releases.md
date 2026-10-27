@@ -1,64 +1,67 @@
 # 平台与业务任务分别投产
 
+正式安装、systemd 服务、环境配置和运维操作统一见[systemd 部署手册](systemd-deployment.md)。本文件说明两条发布流程及旧任务迁移，避免平台升级与任务代码更新混用。
+
 ## 两条发布流程
 
-| 发布对象 | 谁操作 | 入口与内容 | 回滚范围 |
+| 对象 | 操作入口 | 固定版本 | 回退范围 |
 | --- | --- | --- | --- |
-| 业务任务 | 有发布权限的管理员 | 「任务发布」上传完整 ZIP → 预览差异 → 检查独立环境 → 确认发布 | 任务代码版本；调度配置另走配置历史 |
-| 调度平台 | 运维 / CI/CD | 审批固定提交或版本 → 平台测试与构建 → 发布新版本目录 → 切换服务 → 就绪检查 | 平台版本；数据库迁移需单独评估兼容性 |
+| 平台程序 | 运维使用 deploy_release.sh，systemd 管理 Web/Scheduler | 审批后的完整平台提交 SHA | 平台程序；数据库兼容性另行核对 |
+| 业务任务 | GitLab 合并后，在任务列表审查、检查依赖并确认发布 | GitLab 完整提交、任务内容指纹及平台生成的任务版本 | 单任务代码；调度配置通过配置历史恢复 |
 
-两条流程使用不同版本号、审批记录和操作权限。业务发布不会替换 Web/Scheduler 程序；平台升级不会重新上传业务代码、重建任务环境或修改调度配置。任务配置变化通过任务配置和历史记录管理。
+平台发布只构建平台依赖与前端；不会从 app/jobs 自动注册任务，不会重建已有任务环境或清理输出。任务新增以绿色卡片置顶，更新和删除在原任务行标识，经过确认后生效。ZIP 上传已删除，「任务示例」仅用于维护和下载示例；私有 PyPI 在独立「依赖仓库」配置。
 
-任务列表只包含已经成功发布、未在回收站的任务。运行时不再扫描 `app/jobs`，在 Git 或服务器目录中增加、修改 Python 文件均不能投产任务。旧的在线导入、同步、全量重载和版本检查接口返回 410，防止旧客户端继续使用。
+目标分支之外的代码只用于差异与合并审查，不能直接发布。任务尚未发布前不会出现在运行任务统计中；已移入回收站的任务不自动恢复。详见[任务发布](task-packages.md)和[GitLab 接入](gitlab-updates.md)。
 
-## 当前项目建议的投产方式
-
-当前已有双 systemd 服务和版本目录发布脚本，建议先沿用这条可验证的流程：CI 对固定提交执行后端、前端及浏览器检查，审批后由运维使用 `scripts/deploy_release.sh` 发布同一提交。生产使用版本标签或完整 SHA，避免移动分支作为最终审批依据；服务器不能在正在运行的目录直接 `git pull`。
+## 平台发布
 
 ```text
-/data/wfs/releases/<平台提交>/     平台程序和平台依赖
-/data/wfs/current                当前平台版本链接
-/data/wfs/shared/data/           执行记录文件、连接配置、示例配置等持久数据
-/data/wfs/shared/data/task-packages/<任务编号>/<任务版本>/
-                                已发布业务代码和独立 Python 环境
-/data/wfs/shared/logs/           服务日志
+/data/wfs/releases/<SHA>/        平台程序与固定平台 .venv
+/data/wfs/current               当前平台链接
+/data/wfs/shared/data/          稳定的配置、执行记录、任务版本及输出
+/data/wfs/shared/logs/          持久日志
 ```
 
-平台数据库保存任务配置、版本注册信息、账号、执行记录与审计；它与上述文件共同构成平台数据，必须一起备份。密钥和连接凭据继续由运维配置注入，不放进发布包。
+1. checkout 审批提交，在旧平台仍运行时执行 `deploy_release.sh --prepare <SHA>`，完成依赖、后端/前端测试及构建。准备阶段不连接生产数据库、不切换版本、不停止服务。
+2. 维护窗口内停止接收发布和手动执行，暂停调度，等待任务完成；停止 Web 和 Scheduler，配套备份数据库、shared 数据和密钥。
+3. 首次从旧目录模型升级时，先完成下节迁移。脚本核对已知任务编号，发现旧任务尚无版本或删除记录时拒绝激活。
+4. 执行 `deploy_release.sh --activate <SHA>`。只有两项服务停止后才运行迁移；之后切换 current，通过 systemd 启动 Scheduler 和 Web 并检查就绪。
+5. 核对运行版本、数据目录、任务数量、两个 ready 接口和低风险任务，再恢复调度。记录审批 SHA、备份位置和验证结果。
 
-有成熟容器平台、内网镜像仓库和运维支持时，再将平台发布产物改为固定镜像摘要。业务任务继续走 ZIP 发布，不因平台容器化而改为 Git 投产。当前仓库未提供验收完成的容器镜像，不能将容器建议当成已部署能力。
+已完成的 release 不覆盖。激活失败时先停止新服务，再尝试恢复旧代码；不自动撤销数据库迁移。必须使用经验证的向后兼容迁移，不兼容变更另行演练数据库恢复。回退不能只恢复平台代码而丢失 shared 数据与密钥。
 
-### 平台升级步骤
+Web 可以多 worker；Scheduler 只允许一个 worker、一个实例，不使用 preload/热重载。生产使用系统级 `wfs.service` 和 `wfs-scheduler.service`；本机 WSL 使用用户级 `wfs-local.service` 和 `wfs-local-scheduler.service`。不要同时启动旧 nohup 进程或 Docker 应用预览。
 
-1. 在测试环境完成构建、迁移、代表性业务任务和回滚验证。平台公共模块（如 NewDB）发生变化时，应额外验证使用这些模块的任务。
-2. 安排维护窗口，停止接收新发布和手动执行，暂停自动调度，等待运行任务完成。停止 Web 和 Scheduler 后备份平台数据库、共享文件和独立保管的密钥。
-3. 首次升级到只允许任务包的版本时，先按下节迁移旧任务。新版发布脚本会核对原有任务统计中的编号，发现没有发布版本的旧任务会在切换 `current` 前拒绝升级，不静默丢弃任务。
-4. 执行 `sudo bash scripts/deploy_release.sh <审批的提交 SHA>`。脚本构建平台、检查数据库与任务目录、原子切换平台版本，再重启两个服务；就绪检查失败会恢复旧版本链接。脚本不为 `app/jobs` 构建业务环境。
-5. 核对接口、平台库、Scheduler 就绪状态与任务数量，选择低风险任务验证后恢复调度。保存发布 SHA、备份位置、验证结果与变更记录。
-
-Web 和一个独立 Scheduler 共享相同的持久目录与绝对路径。保持单个 Scheduler；APScheduler 3.x 官方说明，多进程共享同一调度存储可能造成重复或遗漏执行，建议使用独立调度进程和控制接口。[官方说明](https://apscheduler.readthedocs.io/en/3.x/faq.html#how-do-i-share-a-single-job-store-among-one-or-more-worker-processes)
-
-跨主机、Python 大版本、操作系统或 CPU 架构升级时，需要在目标环境重建并验证任务依赖；不要直接移动虚拟环境。Python 文档明确说明虚拟环境不应视为可移动或可复制的部署产物。[venv 文档](https://docs.python.org/3/library/venv.html)
-
-平台代码回退与数据库恢复分开：只有数据库结构兼容时才能直接切回旧版本；不兼容迁移应按演练过的方案恢复对应备份，不能只改链接。保留旧程序和任务文件，禁止发布脚本自动清理数据或旧业务版本。
+跨主机、Python 大版本、系统或 CPU 架构升级，需要在目标环境重建并验证任务依赖，不能把虚拟环境视为可随意搬移的发布产物。参见 [Python venv 说明](https://docs.python.org/3/library/venv.html)。
 
 ## 旧任务的一次性迁移
 
-仅用于旧平台升级，不是日常业务投产入口。新平台正常运行后，所有新增与更新均使用「任务发布」。
+此工具只用于首次从旧目录任务升级，不是日常任务投产入口。先备份并停止 Web、Scheduler 及活动任务；平台库、共享数据目录、依赖仓库与密钥必须与原安装一致。
 
-在加载生产环境配置、安装平台依赖并确认新版表结构后，从新版平台源码执行。共享 `WFS_DATA_DIR`、平台连接和密钥必须与原服务一致。
+从准备好的新版 release 执行，生产配置通过 `service_config.py` 字面量读取，维护子进程不会启动 Scheduler：
 
 ```bash
-# 只检查旧目录中的编号和入口；不复制、安装依赖或发布
-.venv/bin/python scripts/migrate_legacy_tasks.py --source /path/to/old-platform/app/jobs
+APP_SHA='填写准备完成的完整平台提交SHA'
+RELEASE="/data/wfs/releases/$APP_SHA"
+cd "$RELEASE"
 
-# 确认备份完成，停止两个服务及任务后，复制并检查独立环境再注册发布版本
-.venv/bin/python scripts/migrate_legacy_tasks.py --source /path/to/old-platform/app/jobs --apply
+# 仅检查旧目录，不复制、安装依赖或发布
+sudo .venv/bin/python scripts/service_config.py --environment-file /etc/wfs/wfs.env \
+  --data /data/wfs/shared/data --logs /data/wfs/shared/logs -- \
+  "$RELEASE/.venv/bin/python" scripts/migrate_legacy_tasks.py --source /path/to/old-platform/app/jobs
 
-# 检查原有任务是否已有发布版本；新版平台切换前也会执行
-.venv/bin/python scripts/migrate_legacy_tasks.py --verify-only
+# 确认备份与停服后复制代码、建立独立环境、保留原编号注册版本
+sudo .venv/bin/python scripts/service_config.py --environment-file /etc/wfs/wfs.env \
+  --data /data/wfs/shared/data --logs /data/wfs/shared/logs -- \
+  "$RELEASE/.venv/bin/python" scripts/migrate_legacy_tasks.py --source /path/to/old-platform/app/jobs --apply
 ```
 
-迁移保留任务 PID、调度配置、执行历史和累计统计，不执行任务代码，不删除原目录。每个旧任务的代码会复制到共享版本存储，并重新建立独立环境；有依赖时必须提供 requirements.txt 和可用 Nexus / 离线 wheels，不能依赖原平台环境中偶然存在的包。
+迁移保留 PID、调度配置、历史和累计统计，不执行业务代码、不删除旧目录。任务的第三方依赖需要 requirements.txt，并提供可用的私有 PyPI 配置或匹配的离线 wheels；不能依赖旧平台环境中偶然安装的包。迁移创建的共享文件需归 `wfs:wfs`，激活脚本也会整理共享目录的属主。
 
-重复运行会跳过已发布或已删除的任务，不会将回收站任务重新上架。准备失败的草稿留在任务发布页，便于检查；修正依赖或上传新版本后再发布。存在失败或未迁移任务时，不要启动新版 Scheduler；先完成迁移和核对，或恢复备份并启动原平台版本。Windows 本地操作需手动确认服务已停止；生产 Linux 使用 Scheduler 文件锁阻止在线迁移。
+重复执行跳过已发布或已删除任务。准备失败时保留草稿，不启动新版 Scheduler；修正依赖并重试，或按配套备份恢复旧平台。激活时自动执行 `--verify-only`。接入 GitLab 后使用相同稳定编号或绑定目录，再通过任务列表发布；缺失目录不会仅因一次扫描失败被当成删除。
+
+## 备份与输出
+
+生产数据库与 shared 文件共同构成平台数据，必须在停服窗口配套备份。shared 包括执行索引、三份加密配置、任务代码/环境和 task-data 输出；密钥另行保护。数据库使用对应产品配套工具；本机 PostgreSQL 容器仅为兼容性测试，不替代生产 DWS 验收。
+
+业务发布读取固定提交并创建新任务版本，不对运行目录执行 Git 删除/清理。因此旧目录里多出的输出不会阻碍更新或回收任务，输出和旧代码继续保留。迁移到独立输出目录后，在业务代码里使用 `WFS_OUTPUT_DIR`、`WFS_TASK_DATA_DIR`。

@@ -3,6 +3,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 ENV_FILE="${2:-.env.local}"
+# Compatibility only: systemd owns both processes once installed.
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+UNIT_FILE="$CONFIG_HOME/systemd/user/wfs-local.service"
+SOURCE_FILE="$CONFIG_HOME/workflow-scheduler/systemd-source.txt"
+if [[ -f "$UNIT_FILE" ]] && grep -q 'Managed by workflow_scheduler/scripts/install_systemd.py' "$UNIT_FILE"; then
+  [[ -r "$SOURCE_FILE" ]] || { echo 'Re-run the systemd installer to synchronize its source configuration.' >&2; exit 2; }
+  IFS= read -r INSTALLED_ENV < "$SOURCE_FILE"
+  [[ "$(dirname "$INSTALLED_ENV")" == "$ROOT" ]] || { echo 'systemd belongs to another checkout; use its service manager.' >&2; exit 2; }
+  if [[ "${1:-status}" == start && $# -ge 2 && "$(realpath -m "$ENV_FILE")" != "$INSTALLED_ENV" ]]; then
+    echo 'Database configuration differs from systemd. Stop both services and re-run install_systemd.py with the chosen environment file.' >&2
+    exit 2
+  fi
+  case "${1:-status}" in
+    start) systemctl --user start wfs-local-scheduler.service wfs-local.service ;;
+    stop) systemctl --user stop wfs-local.service wfs-local-scheduler.service ;;
+    status) systemctl --user status wfs-local.service wfs-local-scheduler.service --no-pager ;;
+    *) echo 'Usage: local_service.sh [start|stop|status] [environment-file]' >&2; exit 2 ;;
+  esac
+  exit
+fi
 if [[ "$ENV_FILE" != .env.local && "$ENV_FILE" != .env.postgres.local ]]; then
   echo '请选择 .env.local 或 .env.postgres.local。' >&2
   exit 1

@@ -1,5 +1,7 @@
 # Workflow Scheduler
 
+正式部署统一采用 **systemd 管理 Web 和独立 Scheduler**，完整步骤见 [systemd 部署手册](docs/systemd-deployment.md)。生产沿用现有 GaussDB/DWS；本机 PostgreSQL 测试库仍可保留 Docker。
+
 长期运行优化、升级步骤和验证范围见 [优化说明](docs/runtime-scale-improvements.md)。
 
 管理员可在「代码更新」配置 GitLab 分支检查、登录后未读提醒和代码差异；接入方式、部署基线与检查范围见 [GitLab 更新提醒](docs/gitlab-updates.md)。
@@ -76,9 +78,9 @@ MySQL 的显式平台写事务先锁定 `wfs_platform_lock` 中的单行，以�
 
 “任务示例”页提供“任务编写示例”，查看高亮代码、复制或下载；管理员可以编辑既有示例或新增示例类型，选择 Python / SQL / Shell / JSON / 纯文本。初始内容来自 [examples/tasks](examples/tasks/README.md)，编辑内容保存在共享 `WFS_DATA_DIR/task-publishing.sqlite3`，重启与前端重新构建后保留。示例更新有版本冲突检查，不会执行管理员填写的代码；普通用户不能访问维护接口。
 
-同页的“任务依赖仓库”可选择 Nexus 或离线安装。预填生产仓库为 `http://nexus.immp.icbc/repository/pypi-hosted/simple/`，无需认证；初次部署保持离线模式，管理员保存选择后，新版本检查依赖时生效。Nexus 模式自动解析间接依赖，支持标准版本约束和环境标记，建议直接依赖固定版本；离线模式继续要求所有依赖精确锁定并提供 wheel。详细流程见[任务环境与 Nexus](docs/task-environments-and-nexus.md)。
+独立导航“依赖仓库”可选择 Nexus 或离线安装。预填生产仓库为 `http://nexus.immp.icbc/repository/pypi-hosted/simple/`，无需认证；初次部署保持离线模式，管理员保存选择后，新版本检查依赖时生效。Nexus 模式自动解析间接依赖，支持标准版本约束和环境标记，建议直接依赖固定版本；离线模式继续要求所有依赖精确锁定并提供 wheel。详细流程见[任务环境与 Nexus](docs/task-environments-and-nexus.md)。
 
-平台与业务数据库拆分、容器交付的取舍和日志增长治理见[部署与平台数据库建议](docs/deployment-and-storage.md)。优先独立事务型平台库，长期日志分析再按需求接入 ClickHouse，不将其直接作为平台主库。
+systemd 的目录、数据保留与数据库边界见[部署与数据保留](docs/deployment-and-storage.md)。平台使用现有 GaussDB/DWS，任务通过 GitLab 审查发布；应用部署不依赖 Docker。
 
 ## 目录
 
@@ -96,58 +98,43 @@ tests/                   独立本地数据库的集成测试
 ddl.sql                  新建生产数据库的初始表结构
 ```
 
-## WSL 启动
+## WSL 启动（systemd 用户服务）
 
-在 Ubuntu WSL 终端进入项目目录：
+本机应用由用户级 systemd 托管，关闭终端不影响运行；旧的容器预览应用已停用，测试 PostgreSQL 容器和数据卷保留。首次准备 Python 环境、前端和本地配置后，安装服务：
 
 ```bash
-cd "/mnt/c/Users/<Windows用户名>/Documents/Github/workflow_scheduler"
+cd /mnt/c/Users/你的用户名/Documents/Github/workflow_scheduler
+# 已有配置和环境时跳过初始化，不能重新生成旧密钥
 python3 -m venv ~/.local/share/workflow-scheduler/.venv
 ~/.local/share/workflow-scheduler/.venv/bin/pip install -r requirements.txt
 npm --prefix frontend ci --no-audit --no-fund
 npm --prefix frontend run build
 ~/.local/share/workflow-scheduler/.venv/bin/python scripts/init_local_env.py
-bash run.sh migrate
-bash scripts/local_service.sh start
+
+# 原后台进程需先停止；已有 PostgreSQL 配置时使用它，继续沿用原库
+bash scripts/local_service.sh stop .env.postgres.local
+python3 scripts/install_systemd.py --scope user --project "$PWD" \
+  --environment-file "$PWD/.env.postgres.local" --install --start
 ```
 
-如果已经配置本地 PostgreSQL，请使用对应配置启动：
+首次只有 SQLite 配置时，将最后两行中的 `.env.postgres.local` 换成 `.env.local`。安装器读取原配置，保留账号/密钥/数据，生成 0600 的 Linux 用户服务配置；不会迁移数据库。使用 PostgreSQL 前先启动 Docker Desktop 和原测试库。数据库首次配置见下一节。
 
 ```bash
-bash scripts/local_service.sh start .env.postgres.local
+systemctl --user status wfs-local.service wfs-local-scheduler.service --no-pager
+systemctl --user restart wfs-local-scheduler.service wfs-local.service
+systemctl --user stop wfs-local.service wfs-local-scheduler.service
+journalctl --user -u wfs-local.service -u wfs-local-scheduler.service -f
 ```
 
-启动前可加载选择的环境并执行只读检查：
+访问 <http://127.0.0.1:18008/>。服务已 enable，随用户 systemd 会话启动；WSL 完全关闭后进程仍会结束，WSL/Docker 的 Windows 开机启动另行配置。旧 `local_service.sh` 在 systemd 已接管时只兼容转发管理命令，不再另起 nohup 进程；更换数据库配置需重新运行安装器同步。
 
-```bash
-set -a
-source .env.postgres.local  # SQLite 环境则选 .env.local
-set +a
-"$WFS_PYTHON" scripts/check_local_env.py --database
-```
+生产使用系统级 `wfs.service` / `wfs-scheduler.service` 和 Python 3.12 锁定依赖，本机服务默认 18008/18009，不安装或覆盖生产服务。完整区别及故障排查见[部署手册](docs/systemd-deployment.md)。
 
-检查显示解释器、依赖、端口、空间、数据库类型与基础迁移表，不打印密码或连接凭据。端口已有服务时先用 `local_service.sh status` 核对，不必重复启动。
-
-平台业务时间统一为 `Asia/Shanghai`（UTC+8），包含调度、记录、矩阵与默认日志日期。历史无时区时间按原业务含义保留；已有 UTC 等其他来源数据的安装应先核对来源，再安排单独迁移。本次不自动改写历史记录。普通 PostgreSQL 可显式设置 `WFS_DB_DIALECT=postgresql` 启用统计行级更新；GaussDB/DWS 保持原兼容路径。
-
-界面提供任务更多操作、执行记录名称检索、日期快捷范围、可直接定位的任务/执行链接、总览待处理事项、二维时间图，以及持久化的“简化特效”选项。管理员可在账户与审计页检查版本容量和保留范围；此功能只做预览，不自动删除版本。详细说明见 [本轮优化与验证](docs/workspace-optimizations-2026-10-04.md)。
-
-初始化脚本生成随机管理员密码并只显示一次；配置写入未被 Git 跟踪的 `.env.local`。已存在时不会覆盖配置。启动脚本使用其中的 Python 路径，将 Web 与 Scheduler 放在后台运行。访问 <http://127.0.0.1:18008/>。
-
-```bash
-bash scripts/local_service.sh status
-bash scripts/local_service.sh stop
-# 停止后再启动即可重启
-bash scripts/local_service.sh start
-```
-
-日志为 `data/web.log`、`data/scheduler.log`，数据库为 `data/wfs-local.sqlite3`。WSL 关闭后需要重新启动服务。后台进程不会在关闭终端后退出。
-
-单进程调试可使用 `bash run.sh single`。Windows 原生调试需要自行设置同名环境变量后运行 `backend_dev_runner.py`；`.env.local` 是 Bash 格式。
+平台业务时间为 Asia/Shanghai（UTC+8）；修改服务管理方式不改写历史时间或现有数据。单进程调试仍可使用 `bash run.sh single`，调试前先停止 systemd 服务，避免双调度器。
 
 ### PostgreSQL 18.1 兼容性测试
 
-当前 WSL 已运行用户本地的 `postgres:18.1` 镜像，容器为 `wfs-postgres18-test`。数据库连接为 `127.0.0.1:15432`，数据库/用户为 `wfstest`，schema 为 `wfs`；数据卷为 `wfs-postgres18-test-data`，挂载到 PostgreSQL 18 的 `/var/lib/postgresql`。密码和配置保存在 Git 忽略的 `.env.postgres.local` 与 `.wfs-secrets/`，管理员登录沿用原本地账户。
+本机 PostgreSQL 兼容性测试使用 `postgres:18.1` 镜像，容器为 `wfs-postgres18-test`。数据库连接为 `127.0.0.1:15432`，数据库/用户为 `wfstest`，schema 为 `wfs`；数据卷为 `wfs-postgres18-test-data`，挂载到 PostgreSQL 18 的 `/var/lib/postgresql`。密码和配置保存在 Git 忽略的 `.env.postgres.local` 与 `.wfs-secrets/`，管理员登录沿用原本地账户。
 
 首次配置需要 WSL 中可用的 Docker 镜像、Python 环境，以及 `odbc-postgresql`、`libodbc2`、`unixodbc`。已有配置可以直接从启动数据库开始：
 
@@ -163,14 +150,15 @@ bash scripts/start_postgres_test.sh
 bash scripts/postgres_test_env.sh scripts/prepare_postgres_test.py
 bash scripts/postgres_test_env.sh scripts/accept_postgres_test.py
 
-# 切换 Web 和 Scheduler 到 PostgreSQL 测试库
-bash scripts/local_service.sh stop
-bash scripts/local_service.sh start .env.postgres.local
+# 安装/同步 systemd 用户服务，使用原 PostgreSQL 测试配置
+systemctl --user stop wfs-local.service wfs-local-scheduler.service
+python3 scripts/install_systemd.py --scope user --project "$PWD" \
+  --environment-file "$PWD/.env.postgres.local" --install --start
 ```
 
 项目回归检查建议使用 `bash scripts/postgres_test_env.sh scripts/accept_postgres_isolated.py`。它为每次检查新建临时 schema，应用全部迁移，验证真实 ODBC、事务、行锁、执行写入、并发汇总和归档，结束后移除该临时 schema；不会改动正在运行页面使用的 `wfs` 数据。
 
-测试库表结构由当前 `ddl.sql` 和全部编号迁移维护，初始化脚本会显示实际表清单。页面地址仍为 <http://127.0.0.1:18008/>。原 SQLite 数据库保留，两种配置使用独立执行数据目录；恢复 SQLite 时先停止服务，再执行 `bash scripts/local_service.sh start`。该切换不会迁移两种数据库中的数据。
+测试库表结构由当前 `ddl.sql` 和全部编号迁移维护，初始化脚本会显示实际表清单。页面地址仍为 <http://127.0.0.1:18008/>。原 SQLite 数据库保留，两种配置使用独立执行数据目录；恢复 SQLite 时先停止两项用户服务，再以 `.env.local` 重新运行 systemd 安装器。该切换不会迁移两种数据库中的数据。
 
 可选容量测试：`bash scripts/postgres_test_env.sh scripts/benchmark_postgres_history.py`。它只允许指定本地测试环境，生成 200 万条标记为 `postgres-volume-test` 的合成日志，并写出 `data/postgres-history-benchmark.json`；这些记录会保留供页面查询，数据库约占 1.7 GB。测试衡量本机 SQL 查询与索引计划，不能代表实际业务日志大小、并发压力或生产 GaussDB 性能。
 
@@ -271,24 +259,25 @@ GitLab 任务发布保留完整项目的多层目录和子目录 Python 入口�
 
 任务业务库使用 `app/common/db/` 工厂和适配器，兼容入口为 `app.common.database.NewDB`。业务数据库配置与平台数据库分开；特殊驱动放在任务环境中。
 
-## Linux 生产发布
+## Linux 生产发布（systemd）
 
-服务使用专用 `wfs` 用户，代码通过 `/data/wfs/current` 指向独立版本目录。先创建用户、配置 `/etc/wfs/wfs.env`、准备 GaussDB 表和 HTTPS 代理，将两个 `.service` 文件安装到 `/etc/systemd/system/` 后运行 `systemctl daemon-reload`。本轮验证使用 Linux x86_64、Python 3.12；发布安装 `requirements-linux-py312.lock`。服务器还需 Node/npm、ODBC 运行库、Git、curl 和 flock。
+以 [systemd 部署手册](docs/systemd-deployment.md) 为正式步骤。使用专用 wfs 用户、固定生产配置、GaussDB/DWS 和私有 PyPI，平台版本与共享数据分开。
 
 ```bash
-# 在源代码 checkout 中，发布已经提交的版本
-sudo bash scripts/deploy_release.sh <commit-or-ref>
-sudo systemctl enable wfs-scheduler wfs
-sudo journalctl -u wfs -u wfs-scheduler -f
+# 先切到审批提交；准备阶段不改动生产数据库或当前服务
+APP_SHA="$(git rev-parse HEAD)"
+sudo env PIP_CONFIG_FILE=/etc/wfs/pip.conf WFS_DEPLOY_PYTHON=/usr/bin/python3.12 \
+  bash scripts/deploy_release.sh --prepare "$APP_SHA"
+sudo python3 scripts/install_systemd.py --install
+
+# 在维护窗口等任务结束，停服并完成配套备份，再激活
+sudo systemctl stop wfs.service wfs-scheduler.service
+sudo bash scripts/deploy_release.sh --activate "$APP_SHA"
+sudo systemctl enable wfs-scheduler.service wfs.service
+sudo journalctl -u wfs.service -u wfs-scheduler.service -f
 ```
 
-发布脚本加锁，导出指定提交到 `/data/wfs/releases/<sha>`，只安装平台依赖，执行测试、前端构建、数据库迁移和旧任务迁移检查，再原子切换 current 并重启服务。健康检查失败时恢复旧版本链接。已存在的版本目录不覆盖，以便检查失败产物。初次迁移旧目录时应先备份并移开现有 current 普通目录。
-
-自定义部署根目录时，必须同步修改两个 systemd 文件中的路径。ODBC 配置由脚本改为当前 release 的绝对路径。生产服务的 Scheduler 始终保持单 worker；不要横向扩容调度器。
-
-执行日志、运行状态、指标统一放在 `/data/wfs/shared/data`，服务日志放在 `shared/logs`，发布不切换数据目录。代码归 root:wfs 所有，服务不能修改代码；业务文件请写入 `WFS_DATA_DIR` 或明确的外部目录。旧版本 `current/data` 有数据时，发布会要求先停服务、备份并迁移到 `shared/data`，避免自动复制正在写入的数据。
-
-平台版本由运维发布流程管理，不在业务页面连接 Git 或升级服务。平台自身与业务任务的发布和回滚分开，详见[平台与业务任务投产](docs/platform-releases.md)。
+脚本要求两项服务停止后才迁移数据库，成功后原子切换 current 并等待两个 ready 接口通过。失败只尝试回退代码，不撤销迁移；旧任务、共享配置、依赖环境和输出保留。禁止在运行 release 中 git pull，不使用 Scheduler 热重载或额外副本。任务日常投产走 GitLab 任务列表，详见[平台与业务任务分别投产](docs/platform-releases.md)。
 
 ## 验证与开发
 
@@ -361,7 +350,7 @@ Vite 开发服务默认 5173，API 代理默认 8008；使用 WSL 18008 时相�
 
 通知最多 2 个后台消费者、100 条待发记录，网关超时 10 秒；满队列会记录错误，执行结果仍保留。通知队列本身不跨重启持久化。短信需设置 `WFS_SMS_USERNAME/PASSWORD`，可用 `WFS_SMS_HOST/PORT` 覆盖网关；邮件可用 `WFS_SMTP_HOST/PORT/SENDER` 配置。需在实际业务通道验收。
 
-本地一致备份：先停止服务，备份文件必须在 data 外，且不会覆盖旧备份：
+以下为 SQLite 开发库的一致备份，仅在使用 .env.local 时适用；当前本机 PostgreSQL 的配套备份见 [systemd 手册](docs/systemd-deployment.md#7-本机-wsl用户级-systemd)。先停止服务，备份文件必须在 data 外且不覆盖旧备份：
 
 两种备份工具还会归档任务版本代码、独立依赖环境和 `task-data` 业务输出。使用自定义 `WFS_TASK_RELEASE_DIR` 时加 `--releases <版本目录>`；恢复后将 `data/task-packages` 复制回原版本目录。恢复跨机器时需验证 Python、操作系统和架构兼容。详见 [任务包备份说明](docs/task-packages.md)。
 
