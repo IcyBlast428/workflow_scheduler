@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
-  testIgnore: ['gitlab-updates.spec.js'],
+  testIgnore: ['gitlab-updates.spec.js', 'gitlab-tasks.spec.js'],
   workers: 1,
   timeout: 45000,
   expect: { timeout: 15000 },

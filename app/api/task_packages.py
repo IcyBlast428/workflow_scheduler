@@ -12,7 +12,11 @@ BASE = '/api/taskinfo/packages'
 
 @blueprint.before_request
 def guard_and_forward():
+    if request.path == BASE + '/upload':
+        return error_msg('ZIP 上传已移除，请在任务列表通过 GitLab 发布代码。'), 410
     if request.method not in ('GET', 'HEAD'):
+        if request.content_length is None or request.content_length > 100000:
+            return error_msg('请求内容过大。'), 413
         allowed = {name.strip() for name in os.environ.get('WFS_TASK_PUBLISHERS', '').split(',') if name.strip()}
         if allowed and g.identity['username'] not in allowed:
             return error_msg('此账户未获得任务发布权限。'), 403
@@ -22,13 +26,7 @@ def guard_and_forward():
     g.audit_forwarded = True
     headers = _internal_auth_headers()
     arguments = {'params': request.args, 'timeout': 60}
-    if request.mimetype == 'multipart/form-data':
-        maximum = packages.limits()['upload_bytes'] + 1024 * 1024
-        if request.content_length is None or request.content_length > maximum:
-            return error_msg('任务包超过上传限制或缺少大小信息。'), 413
-        headers['Content-Type'] = request.headers['Content-Type']
-        arguments['data'] = request.get_data()
-    elif request.method not in ('GET', 'HEAD'):
+    if request.method not in ('GET', 'HEAD'):
         arguments['json'] = request.get_json(silent=True)
     try:
         response = requests.request(request.method, urljoin(WFS_SCHEDULER_CONTROL_URL.rstrip('/') + '/', request.path.lstrip('/')),
@@ -57,6 +55,7 @@ def index():
 def example_package():
     import io
     import zipfile
+    import json
     from pathlib import Path
     examples = {'outputs': 'file_output', 'nested': 'nested_report'}
     kind = request.args.get('kind', 'outputs')
@@ -65,6 +64,7 @@ def example_package():
     root = Path(__file__).resolve().parents[2] / 'examples/tasks' / examples[kind]
     result = io.BytesIO()
     with zipfile.ZipFile(result, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('.wfs-task.json', json.dumps({'task_id': 'example_' + kind, 'task_name': '示例任务（请修改编号与名称）', 'main_file': 'main.py'}, ensure_ascii=False, indent=2))
         for path in sorted(root.rglob('*')):
             if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts:
                 archive.write(path, path.relative_to(root).as_posix())
@@ -92,16 +92,30 @@ def _audit(action, pid, version=''):
 
 @blueprint.post(BASE + '/upload')
 def upload():
-    maximum = packages.limits()['upload_bytes']
-    if request.content_length is None or request.content_length > maximum + 1024 * 1024:
-        raise packages.PackageError('任务包超过上传大小限制。', 413)
-    package = request.files.get('package')
-    if not package or not package.filename.lower().endswith('.zip'):
-        raise packages.PackageError('请选择 ZIP 任务包。')
-    blob = package.stream.read(maximum + 1)
-    data = packages.stage(blob, request.form.to_dict(), g.identity['username'])
-    _audit('upload', data['pid'], data['version'])
-    return success_msg(data)
+    return error_msg('ZIP 上传已移除，请在任务列表通过 GitLab 发布代码。'), 410
+
+
+@blueprint.route(BASE + '/gitlab', methods=['GET', 'POST'])
+def gitlab_tasks():
+    from app.bootstrap import gitlab_tasks as tasks
+    from app.bootstrap.gitlab_updates import GitLabError
+    try:
+        if request.method == 'GET':
+            return success_msg(tasks.changes())
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            raise packages.PackageError('请求内容必须为对象。')
+        actor = g.identity['username']
+        if body.get('action') == 'stage':
+            result = tasks.stage(body.get('id'), actor)
+        elif body.get('action') == 'delete':
+            result = tasks.remove(body.get('id'), actor)
+        else:
+            raise packages.PackageError('无效的 GitLab 任务操作。')
+        _audit('gitlab_' + body['action'], result['pid'], result.get('version', ''))
+        return success_msg(result)
+    except GitLabError as exc:
+        return error_msg(str(exc)), exc.status
 
 
 @blueprint.post(BASE + '/action')
@@ -113,7 +127,7 @@ def action():
     version = body.get('version', '')
     actor = g.identity['username']
     if action == 'import':
-        raise packages.PackageError('Git 任务导入入口已停用，请上传任务包。旧任务请使用一次性迁移工具。', 410)
+        raise packages.PackageError('旧导入入口已停用，请在任务列表通过 GitLab 发布。', 410)
     elif action == 'prepare':
         result = packages.prepare(pid, version, body.get('main_file', ''))
     elif action in ('publish', 'rollback', 'trash', 'restore'):

@@ -74,7 +74,7 @@
           </div>
           <p class="hint">
             Nexus
-            模式只使用此索引，并自动解析间接依赖；离线模式要求所有依赖精确锁定并上传
+            模式只使用此索引，并自动解析间接依赖；离线模式要求所有依赖精确锁定，并在 GitLab 任务目录内提供
             wheels。两种模式均安装匹配当前 Python / 系统的 wheel。
           </p>
           <button class="btn primary">

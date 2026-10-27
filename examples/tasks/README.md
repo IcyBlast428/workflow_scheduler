@@ -1,8 +1,8 @@
 # 任务编写示例
 
-任务发布页从 catalog.json 和这里的源码生成初始示例，管理员的后续编辑独立持久化，不会改写仓库默认文件。每个子目录的 `main.py` 是独立示例入口，不是一个需要整体上传的任务。
+「任务示例」页从 catalog.json 和这里的源码生成初始示例，管理员后续编辑独立持久化。每个子目录是独立示例；复制到 GitLab 的 `app/jobs/<分类>/<任务>`，添加稳定任务身份文件并合并到目标分支，再在任务列表审查发布。ZIP 仅用于下载完整示例，平台已移除上传入口。
 
-- `hello/`：标准库入门，上传 ZIP 根目录的 main.py 即可，无需依赖文件。
+- `hello/`：标准库入门，将 main.py 放在任务根目录，无需依赖文件。
 - `database_query/`：通过 `NewDB('mysql_orders')` 查询。需要管理员配置业务连接，准备 `orders(id, status)` 表；只有 SELECT 1 的连通性检查不需要业务表。
 - `database_transaction/`：演示表 `task_demo_items(id 主键, status)` 上的事务批量更新。先在演示业务库插入 id=1、2 且 status='pending' 的两行。失败时自动回滚，重复运行不会再次更新已完成的两行。
 - `file_output/`：CSV 输出到 `WFS_TASK_DATA_DIR`，并发执行使用独立文件名。

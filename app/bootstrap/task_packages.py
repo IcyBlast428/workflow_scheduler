@@ -533,6 +533,9 @@ def _prepare_worker(pid, version, token):
 def publish(pid, version, revision, actor, rollback=False):
     from app.bootstrap.core import _configuration_lock, aps_start
     from app.bootstrap.schedule_config import load_schedule
+    if not rollback:
+        from app.bootstrap.gitlab_tasks import validate_release
+        validate_release(release(pid, version))
     with _configuration_lock:
         record, data = task(pid), release(pid, version)
         if record['revision'] != revision or record.get('deleted_at') or record.get('pending'):
@@ -559,6 +562,13 @@ def publish(pid, version, revision, actor, rollback=False):
         record['pending'] = {'previous': previous, 'version': version, 'actor': actor}
         record['active_version'] = version
         record['legacy'] = False
+        if data.get('git_source'):
+            record['git_source'] = data['git_source']
+            record.update(group_name=data['git_source']['group_name'], folder_name=data['git_source']['folder_name'])
+        elif record.get('git_source'):
+            # A historical pre-GitLab rollback keeps the repository association,
+            # but cannot claim the newer commit's content is still deployed.
+            record['git_source'] = {**record['git_source'], 'sha': '', 'fingerprint': ''}
         record = _write_task(record, expected=revision)
         try:
             aps_start(task_pid=pid, action='refresh')

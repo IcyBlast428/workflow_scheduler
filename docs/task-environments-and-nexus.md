@@ -10,7 +10,7 @@
 
 ## Nexus 配置与使用
 
-管理员在“任务发布 → 任务依赖仓库”选择 Nexus 并保存：
+管理员在独立导航“依赖仓库”选择 Nexus 并保存：
 
 ```text
 安装方式：Nexus 私有仓库
@@ -38,7 +38,7 @@ cryptography==50.0.2
 PyMySQL==1.1.0
 ```
 
-完整流程：上传 ZIP → 查看文件 → 检查依赖环境 → 创建版本虚拟环境 → 从 Nexus 安装直接和间接依赖 → pip check → 记录 dependencies.lock.txt → 发布 → 手动执行确认 → 启用调度。准备阶段不会运行任务入口，失败的版本不能发布。依赖准备的状态和阶段在版本预览中显示，详细错误在版本目录 prepare.log 中。
+完整流程：代码合并到 GitLab 目标分支 → 任务列表审查变更 → 获取指定提交 → 查看文件差异 → 检查依赖环境 → 创建版本虚拟环境 → 从 Nexus 安装依赖 → pip check → 记录 dependencies.lock.txt → 确认发布 → 手动执行验证 → 启用调度。准备阶段不会运行任务入口，失败版本不能发布。详细错误保存在版本目录 prepare.log 中。
 
 Nexus 模式使用一个索引，不设置额外公共索引，不读取服务主机已有的 pip 配置，避免已有 extra-index 设置混入公共源。[pip 文档](https://pip.pypa.io/en/stable/cli/pip_install/)说明 extra-index 可能造成同名依赖选择问题。HTTP 仓库仅针对配置主机添加 pip trusted-host；HTTPS 保持证书校验，可配置内部 CA。
 

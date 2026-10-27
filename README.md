@@ -74,7 +74,7 @@ MySQL 的显式平台写事务先锁定 `wfs_platform_lock` 中的单行，以�
 
 ## 任务入门与部署选型
 
-任务发布页可展开“任务编写示例”，查看高亮代码、复制或下载；管理员可以编辑既有示例或新增示例类型，选择 Python / SQL / Shell / JSON / 纯文本。初始内容来自 [examples/tasks](examples/tasks/README.md)，编辑内容保存在共享 `WFS_DATA_DIR/task-publishing.sqlite3`，重启与前端重新构建后保留。示例更新有版本冲突检查，不会执行管理员填写的代码；普通用户不能访问维护接口。
+“任务示例”页提供“任务编写示例”，查看高亮代码、复制或下载；管理员可以编辑既有示例或新增示例类型，选择 Python / SQL / Shell / JSON / 纯文本。初始内容来自 [examples/tasks](examples/tasks/README.md)，编辑内容保存在共享 `WFS_DATA_DIR/task-publishing.sqlite3`，重启与前端重新构建后保留。示例更新有版本冲突检查，不会执行管理员填写的代码；普通用户不能访问维护接口。
 
 同页的“任务依赖仓库”可选择 Nexus 或离线安装。预填生产仓库为 `http://nexus.immp.icbc/repository/pypi-hosted/simple/`，无需认证；初次部署保持离线模式，管理员保存选择后，新版本检查依赖时生效。Nexus 模式自动解析间接依赖，支持标准版本约束和环境标记，建议直接依赖固定版本；离线模式继续要求所有依赖精确锁定并提供 wheel。详细流程见[任务环境与 Nexus](docs/task-environments-and-nexus.md)。
 
@@ -178,7 +178,7 @@ bash scripts/local_service.sh start .env.postgres.local
 
 ## 复杂项目与输出文件
 
-任务发布支持完整项目 ZIP、多层目录和子目录 Python 入口，可选择保留目录或移除一层外目录。已发布任务以包根目录为工作目录，支持 Python 包相对导入及 src/ 布局。任务输出写入每次执行独立的 `WFS_OUTPUT_DIR`，在「查看执行 → 输出文件」中预览 CSV、JSON、日志并下载；长期检查点仍使用 `WFS_TASK_DATA_DIR`。使用方法与限制见[复杂项目与输出文件](docs/task-outputs-and-projects.md)。
+GitLab 任务发布保留完整项目的多层目录和子目录 Python 入口。已发布任务以包根目录为工作目录，支持 Python 包相对导入及 src/ 布局。任务输出写入每次执行独立的 `WFS_OUTPUT_DIR`，在「查看执行 → 输出文件」中预览 CSV、JSON、日志并下载；长期检查点仍使用 `WFS_TASK_DATA_DIR`。使用方法与限制见[复杂项目与输出文件](docs/task-outputs-and-projects.md)。
 
 ## 任务与调度
 
@@ -190,9 +190,9 @@ bash scripts/local_service.sh start .env.postgres.local
 
 任务目录中的配置文件也属于可读范围；平台凭据配置继续存放于任务目录外的环境配置或密钥配置中。
 
-业务任务仅通过「任务发布」上传完整 ZIP、检查独立依赖环境并确认发布。任务编号由平台生成，代码与环境保存在共享 `WFS_DATA_DIR/task-packages` 中，独立于平台版本目录。修改或新增 `app/jobs` 文件不会新增或更新运行任务。
+业务任务通过 GitLab 管理源码：目标分支合并后，「任务列表」自动标记新建、更新和删除，管理员审查差异、检查依赖后确认发布。新任务在列表首页以绿色卡片置顶。ZIP 上传已移除；导航中的「任务示例」保留示例维护与下载，「依赖仓库」独立配置私有 PyPI。任务使用稳定编号，代码与独立环境保存在共享 `WFS_DATA_DIR/task-packages`，不直接运行 Git 工作区。
 
-旧目录任务需在停服窗口通过 [一次性迁移工具](docs/platform-releases.md#旧任务的一次性迁移) 转为发布版本，保留编号、配置和历史记录；在线 Git 导入、目录同步、全量重载和版本检查入口均已停用。
+旧目录任务需在停服窗口通过 [一次性迁移工具](docs/platform-releases.md#旧任务的一次性迁移) 转为发布版本，保留编号、配置和历史。GitLab 接入使用相同稳定编号或绑定目录；确认发布后自动记录来源。每次发布读取固定提交并创建新版本，不在旧目录执行 Git 更新或清理；额外输出文件不会阻碍更新/删除，也不会丢失。详见 [GitLab 任务发布](docs/task-packages.md)。
 
 在任务列表配置入口、展示名称、并发、超时和调度。配置保存在 `wfs_task_config`；支持每分钟/小时、每 N 分钟/小时、每日/周/月、每天多个时间点、月末、单次、时间窗口及高级 Cron。interval 首轮注册会随机错峰，错峰不写入数据库。
 
@@ -376,6 +376,6 @@ bash scripts/local_service.sh start
 
 ### 任务代码发布
 
-新增「任务发布」页面，支持多文件 ZIP 上传、只读差异预览、离线依赖检查、发布、代码回滚和回收站。旧目录任务通过停服迁移工具保留编号转为发布版本，现有调度配置和日志延续使用。部署前应用 `007_task_packages.sql`；操作方式、离线依赖和数据目录见 [任务包管理说明](docs/task-packages.md)。
+任务列表提供 GitLab 新增、更新和删除审查，支持只读差异、依赖检查、发布、代码回滚和回收站。旧目录任务通过停服迁移工具保留编号转为发布版本，现有调度配置和日志延续使用。部署前应用 `007_task_packages.sql`；操作方式、离线依赖和数据目录见 [任务包管理说明](docs/task-packages.md)。
 
 任务详情新增「执行流程」，可离线分析 Python 分支、循环和本地函数调用，展开跨文件流程并定位源码。使用方式与分析边界见 [任务执行流程说明](docs/task-flow.md)。

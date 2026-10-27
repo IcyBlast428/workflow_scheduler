@@ -10,8 +10,7 @@ test('publishing guide provides executable examples, downloads and mobile layout
   await page.getByRole('button', { name: '登录', exact: true }).click();
   const guide = page.locator('.task-guide');
   await expect(guide).toBeVisible();
-  await expect(guide).not.toHaveAttribute('open', '');
-  await guide.locator('summary').click();
+  await expect(guide).toHaveAttribute('open', '');
   const code = guide.getByLabel('示例代码', { exact: true });
   await expect(code).toContainText("if __name__ == '__main__':");
   await expect(code.locator('.hljs-keyword').first()).toBeVisible();
@@ -61,7 +60,6 @@ test('administrators maintain highlighted examples and Nexus settings across rel
   await page.getByLabel('密码').fill('browser-test-password');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   const guide = page.locator('.task-guide');
-  await guide.locator('summary').click();
   await guide
     .getByRole('button', { name: '新增示例类型', exact: true })
     .click();
@@ -88,7 +86,7 @@ test('administrators maintain highlighted examples and Nexus settings across rel
     'EDITED_EXAMPLE',
   );
   const repository = page.locator('.repository-settings');
-  await repository.locator('summary').click();
+  await page.getByRole('button', { name:'依赖仓库', exact:true }).click();
   await repository
     .getByLabel('依赖安装方式', { exact: true })
     .selectOption('nexus');
@@ -100,14 +98,14 @@ test('administrators maintain highlighted examples and Nexus settings across rel
     .click();
   await expect(repository.getByRole('status')).toContainText('仓库设置已保存');
   await page.reload();
-  await guide.locator('summary').click();
+  await page.getByRole('button', { name:'任务示例', exact:true }).click();
   await guide
     .getByRole('button', { name: '浏览器新增示例', exact: true })
     .click();
   await expect(guide.getByLabel('示例代码', { exact: true })).toContainText(
     'EDITED_EXAMPLE',
   );
-  await repository.locator('summary').click();
+  await page.getByRole('button', { name:'依赖仓库', exact:true }).click();
   await expect(
     repository.getByLabel('依赖安装方式', { exact: true }),
   ).toHaveValue('nexus');

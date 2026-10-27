@@ -41,6 +41,8 @@ class Fixture:
             return [{'name': 'main', 'commit': {'id': B}}, {'name': 'feature/report', 'commit': {'id': self.head}}], {}
         if suffix == '/repository/merge_base':
             return {'id': self.ancestor}, {}
+        if suffix == '/repository/tree':
+            return [], {}
         if suffix == '/repository/compare':
             return {'diffs': [changed('frontend/src/report.vue'), changed('app/jobs/team/report/main.py'),
                               changed('app/common/report.py'), changed('app/bootstrap/moved.py', 'app/jobs/team/report/helper.py', renamed_file=True)],
@@ -153,7 +155,7 @@ class GitLabTests(unittest.TestCase):
         self.config(platform_commit='', tasks=[])
         result = self.run_scan()
         self.assertEqual(len(result['items']), 1)
-        self.assertTrue(any('尚未绑定任务' in message for message in result['warnings']))
+        self.assertTrue(any('任务列表查看' in message for message in result['warnings']))
         self.assertTrue(any('尚未确认平台' in message for message in result['warnings']))
 
     def test_timeout_and_truncated_text_are_explicit(self):

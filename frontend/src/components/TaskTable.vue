@@ -24,7 +24,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="row.id">
+        <tr v-for="row in rows" :key="row.id" :class="change(row.id) ? 'gitlab-row-' + change(row.id).kind : ''">
           <td class="task-name-cell">
             <div class="task-identity">
               <input
@@ -43,6 +43,7 @@
                   {{ row.name }}
                 </button>
                 <div class="mono muted clip" :title="row.id">{{ row.id }}</div>
+                <button v-if="canManage && change(row.id)" class="task-change-badge tag" :class="change(row.id).kind === 'delete' ? 'danger' : 'warning'" @click="$emit('release', row.id)">{{ change(row.id).kind === 'delete' ? 'GitLab 已删除 · 确认删除' : 'GitLab 有更新 · 审查发布' }}</button>
                 <div
                   v-if="row.config_error"
                   class="muted clip"
@@ -108,6 +109,7 @@
                 手动执行
               </button>
               <ActionMenu>
+                <button v-if="canManage" class="btn" @click="$emit('release', row.id)">代码版本</button>
                 <button
                   v-if="canOperate && canStart(row)"
                   class="btn"
@@ -181,7 +183,7 @@
 <script setup>
 import ActionMenu from './ActionMenu.vue';
 import { canTrigger, exitLabel, exitClass } from '../executionLabels';
-defineProps({
+const props = defineProps({
   rows: { type: Array, required: true },
   favorites: { type: Array, default: () => [] },
   selected: { type: Array, default: () => [] },
@@ -189,7 +191,9 @@ defineProps({
   pendingActions: { type: Object, default: () => ({}) },
   canOperate: { type: Boolean, default: true },
   canManage: { type: Boolean, default: true },
+  gitlabChanges: { type: Array, default: () => [] },
 });
+const change = pid => props.gitlabChanges.find(item => item.pid === pid && item.kind !== 'new');
 
 defineEmits([
   'action',
@@ -201,6 +205,7 @@ defineEmits([
   'favorite',
   'select',
   'execution',
+  'release',
 ]);
 
 function stateText(row) {
@@ -274,3 +279,6 @@ function callTaskTitle(row) {
   return '立即执行一次任务';
 }
 </script>
+<style scoped>
+.gitlab-row-update{background:#d4a54b0a}.gitlab-row-delete{background:#d45c5c0b}.gitlab-row-update .task-name-cell{box-shadow:inset 3px 0 #c5a164}.gitlab-row-delete .task-name-cell{box-shadow:inset 3px 0 #bc6969}.task-change-badge{margin-top:8px;cursor:pointer;text-align:left;white-space:normal;font:inherit;font-size:12px;border:1px solid currentColor}
+</style>

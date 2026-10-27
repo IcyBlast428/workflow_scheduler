@@ -1,6 +1,6 @@
 {
   "index.html": {
-    "file": "static/index-B8xB5Flc.js",
+    "file": "static/index-CJfZ_eU-.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -8,15 +8,17 @@
       "src/components/AdminPanel.vue",
       "src/components/DatabaseConnections.vue",
       "src/components/GitlabUpdates.vue",
-      "src/components/TaskPackageManager.vue",
+      "src/components/TaskExamples.vue",
+      "src/components/TaskReleaseDialog.vue",
+      "src/components/PackageRepositorySettings.vue",
       "src/components/ExecutionMatrix.vue"
     ],
     "css": [
-      "static/index-Cjq17-Qx.css"
+      "static/index-BxzVQ5Xu.css"
     ]
   },
   "src/components/AdminPanel.vue": {
-    "file": "static/AdminPanel-BLJ32Nni.js",
+    "file": "static/AdminPanel-D6DUiQBO.js",
     "name": "AdminPanel",
     "src": "src/components/AdminPanel.vue",
     "isDynamicEntry": true,
@@ -25,7 +27,7 @@
     ]
   },
   "src/components/DatabaseConnections.vue": {
-    "file": "static/DatabaseConnections-BAsUoeIf.js",
+    "file": "static/DatabaseConnections-GfmgX1go.js",
     "name": "DatabaseConnections",
     "src": "src/components/DatabaseConnections.vue",
     "isDynamicEntry": true,
@@ -37,7 +39,7 @@
     ]
   },
   "src/components/ExecutionMatrix.vue": {
-    "file": "static/ExecutionMatrix-CHgYvXcC.js",
+    "file": "static/ExecutionMatrix-XDP6eyj1.js",
     "name": "ExecutionMatrix",
     "src": "src/components/ExecutionMatrix.vue",
     "isDynamicEntry": true,
@@ -49,7 +51,7 @@
     ]
   },
   "src/components/GitlabUpdates.vue": {
-    "file": "static/GitlabUpdates-BvdtQSP0.js",
+    "file": "static/GitlabUpdates-C3vsnff-.js",
     "name": "GitlabUpdates",
     "src": "src/components/GitlabUpdates.vue",
     "isDynamicEntry": true,
@@ -57,19 +59,43 @@
       "index.html"
     ],
     "css": [
-      "static/GitlabUpdates-D056CZfC.css"
+      "static/GitlabUpdates-BPI5Sanr.css"
     ]
   },
-  "src/components/TaskPackageManager.vue": {
-    "file": "static/TaskPackageManager-CM0deeRf.js",
-    "name": "TaskPackageManager",
-    "src": "src/components/TaskPackageManager.vue",
+  "src/components/PackageRepositorySettings.vue": {
+    "file": "static/PackageRepositorySettings-pXwIaV7M.js",
+    "name": "PackageRepositorySettings",
+    "src": "src/components/PackageRepositorySettings.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
     ],
     "css": [
-      "static/TaskPackageManager-B9ynA-bj.css"
+      "static/PackageRepositorySettings-CZwhZpbl.css"
+    ]
+  },
+  "src/components/TaskExamples.vue": {
+    "file": "static/TaskExamples-YO9BZTdz.js",
+    "name": "TaskExamples",
+    "src": "src/components/TaskExamples.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html"
+    ],
+    "css": [
+      "static/TaskExamples-Cz7gRg9z.css"
+    ]
+  },
+  "src/components/TaskReleaseDialog.vue": {
+    "file": "static/TaskReleaseDialog-K7sDDTqn.js",
+    "name": "TaskReleaseDialog",
+    "src": "src/components/TaskReleaseDialog.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html"
+    ],
+    "css": [
+      "static/TaskReleaseDialog-DOXmzl1J.css"
     ]
   }
 }

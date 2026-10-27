@@ -15,7 +15,7 @@ for (const username of ['browser-viewer','browser-operator']) {
     await expect(page.locator('.app-shell')).toBeVisible();
     await expect(page).toHaveURL(/\/viewer\/#tasks/);
     await expect(page.getByRole('navigation').getByRole('button')).toHaveCount(3);
-    for (const label of ['数据库连接','账户与审计','任务发布','总览','平台事件','手动执行','检查更新','批量暂停调度'])
+    for (const label of ['数据库连接','账户与审计','任务示例','依赖仓库','总览','平台事件','手动执行','检查更新','批量暂停调度'])
       await expect(page.getByRole('button', {name:label,exact:true})).toHaveCount(0);
     const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
     await row.getByRole('button', {name:'更多',exact:true}).click();

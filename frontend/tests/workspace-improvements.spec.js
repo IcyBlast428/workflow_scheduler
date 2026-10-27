@@ -64,7 +64,7 @@ test('extracted and lazy pages remain navigable without script errors', async ({
   await login(page);
   for (const [name, selector] of [
     ['任务列表', '.task-table'], ['执行记录', '.log-shortcuts'],
-    ['平台事件', '#system-log-id'], ['任务发布', '.package-panel'],
+    ['平台事件', '#system-log-id'], ['任务示例', '.task-examples'], ['依赖仓库', '.repository-settings'],
     ['账户与审计', '.admin-panel'], ['执行矩阵', '.matrix-summary'],
     ['总览', '.cpu-panel'],
   ]) {

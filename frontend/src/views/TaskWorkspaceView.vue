@@ -41,10 +41,11 @@
           type="button"
           @click="$emit('packages')"
         >
-          任务发布 / 新增
+          任务示例
         </button>
       </div>
     </div>
+    <GitlabTaskChanges v-if="canManage" :first-page="tasks.params.currentPage === 1" @state="gitlabChanges = $event.items" @open="$emit('release', $event)" @settings="$emit('gitlab')" />
     <form class="filter-grid" @submit.prevent="$emit('search')">
       <div class="form-row">
         <label for="taskid">任务 ID</label>
@@ -143,7 +144,7 @@
         tasks.loading
           ? '正在更新结果，请稍候。'
           : canManage
-            ? '可以清空筛选条件，或前往“任务发布”发布新任务。'
+            ? '可以清空筛选条件；GitLab 新任务会在首页提示发布。'
             : '可以清空筛选条件后重试。'
       }}</span>
     </div>
@@ -156,6 +157,8 @@
       :can-manage="canManage"
       :favorites="favorites"
       :selected="selectedTasks"
+      :gitlab-changes="gitlabChanges"
+      @release="$emit('release', $event)"
       @favorite="$emit('favorite', $event)"
       @select="$emit('select', $event)"
       @detail="$emit('detail', $event.id)"
@@ -176,7 +179,8 @@
   </section>
 </template>
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import GitlabTaskChanges from '../components/GitlabTaskChanges.vue';
 import TaskTable from '../components/TaskTable.vue';
 import LoadingStatus from '../components/LoadingStatus.vue';
 import Pagination from '../components/Pagination.vue';
@@ -199,6 +203,8 @@ defineEmits([
   'batch',
   'clear-selection',
   'packages',
+  'release',
+  'gitlab',
   'favorite',
   'select',
   'detail',
@@ -210,6 +216,7 @@ defineEmits([
   'log',
   'favorites-only',
 ]);
+const gitlabChanges = ref([]);
 const taskSummary = computed(() => ({
   running: props.tasks.items.filter((item) => item.state === 'true').length,
   pending: props.tasks.items.filter((item) => item.pending).length,

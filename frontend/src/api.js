@@ -103,7 +103,8 @@ export const api = {
   storage(keep) { return request('/api/admin/storage', {params:{keep},timeout:20000}); },
   packages(pid = '') { return request('/api/taskinfo/packages', { params: { pid } }); },
   packagePreview(pid, version, path) { return request('/api/taskinfo/packages/preview', { params: { pid, version, path } }); },
-  uploadPackage(formData) { return request('/api/taskinfo/packages/upload', { method: 'POST', formData, timeout: 65000 }); },
+  gitlabTasks() { return request('/api/taskinfo/packages/gitlab'); },
+  gitlabTaskAction(body) { return request('/api/taskinfo/packages/gitlab', { method: 'POST', body, timeout: 65000 }); },
   packageAction(body) { return request('/api/taskinfo/packages/action', { method: 'POST', body, timeout: 65000 }); },
   health() {
     return request('/api/user/health');

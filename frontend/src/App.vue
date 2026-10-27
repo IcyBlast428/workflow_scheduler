@@ -256,6 +256,8 @@
             :pending-actions="pendingActions"
             :can-manage="canManage"
             :can-operate="canOperate"
+            @release="openPackages"
+            @gitlab="switchView('gitlab')"
             @search="loadTasks(true)"
             @reset="resetTaskFilters"
             @page="setTaskPage"
@@ -293,12 +295,8 @@
         </template>
 
         <template v-else-if="view === 'packages' && canManage"
-          ><TaskPackageManager
-            :confirm="requestConfirm"
-            :initial-pid="packagePid"
-            @detail="detailPid = $event"
-            @changed="refreshPackageTasks"
-        /></template>
+          ><TaskExamples /></template>
+        <template v-else-if="view === 'repository' && canManage"><section class="panel"><div class="panel-head"><div><h2>依赖仓库</h2><p>配置任务独立环境使用的私有 PyPI 或离线依赖。</p></div></div><div class="panel-body"><PackageRepositorySettings open /></div></section></template>
         <template v-else-if="view === 'gitlab' && canManage"><GitlabUpdates @state="acceptGitlabState" /></template>
         <template v-else-if="view === 'admin' && canManage"
           ><AdminPanel
@@ -371,6 +369,7 @@
   </div>
 
   <ConfirmDialog :model-value="confirmState" @resolve="resolveConfirm" />
+  <TaskReleaseDialog v-if="packagePid && canManage" :pid="packagePid" :confirm="requestConfirm" @close="packagePid = ''" @changed="refreshPackageTasks" />
   <TaskDetailDialog
     :pid="detailPid"
     :can-manage="canManage"
@@ -446,9 +445,9 @@ const AdminPanel = defineAsyncComponent(
 );
 const DatabaseConnections = defineAsyncComponent(() => import('./components/DatabaseConnections.vue'));
 const GitlabUpdates = defineAsyncComponent(() => import('./components/GitlabUpdates.vue'));
-const TaskPackageManager = defineAsyncComponent(
-  () => import('./components/TaskPackageManager.vue'),
-);
+const TaskExamples = defineAsyncComponent(() => import('./components/TaskExamples.vue'));
+const TaskReleaseDialog = defineAsyncComponent(() => import('./components/TaskReleaseDialog.vue'));
+const PackageRepositorySettings = defineAsyncComponent(() => import('./components/PackageRepositorySettings.vue'));
 const ExecutionMatrix = defineAsyncComponent(
   () => import('./components/ExecutionMatrix.vue'),
 );
@@ -528,9 +527,15 @@ const navItems = [
   },
   {
     id: 'packages',
-    label: '任务发布',
+    label: '任务示例',
     iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 7v10l9 4 9-4V7', 'M12 11v10'],
-    description: '任务包上传、发布、版本回滚与回收站。',
+    description: '任务编写示例、完整项目与 GitLab 发布说明。',
+  },
+  {
+    id: 'repository',
+    label: '依赖仓库',
+    iconPaths: ['M4 5h16v5H4z','M4 14h16v5H4z','M8 7.5h.01','M8 16.5h.01','M12 10v4'],
+    description: '任务独立环境的私有 PyPI 与离线依赖设置。',
   },
   {
     id: 'admin',
@@ -834,6 +839,7 @@ async function handleLogout() {
   clearToken();
   token.value = '';
   user.roles = [];
+    packagePid.value = '';
   detailPid.value = '';
   executionRunId.value = '';
   scheduleDialog.open = false;
@@ -852,8 +858,8 @@ function switchView(nextView) {
 
 function openPackages(pid) {
   detailPid.value = '';
-  packagePid.value = pid;
-  switchView('packages');
+  if (pid) packagePid.value = pid;
+  else switchView('packages');
 }
 async function refreshPackageTasks() {
   await Promise.all([loadTasks(), loadGroups()]);

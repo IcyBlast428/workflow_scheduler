@@ -197,7 +197,7 @@ class Client:
         self.session.trust_env = False
         self.project = quote(config['project'], safe='')
 
-    def get(self, suffix='', params=None):
+    def get(self, suffix='', params=None, *, binary=False, maximum=4 * 1024**2):
         url = self.config['url'] + '/api/v4/projects/' + self.project + suffix
         headers = {'PRIVATE-TOKEN': self.config['token']} if self.config['token'] else {}
         try:
@@ -208,12 +208,16 @@ class Client:
                 if response.status_code != 200:
                     raise GitLabError(messages.get(response.status_code, 'GitLab 返回异常状态，请检查地址与服务。'), 502)
                 chunks, size = [], 0
+                deadline = time.monotonic() + 45
                 for block in response.iter_content(65536):
+                    if time.monotonic() > deadline:
+                        raise GitLabError('GitLab 响应读取超时，请稍后重试。', 502)
                     size += len(block)
-                    if size > 4 * 1024**2:
+                    if size > maximum:
                         raise GitLabError('GitLab 比对结果过大，请在 GitLab 中查看完整差异。', 502)
                     chunks.append(block)
-                return json.loads(b''.join(chunks)), response.headers
+                content = b''.join(chunks)
+                return (content if binary else json.loads(content)), response.headers
         except GitLabError:
             raise
         except requests.RequestException:
@@ -343,7 +347,14 @@ def scan(config, previous=None):
                 item = _item(config, web, 'branch', _safe_text(name, 300), target_sha, head, result)
                 if item:
                     items.append(item)
-        baselines = [('platform', config['platform_commit'], None)] + [('task', item['commit'], item) for item in config['tasks']]
+        task_baselines = {item['pid']: item for item in config['tasks']}
+        from app.bootstrap.gitlab_tasks import project_key
+        from app.bootstrap.task_packages import registry
+        for record in registry().values():
+            source = record.get('git_source') or {}
+            if not record.get('deleted_at') and source.get('project_key') == project_key(config):
+                task_baselines[record['pid']] = dict(pid=record['pid'], path=source['path'], commit=source.get('sha', ''))
+        baselines = [('platform', config['platform_commit'], None)] + [('task', item['commit'], item) for item in task_baselines.values()]
         for kind, base, task in baselines:
             if not base:
                 warnings.append('尚未确认平台已部署提交，仅检查平台待合并分支。' if kind == 'platform' else '任务 ' + task['pid'] + ' 尚未确认已发布提交。')
@@ -374,10 +385,17 @@ def scan(config, previous=None):
             except GitLabError as exc:
                 warnings.append(('平台' if task is None else '任务 ' + task['pid']) + '已部署基线比对失败：' + str(exc))
         if not config['tasks']:
-            warnings.append('尚未绑定任务已发布提交；任务只展示待合并差异，已合并的待发布更新需要配置基线。')
+            warnings.append('任务新增、修改与删除请在任务列表查看；旧任务首次接入可通过目录绑定确认编号。')
+        from app.bootstrap.gitlab_tasks import catalog
+        try:
+            task_catalog = catalog(client, config, target_sha, (previous or {}).get('task_catalog'))
+        except GitLabError as exc:
+            task_catalog = dict(complete=False, error=str(exc), tasks=[], sha=target_sha)
+        if not task_catalog['complete']:
+            warnings.append('任务目录检查未完成，已禁止发布和删除：' + task_catalog.get('error', '请重新检查。'))
         active_baselines = {base + '|' + target_sha for _, base, _ in baselines if base}
         return dict(items=items, comparisons=used, ancestry={key: val for key, val in ancestry.items() if key in active_baselines}, warnings=list(dict.fromkeys(warnings)), error='',
-                    checked_at=time.time(), revision=config['revision'], project_url=web, target_sha=target_sha)
+                    checked_at=time.time(), revision=config['revision'], project_url=web, target_sha=target_sha, task_catalog=task_catalog)
     except (KeyError, TypeError, AttributeError):
         raise GitLabError('GitLab 返回的数据缺少必要字段。', 502) from None
     finally:

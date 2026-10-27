@@ -280,8 +280,8 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(response.status_code,403)
         response = self.client.post(base+'/upload', headers=self.headers, data={'package':(io.BytesIO(archive({'main.py':'print(1)'})),'demo.zip'),
                                     'task_name':'Demo','group_name':'examples','folder_name':'api'})
-        self.assertEqual(response.status_code,200,response.json)
-        data = response.json['data']
+        self.assertEqual(response.status_code,410,response.json)
+        data = self.new(folder='api')
         download = self.client.get(base+'/download',query_string={'pid':data['pid'],'version':data['version']})
         self.assertEqual(download.status_code,200)
         self.assertIn('main.py',zipfile.ZipFile(io.BytesIO(download.data)).namelist())
@@ -293,10 +293,9 @@ class PackageTests(unittest.TestCase):
             proxy.return_value.headers = {'Content-Type':'application/json'}
             proxy.return_value.json.return_value = {'code':20000,'data':{}}
             proxy.return_value.status_code = 200
-            response = self.client.post(base+'/upload',headers=self.headers,data={'package':(io.BytesIO(archive({'main.py':'print(2)'})),'demo.zip')})
+            response = self.client.post(base+'/gitlab',headers=self.headers,json={'action':'stage','id':'candidate'})
             self.assertEqual(response.status_code,200)
-            self.assertIn(b'PK',proxy.call_args.kwargs['data'])
-            self.assertIn('multipart/form-data',proxy.call_args.kwargs['headers']['Content-Type'])
+            self.assertEqual(proxy.call_args.kwargs['json'], {'action':'stage','id':'candidate'})
             self.assertEqual(proxy.call_args.kwargs['headers']['X-CSRF-Token'],self.headers['X-CSRF-Token'])
 
 

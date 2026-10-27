@@ -182,15 +182,15 @@
           <h3>打包与发布</h3>
           <ol>
             <li>
-              ZIP 根目录放 main.py；其他模块、SQL、资源文件按相对目录一起打包。
+              任务根目录放 main.py；其他模块、SQL、资源文件按相对目录提交到 GitLab。
             </li>
             <li>
-              使用第三方库时，将 requirements.txt 放在 ZIP 根目录。Nexus
+              使用第三方库时，将 requirements.txt 放在任务根目录。Nexus
               模式自动解析间接依赖；离线模式需完整锁定并提供
               wheels/。任务不继承平台已安装的库。
             </li>
             <li>
-              新增任务 → 上传 ZIP → 选择 main.py → 检查依赖环境 →
+              提交 GitLab 并合并 → 任务列表审查 → 选择入口 → 检查依赖环境 →
               查看差异并发布。
             </li>
             <li>

@@ -44,7 +44,7 @@
             <small class="hint">请确认提交属于此 GitLab 项目。“已读”不会改变部署基线；平台升级后再核对更新。</small>
           </div>
           <div class="gitlab-binding-head"><strong>任务目录与已发布提交</strong><button class="btn" type="button" @click="form.tasks.push({ pid: '', path: '', commit: '' })">添加任务绑定</button></div>
-          <p class="hint">旧 ZIP 版本没有 Git 来源记录，请首次确认对应提交。绑定后可以发现目标分支中已合并、尚未发布的任务变更。</p>
+          <p class="hint">任务列表会自动发现目标分支中的任务。旧任务的编号与仓库不一致时，可在这里绑定目录；GitLab 发布后自动记录任务来源。旧版本基线用于补充差异审查。</p>
           <div v-for="(task, index) in form.tasks" :key="index" class="gitlab-binding">
             <label>任务编号<select v-model="task.pid" class="select" required><option value="">选择任务</option><option v-for="item in tasks" :key="item.pid" :value="item.pid">{{ item.task_name }} · {{ item.pid }}</option><option v-if="task.pid && !tasks.some(item => item.pid === task.pid)" :value="task.pid">{{ task.pid }}</option></select></label>
             <label>仓库中的任务目录<input v-model.trim="task.path" class="input" required placeholder="app/jobs/group/job"></label>
