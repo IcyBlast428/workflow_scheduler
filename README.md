@@ -2,6 +2,8 @@
 
 长期运行优化、升级步骤和验证范围见 [优化说明](docs/runtime-scale-improvements.md)。
 
+管理员可在「代码更新」配置 GitLab 分支检查、登录后未读提醒和代码差异；接入方式、部署基线与检查范围见 [GitLab 更新提醒](docs/gitlab-updates.md)。
+
 面向内网运维与业务脚本的定时任务平台，使用 Flask、APScheduler 和 Vue 3。提供登录、任务发现、调度配置、手动执行、暂停、强停、运行日志，以及 CPU/内存和任务运行时间线。
 
 ## 运行结构

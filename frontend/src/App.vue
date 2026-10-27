@@ -191,6 +191,7 @@
           <span>{{ canManage ? activeNav.description : '用户工作区 · 只读查看任务' }}</span>
         </div>
         <div class="top-actions">
+          <button v-if="canManage" class="btn" type="button" @click="switchView('gitlab')">代码更新<span v-if="gitlabSummary?.unread && gitlabSummary.count"> · {{ gitlabSummary.count }}</span></button>
           <button
             class="btn effects-toggle"
             :aria-pressed="lowEffects"
@@ -207,6 +208,12 @@
         class="content"
         :class="{ 'dashboard-content': view === 'dashboard' }"
       >
+        <div v-if="showGitlabReminder && view !== 'gitlab'" class="inline-alert content-alert gitlab-reminder" role="status">
+          <strong>GitLab 有新的代码更新</strong>
+          <span>待合并 {{ gitlabSummary.pending_merge }} 项，待部署 / 发布 {{ gitlabSummary.pending_release }} 项。</span>
+          <button class="btn primary" @click="switchView('gitlab')">查看代码差异</button>
+          <button class="btn" @click="dismissGitlabReminder">稍后处理</button>
+        </div>
         <div
           v-if="backendStatus.error"
           class="inline-alert danger content-alert"
@@ -292,6 +299,7 @@
             @detail="detailPid = $event"
             @changed="refreshPackageTasks"
         /></template>
+        <template v-else-if="view === 'gitlab' && canManage"><GitlabUpdates @state="acceptGitlabState" /></template>
         <template v-else-if="view === 'admin' && canManage"
           ><AdminPanel
         /></template>
@@ -422,6 +430,7 @@ import CursorLight from './components/CursorLight.vue';
 import LoginBackdrop from './components/LoginBackdrop.vue';
 import LiquidGlassPanel from './components/LiquidGlassPanel.vue';
 import { LOGIN_CORNER_RADIUS } from './loginBackdropScene';
+import { useGitlabUpdates } from './composables/useGitlabUpdates';
 import UserMenu from './components/UserMenu.vue';
 import { api, clearToken, getToken, setToken } from './api';
 import { scheduleRequest } from './scheduleForm';
@@ -436,6 +445,7 @@ const AdminPanel = defineAsyncComponent(
   () => import('./components/AdminPanel.vue'),
 );
 const DatabaseConnections = defineAsyncComponent(() => import('./components/DatabaseConnections.vue'));
+const GitlabUpdates = defineAsyncComponent(() => import('./components/GitlabUpdates.vue'));
 const TaskPackageManager = defineAsyncComponent(
   () => import('./components/TaskPackageManager.vue'),
 );
@@ -528,6 +538,7 @@ const navItems = [
     iconPaths: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
     description: '账户权限与操作记录。',
   },
+  { id: 'gitlab', label: '代码更新', iconPaths: ['M7 4v11a4 4 0 0 0 4 4h6', 'M17 4v4a4 4 0 0 1-4 4H7', 'M4 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0', 'M14 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0'], description: 'GitLab 分支检查、更新提醒与代码差异。' },
   {id: 'connections', label: '数据库连接', iconPaths: ['M4 6c0-4 16-4 16 0s-16 4-16 0','M4 6v12c0 4 16 4 16 0V6','M4 12c0 4 16 4 16 0'], description: '平台与任务业务数据库连接设置。'},
 ];
 
@@ -567,6 +578,8 @@ const user = reactive({
   roles: [],
 });
 const canManage = computed(() => user.roles.includes('admin'));
+const gitlabEnabled = computed(() => Boolean(token.value) && canManage.value);
+const { summary: gitlabSummary, showReminder: showGitlabReminder, accept: acceptGitlabState, dismiss: dismissGitlabReminder } = useGitlabUpdates(gitlabEnabled);
 const canOperate = computed(() => canManage.value);
 const visibleNavItems = computed(() =>
   navItems.filter(

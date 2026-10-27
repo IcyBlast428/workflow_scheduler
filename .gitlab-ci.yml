@@ -46,6 +46,7 @@ browser-regression:
     - npm test
     - npm run build
     - WFS_BROWSER_PYTHON=../.ci-venv/bin/python npm run test:e2e
+    - WFS_BROWSER_PYTHON=../.ci-venv/bin/python npm run test:e2e:gitlab
   artifacts:
     when: on_failure
     paths:

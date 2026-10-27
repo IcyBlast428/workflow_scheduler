@@ -21,3 +21,5 @@ def init_api(app):
     app.register_blueprint(publishing_blueprint)
     from app.api.task_artifacts import blueprint as artifacts_blueprint
     app.register_blueprint(artifacts_blueprint)
+    from app.api.gitlab_updates import blueprint as gitlab_blueprint
+    app.register_blueprint(gitlab_blueprint)

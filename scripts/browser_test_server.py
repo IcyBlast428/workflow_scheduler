@@ -43,4 +43,17 @@ save_schedule('acceptance__slow',{'schedule_type':'every_hour','main_file':'main
 if os.environ.get('WFS_BROWSER_FLOW_FIXTURE') == '1':
     save_schedule('acceptance__flow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})
 aps_start()
+if os.environ.get('WFS_BROWSER_GITLAB_FIXTURE') == '1':
+    sys.path.insert(0, str(ROOT / 'tests'))
+    from gitlab_fixture import serve, TOKEN, A
+    from app.bootstrap import gitlab_updates
+    fixture_server, fixture_url, fixture_calls = serve()
+    gitlab_updates.save_configuration({**gitlab_updates.DEFAULTS, 'enabled': True,
+        'url': fixture_url, 'allow_http': True, 'project': 'team/project', 'token': TOKEN,
+        'platform_commit': A, 'tasks': [{'pid': 'acceptance__slow', 'path': 'app/jobs/acceptance/slow', 'commit': A}]})
+    gitlab_updates.request_scan(force=True)
+    import time
+    deadline = time.monotonic() + 10
+    while gitlab_updates.state('admin')['scanning'] and time.monotonic() < deadline:
+        time.sleep(.05)
 app.run(host='127.0.0.1',port=19008,debug=False,threaded=True)

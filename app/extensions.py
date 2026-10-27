@@ -15,3 +15,5 @@ def ext_init(app):
             scheduler._scheduler.remove_executor('default')
         scheduler._scheduler.add_executor(ScheduledExecutor(max_workers=20),'default')
         scheduler.start()
+        from app.bootstrap.gitlab_updates import start as start_gitlab_monitor
+        start_gitlab_monitor()

@@ -1,21 +1,22 @@
 {
   "index.html": {
-    "file": "static/index-CrpZZK5m.js",
+    "file": "static/index-B8xB5Flc.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "dynamicImports": [
       "src/components/AdminPanel.vue",
       "src/components/DatabaseConnections.vue",
+      "src/components/GitlabUpdates.vue",
       "src/components/TaskPackageManager.vue",
       "src/components/ExecutionMatrix.vue"
     ],
     "css": [
-      "static/index-CrjkhxK6.css"
+      "static/index-Cjq17-Qx.css"
     ]
   },
   "src/components/AdminPanel.vue": {
-    "file": "static/AdminPanel-CxW4BcFi.js",
+    "file": "static/AdminPanel-BLJ32Nni.js",
     "name": "AdminPanel",
     "src": "src/components/AdminPanel.vue",
     "isDynamicEntry": true,
@@ -24,7 +25,7 @@
     ]
   },
   "src/components/DatabaseConnections.vue": {
-    "file": "static/DatabaseConnections-C9eba_CI.js",
+    "file": "static/DatabaseConnections-BAsUoeIf.js",
     "name": "DatabaseConnections",
     "src": "src/components/DatabaseConnections.vue",
     "isDynamicEntry": true,
@@ -32,11 +33,11 @@
       "index.html"
     ],
     "css": [
-      "static/DatabaseConnections-zFIimcLx.css"
+      "static/DatabaseConnections-BCVPhz5y.css"
     ]
   },
   "src/components/ExecutionMatrix.vue": {
-    "file": "static/ExecutionMatrix-Ce8b3Nkd.js",
+    "file": "static/ExecutionMatrix-CHgYvXcC.js",
     "name": "ExecutionMatrix",
     "src": "src/components/ExecutionMatrix.vue",
     "isDynamicEntry": true,
@@ -47,8 +48,20 @@
       "static/ExecutionMatrix-NuIyRnTF.css"
     ]
   },
+  "src/components/GitlabUpdates.vue": {
+    "file": "static/GitlabUpdates-BvdtQSP0.js",
+    "name": "GitlabUpdates",
+    "src": "src/components/GitlabUpdates.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html"
+    ],
+    "css": [
+      "static/GitlabUpdates-D056CZfC.css"
+    ]
+  },
   "src/components/TaskPackageManager.vue": {
-    "file": "static/TaskPackageManager-mHsOoKpu.js",
+    "file": "static/TaskPackageManager-CM0deeRf.js",
     "name": "TaskPackageManager",
     "src": "src/components/TaskPackageManager.vue",
     "isDynamicEntry": true,
@@ -56,7 +69,7 @@
       "index.html"
     ],
     "css": [
-      "static/TaskPackageManager-8PTjqFOI.css"
+      "static/TaskPackageManager-B9ynA-bj.css"
     ]
   }
 }

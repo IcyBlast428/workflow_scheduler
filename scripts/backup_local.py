@@ -50,6 +50,7 @@ def backup(database, data, output, releases=None):
                 add_task_storage(archive, data, releases)
                 encrypted_settings = add_connection_settings(archive, data, temporary)
                 add_connection_settings(archive, data, temporary, 'task-publishing.sqlite3')
+                add_connection_settings(archive, data, temporary, 'gitlab-updates.sqlite3')
                 archive.writestr('manifest.json', json.dumps({'format':2,'database':'database.sqlite3','data':'data','credentials_included':False,'encrypted_connections_included':encrypted_settings}))
     return output
 

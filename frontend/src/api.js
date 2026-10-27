@@ -87,6 +87,12 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  gitlabConfiguration() { return request('/api/admin/gitlab-updates/configuration'); },
+  saveGitlabConfiguration(body) { return request('/api/admin/gitlab-updates/configuration', { method: 'POST', body }); },
+  gitlabState(brief = false) { return request('/api/admin/gitlab-updates/state', { params: { brief } }); },
+  scanGitlab() { return request('/api/admin/gitlab-updates/scan', { method: 'POST', body: {} }); },
+  acknowledgeGitlab(fingerprint) { return request('/api/admin/gitlab-updates/acknowledge', { method: 'POST', body: { fingerprint } }); },
+  gitlabDiff(id, index) { return request('/api/admin/gitlab-updates/diff', { params: { id, index } }); },
   taskExamples() { return request('/api/admin/task-publishing/examples'); },
   saveTaskExample(body) { return request('/api/admin/task-publishing/examples', {method:'POST', body}); },
   packageRepository() { return request('/api/admin/task-publishing/repository'); },
