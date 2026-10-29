@@ -78,7 +78,8 @@ def task_detail():
     next_time = getattr(job,'next_run_time',None)
     with GaussDB() as db:
         notifications = db.execute_query_sql('SELECT id,channel,status,attempts,message,created_at FROM wfs_notifications WHERE pid=? ORDER BY created_at DESC LIMIT 20',params=(pid,),return_json=True)
-    return success_msg({'pid':pid, 'task_name':spec.get('task_name') or spec.get('folder_name') or pid, 'description':description, 'schedule':load_schedule(pid), 'runs':records, 'versions':_business_rows(versions,'changed_at'), 'audit':_business_rows(changes,'created_at'),
+    from app.bootstrap.task_access import for_task
+    return success_msg({'permissions':for_task(g.identity,pid,spec.get('group_name')),'pid':pid, 'task_name':spec.get('task_name') or spec.get('folder_name') or pid, 'description':description, 'schedule':load_schedule(pid), 'runs':records, 'versions':_business_rows(versions,'changed_at'), 'audit':_business_rows(changes,'created_at'),
                         'notifications':_business_rows(notifications,'created_at'),'diagnostics':{'active':runnings.count(),'capacity':int(os.environ.get('WFS_MAX_ACTIVE_RUNS','20')),
                         'next_run_time':str(next_time or ''),'last_not_started':next((item for item in records if item['status'] in ('skipped','missed')),None)}})
 
@@ -309,3 +310,41 @@ def users():
             db.set_rollback()
             raise
     return success_msg('账户已保存；权限和禁用状态立即生效。')
+
+
+@blueprint.route('/api/admin/admission', methods=['GET','POST'])
+def admission_control():
+    forwarded = _forward()
+    if forwarded is not None: return forwarded
+    from app.bootstrap import admission, journal, operations
+    try:
+        if request.method == 'POST':
+            form=request.get_json(silent=True) or {}
+            saved=admission.set_maintenance(form.get('enabled'),form.get('revision'),form.get('reason',''),g.identity['username'])
+            from app.bootstrap.operations import audit
+            audit(g.identity['username'],'maintenance','platform',details=json.dumps(saved,ensure_ascii=False))
+            g.audit_forwarded=True
+        from app.bootstrap.global_vars import runnings
+        return success_msg({**admission.maintenance(), 'reserved':runnings.count(), 'active':[
+            {k:r.get(k) for k in ('run_id','pid','task_name','status','start_time')}
+            for r in journal.active(operations._directory)]})
+    except ValueError as exc: return error_msg(str(exc)),400
+    except RuntimeError as exc: return error_msg(str(exc)),409
+
+@blueprint.route('/api/admin/task-connections', methods=['GET','POST'])
+def task_connections():
+    forwarded = _forward()
+    if forwarded is not None: return forwarded
+    from app.bootstrap import admission, connection_settings
+    pid=request.args.get('pid','')
+    if not any(s['pid']==pid for s in discover_task_specs()): return error_msg('任务不存在。'),404
+    try:
+        if request.method=='POST':
+            saved=admission.save_grant(pid,request.get_json(silent=True) or {},g.identity['username'])
+            from app.bootstrap.operations import audit
+            audit(g.identity['username'],'task_connections',pid,details=json.dumps(saved,ensure_ascii=False))
+            g.audit_forwarded=True
+        return success_msg({'grant':admission.grant(pid),'available':[
+            {'id':p['id'],'dialect':p['dialect']} for p in connection_settings.profiles().values() if p['id']!='platform']})
+    except ValueError as exc: return error_msg(str(exc)),400
+    except RuntimeError as exc: return error_msg(str(exc)),409

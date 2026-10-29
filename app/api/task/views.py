@@ -72,9 +72,9 @@ def _build_task_log_filters(pid=None, taskstate=None, datetimeval=None, taskname
         clauses.append("state = 0")
     elif taskstate in ("失败", "澶辫触"):
         clauses.append(FAILURE_SQL)
-    elif taskstate in ('已停止','重启中断','超时/终止','并发跳过','错过调度'):
+    elif taskstate in ('已停止','重启中断','超时/终止','并发跳过','已跳过','错过调度'):
         clauses.append('state = ?')
-        params.append({'已停止':-15,'重启中断':-1,'超时/终止':-9,'并发跳过':-10001,'错过调度':-10002}[taskstate])
+        params.append({'已停止':-15,'重启中断':-1,'超时/终止':-9,'并发跳过':-10001,'已跳过':-10001,'错过调度':-10002}[taskstate])
     if datetimeval and len(datetimeval) >= 2:
         clauses.append("end_time >= ?")
         clauses.append("end_time <= ?")
@@ -860,7 +860,11 @@ class CallTask(Resource):
             pid = request.args.get('pid')
             if not pid:
                 return error_msg('missing task pid')
-            run_id = call_task_once(pid, actor=g.identity['username'])
+            from app.bootstrap.admission import manual_request
+            import uuid
+            result = manual_request(g.identity['username'], pid,
+                (request.get_json(silent=True) or {}).get('request_id') or uuid.uuid4().hex,
+                lambda: call_task_once(pid, actor=g.identity['username']))
         except Exception as exc:
-            return error_msg('Task call failed: ' + str(exc))
-        return success_msg({'message':'任务已排队', 'run_id':run_id})
+            return error_msg('任务启动未确认：' + str(exc)), 409
+        return success_msg(result)

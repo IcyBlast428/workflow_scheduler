@@ -65,6 +65,7 @@ class info(Resource):
             'introduction': '管理员控制台' if identity()['role'] == 'admin' else '任务查看工作区',
             'name': identity()['username'],
             'roles': [identity()['role']],
+            'task_access':__import__('app.bootstrap.task_access',fromlist=['configuration']).configuration(identity()['username']) if identity()['role']=='maintainer' else None,
             'csrf_token': session.get('csrf_token'),
         }
         return success_msg(data)

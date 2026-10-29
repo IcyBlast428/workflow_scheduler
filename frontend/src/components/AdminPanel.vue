@@ -15,17 +15,19 @@
       <p class="runtime-meta">上次维护：{{ (runtime.maintenance?.maintenance?.completed_at || '-').split('.')[0] }}</p>
       <p v-if="runtime.journal?.oldest_pending" class="runtime-meta">最早待补写：{{ runtime.journal.oldest_pending }}</p>
       <div class="runtime-alerts"><span class="tag info">待发告警 {{ runtime.alerts?.pending || 0 }}</span><span class="tag warning">待核对 {{ runtime.alerts?.unknown || 0 }}</span><span class="tag danger">发送失败 {{ runtime.alerts?.failed || 0 }}</span></div>
-      <details class="disclosure"><summary>接口与数据库耗时 <span class="muted">最近最多 512 次采样</span></summary>
+      <details class="disclosure"><summary>接口与数据库耗时 <span class="muted">最近最多 512 次采样</span></summary><div class="disclosure-body">
         <div class="table-wrap"><table class="runtime-metrics"><thead><tr><th>接口 / 数据库操作</th><th>P95</th><th>最大耗时</th></tr></thead><tbody><tr v-for="(metric,name) in runtime.metrics || {}" :key="name"><td class="mono">{{ name }}</td><td>{{ metric.p95_ms }} ms</td><td>{{ metric.max_ms }} ms</td></tr></tbody></table><p v-if="!Object.keys(runtime.metrics || {}).length" class="table-empty-note">暂无采样记录。</p></div>
-      </details>
+      </div></details>
     </section>
+    <OperationalWorkbench />
     <VersionStorage />
+    <TaskAccessEditor :confirm="confirm" />
     <section class="admin-section" aria-labelledby="accounts-heading">
     <div class="section-heading"><h3 id="accounts-heading">账户管理</h3><p>填写账户信息，或从列表中选择已有账户。</p></div>
     <form class="filter-grid account-form" @submit.prevent="save">
       <div class="form-row"><label for="account-name">用户名</label><input id="account-name" v-model.trim="form.username" class="input" required maxlength="100"></div>
       <div class="form-row"><label for="account-password">设置密码</label><input id="account-password" v-model="form.password" class="input" type="password" autocomplete="new-password" minlength="12" placeholder="已有账户留空表示不变"></div>
-      <div class="form-row"><label for="account-role">角色</label><select id="account-role" v-model="form.role" class="select"><option value="viewer">普通用户（只读）</option><option v-if="form.role === 'operator'" value="operator">普通用户（原操作员）</option><option value="admin">管理员</option></select></div>
+      <div class="form-row"><label for="account-role">角色</label><select id="account-role" v-model="form.role" class="select"><option value="viewer">普通用户（只读）</option><option v-if="form.role === 'operator'" value="operator">普通用户（原操作员）</option><option value="admin">管理员</option><option value="maintainer">任务维护员（按任务授权）</option></select></div>
       <div class="filter-actions"><label class="checkbox-row"><input v-model="form.enabled" type="checkbox">允许登录</label><button class="btn primary" :disabled="saving">保存账户</button></div>
     </form>
     <div class="table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in accounts" :key="item.username"><td>{{ item.username }}</td><td>{{ roles[item.role] }}</td><td>{{ item.enabled ? '启用' : '禁用' }}</td><td><span v-if="item.managed_by">通过服务配置管理</span><button v-else class="btn" @click="edit(item)">编辑</button></td></tr></tbody></table></div>
@@ -39,11 +41,14 @@ import { ref, reactive, onMounted } from 'vue';
 import { api } from '../api';
 import { actionLabel } from '../executionLabels';
 import LoadingStatus from './LoadingStatus.vue';
+import OperationalWorkbench from './OperationalWorkbench.vue';
+import TaskAccessEditor from './TaskAccessEditor.vue';
 import VersionStorage from './VersionStorage.vue';
+defineProps({confirm:Function});
 const accounts = ref([]), records = ref([]), error = ref(''), message = ref(''), saving = ref(false);
 const runtime = ref({});
 const loading = ref(false);
-const roles = {viewer:'普通用户',operator:'普通用户（原操作员）',admin:'管理员'};
+const roles = {viewer:'普通用户',operator:'普通用户（原操作员）',admin:'管理员',maintainer:'任务维护员'};
 const form = reactive({username:'',password:'',role:'viewer',enabled:true});
 function edit(item) { Object.assign(form,{...item,password:'',enabled:Boolean(item.enabled)}); message.value = ''; }
 async function load() { if (loading.value) return; loading.value = true; try { [accounts.value, records.value,runtime.value] = await Promise.all([api.users(),api.audit(),api.runtime()]); error.value = ''; } catch (err) { error.value = err.message; } finally { loading.value = false; } }

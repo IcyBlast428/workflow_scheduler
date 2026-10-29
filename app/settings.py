@@ -1,6 +1,7 @@
 import datetime
 import os
 from datetime import timedelta
+from app.bootstrap.timebase import business_now
 
 from configobj import ConfigObj
 
@@ -53,7 +54,7 @@ class Config:
             "func": "app.bootstrap.core:aps_start",
             "name": 'Main task bootstrap',
             "trigger": "date",
-            "run_date": (datetime.datetime.now() + datetime.timedelta(seconds=2)).strftime('%Y-%m-%d %H:%M:%S'),
+            "run_date": (business_now() + datetime.timedelta(seconds=2)).strftime('%Y-%m-%d %H:%M:%S'),
             "max_instances": 10,
             "replace_existing": True,
             "coalesce": True,

@@ -45,7 +45,7 @@
         </button>
       </div>
     </div>
-    <GitlabTaskChanges v-if="canManage" :first-page="tasks.params.currentPage === 1" @state="gitlabChanges = $event.items" @open="$emit('release', $event)" @settings="$emit('gitlab')" />
+    <GitlabTaskChanges v-if="canManage || canPublish" :can-configure="canManage" :first-page="tasks.params.currentPage === 1" @state="gitlabChanges = $event.items" @open="$emit('release', $event)" @settings="$emit('gitlab')" />
     <form class="filter-grid" @submit.prevent="$emit('search')">
       <div class="form-row">
         <label for="taskid">任务 ID</label>
@@ -193,6 +193,7 @@ const props = defineProps({
   busy: Boolean,
   pendingActions: Object,
   canManage: Boolean,
+  canPublish: Boolean,
   canOperate: Boolean,
 });
 defineEmits([

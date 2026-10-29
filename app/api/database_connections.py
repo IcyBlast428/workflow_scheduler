@@ -14,9 +14,14 @@ def connections():
         profiles = settings.profiles()
         pending = profiles.get('platform')
         from app.common.db.catalog import capabilities
-        return success_msg({'profiles': [settings.public_profile(item) for item in profiles.values()],
+        from app.bootstrap.helpers import get_runtime_env
+        local = bool(os.environ.get('WFS_LOCAL_DB_PATH'))
+        production = get_runtime_env() == 'production'
+        source = '平台管理' if active else '本地 SQLite' if local else 'Nacos' if production else '本地 INI / 环境配置'
+        dialect = 'MySQL / PolarDB' if active else 'SQLite' if local else ('PostgreSQL' if os.environ.get('WFS_DB_DIALECT') == 'postgresql' or os.environ.get('WFS_POSTGRES_TEST') == 'true' else 'GaussDB / DWS')
+        return success_msg({'configuration_source':source, 'platform_editable':bool(active), 'environment':get_runtime_env(), 'profiles': [settings.public_profile(item) for item in profiles.values()],
                             'active': settings.public_profile(active) if active else None,
-                            'active_dialect': 'MySQL' if active else ('SQLite' if os.environ.get('WFS_LOCAL_DB_PATH') else 'GaussDB/PostgreSQL'),
+                            'active_dialect': dialect,
                             'restart_required': pending != active, 'supported_databases': capabilities()})
     except ValueError as exc:
         return error_msg(str(exc)), 400
@@ -32,7 +37,15 @@ def change_connection(action):
         if action == 'initialize':
             if profile['id'] != 'platform' or form.get('confirm_database') != profile['database']:
                 raise ValueError('请准确输入目标数据库名称，确认只在新库初始化平台表。')
-        result = settings.probe(profile, initialize=action == 'initialize')
+        import time
+        from app.bootstrap.connection_lifecycle import record_test
+        started=time.monotonic()
+        try:
+            result = settings.probe(profile, initialize=action == 'initialize')
+        except Exception:
+            if profile['id']!='platform': record_test(profile['id'],profile['revision'],False,(time.monotonic()-started)*1000)
+            raise
+        if profile['id']!='platform': record_test(profile['id'],profile['revision'],result.get('ready'),(time.monotonic()-started)*1000)
         if action == 'save':
             if not result['ready']:
                 raise ValueError('目标库缺少平台表或 summary_version 字段，请先初始化新库或完成结构迁移。')

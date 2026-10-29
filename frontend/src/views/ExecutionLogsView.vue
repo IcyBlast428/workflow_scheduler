@@ -78,7 +78,7 @@
           <option value="已停止">已停止</option>
           <option value="重启中断">重启中断</option>
           <option value="超时/终止">超时/终止</option>
-          <option value="并发跳过">并发跳过</option>
+          <option value="已跳过">已跳过（并发或维护）</option>
           <option value="错过调度">错过调度</option>
         </select>
       </div>

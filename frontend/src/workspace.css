@@ -105,3 +105,33 @@ html[data-effects="low"] .glass-surface { background-color: var(--panel); }
   .attention-list > li { gap: 10px; }
   .log-shortcuts { padding: 0 16px 14px; }
 }
+
+/* The existing low-effect switch also provides a quieter, denser operations view. */
+html[data-effects="low"] .glass-optics { display:none!important; }
+html[data-effects="low"] .panel,html[data-effects="low"] .surface-card { background:#13232c; }
+html[data-effects="low"] .task-table td,html[data-effects="low"] .log-table td { padding-top:10px;padding-bottom:10px; }
+html[data-effects="low"] .hint,html[data-effects="low"] .muted { color:#b4c6d0; }
+
+/* Expandable surfaces share one inset body, including forms and nested tools. */
+.disclosure > .disclosure-body {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  min-width: 0;
+}
+.disclosure-body > :is(p, h3, h4),
+.disclosure-body > .section-heading { margin: 0; }
+.disclosure-body > .btn { justify-self: start; max-width: 100%; white-space: normal; }
+.disclosure-body > :is(form, fieldset, div, section) { min-width: 0; }
+.admin-panel .runtime-status, .version-storage, .admin-panel .admin-section {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.admin-panel .runtime-status > :is(p, .section-heading, .runtime-alerts),
+.version-storage > :is(p, .section-heading, .storage-table),
+.admin-panel .admin-section > :is(.section-heading, .account-form) { margin: 0; }
+.task-operations > :is(h3, h4, p), .task-access-editor > :is(h3, p) { margin: 0; }
+.attention-list > li { flex-wrap: wrap; }
+.attention-list > li > div:first-child { flex: 1 1 260px; min-width: 0; }
+.attention-resolution { flex-basis: 100%; display: grid; gap: 12px; }

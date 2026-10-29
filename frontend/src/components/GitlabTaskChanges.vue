@@ -1,6 +1,7 @@
 <template>
   <section class="gitlab-task-changes" aria-label="GitLab 任务变更">
-    <div class="changes-heading"><div><strong>GitLab 任务变更</strong><p class="hint">{{ state.enabled ? '目标分支合并后，可在此审查并发布。已发布任务的更新与删除标记在下方列表。' : '配置 GitLab 后，新任务会在首页置顶展示。' }}</p></div><button class="btn" :disabled="loading" @click="refresh">{{ loading ? '检查中…' : '刷新变更' }}</button><button class="btn" @click="$emit('settings')">连接设置</button></div>
+    <div class="changes-heading"><div><strong>GitLab 任务变更</strong><p class="hint">{{ state.enabled ? '目标分支合并后，可在此审查并发布。已发布任务的更新与删除标记在下方列表。' : '配置 GitLab 后，新任务会在首页置顶展示。' }}</p></div><button class="btn" :disabled="loading" @click="refresh">{{ loading ? '检查中…' : '刷新列表' }}</button><button v-if="canConfigure" class="btn" :disabled="scanning || !state.enabled" @click="scan">{{ scanning ? '已请求检查…' : '立即检查 GitLab' }}</button><button v-if="canConfigure" class="btn" @click="$emit('settings')">连接设置</button></div>
+    <p class="hint">最近完成检查：{{ state.checked_at || '尚未检查' }} · {{ state.complete ? '扫描完整' : '等待检查或结果不完整' }}</p>
     <p v-if="error || state.error" class="inline-alert warning" role="alert">{{ error || state.error }}</p>
     <div v-if="firstPage && newTasks.length" class="new-task-grid">
       <article v-for="item in newTasks" :key="item.id" class="new-task-card"><div><span class="tag success">GitLab 新任务 · 待发布</span><h3>{{ item.task_name }}</h3><p class="hint">{{ item.group_name }} / {{ item.folder_name }}</p><small class="mono">{{ item.sha.slice(0, 8) }} · {{ item.file_count }} 个文件</small><p v-if="item.error" class="danger-text">{{ item.error }}</p></div><button class="btn primary" :disabled="item.blocked" @click="$emit('open', item.pid)">审查并发布</button></article>
@@ -12,14 +13,16 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { api } from '../api';
-defineProps({ firstPage: Boolean });
+const props=defineProps({ firstPage: Boolean,canConfigure:{type:Boolean,default:true} });
 const emit = defineEmits(['state', 'open', 'settings']);
 const state = ref({ enabled: false, items: [] }), error = ref(''), loading = ref(false);
 const newTasks = computed(() => state.value.items.filter(item => item.kind === 'new'));
+const scanning = ref(false);
+async function scan() { scanning.value = true; try { await api.scanGitlab(); await refresh(); } catch(err) { error.value = err.message; scanning.value = false; } }
 let alive = true, timer, sequence = 0;
 async function refresh() {
   const token = ++sequence; loading.value = true;
-  try { const data = await api.gitlabTasks(); if (alive && token === sequence) { state.value = data; error.value = ''; emit('state', data); } }
+  try { const [data, scanState] = await Promise.all([api.gitlabTasks(), props.canConfigure ? api.gitlabState(true) : Promise.resolve({scanning:false})]); if (alive && token === sequence) { state.value = data; scanning.value = scanState.scanning; error.value = ''; emit('state', data); } }
   catch (err) { if (alive && token === sequence) { error.value = err.message; emit('state', { items: [] }); } }
   finally { if (alive && token === sequence) loading.value = false; }
 }

@@ -23,7 +23,7 @@
     class="login-screen"
     :style="{ '--login-radius': `${LOGIN_CORNER_RADIUS}px` }"
   >
-    <LoginBackdrop @scene-change="loginVisual = $event" />
+    <LoginBackdrop v-if="!lowEffects" @scene-change="loginVisual = $event" />
     <LiquidGlassPanel :snapshot="loginVisual">
       <div class="login-brief">
         <div class="login-brand-row">
@@ -188,7 +188,7 @@
       <header class="topbar">
         <div class="page-title">
           <strong>{{ activeNav.label }}</strong>
-          <span>{{ canManage ? activeNav.description : '用户工作区 · 只读查看任务' }}</span>
+          <span>{{ canManage ? activeNav.description : user.roles.includes('maintainer') ? '任务维护工作区 · 按授权操作' : '用户工作区 · 只读查看任务' }}</span>
         </div>
         <div class="top-actions">
           <button v-if="canManage" class="btn" type="button" @click="switchView('gitlab')">代码更新<span v-if="gitlabSummary?.unread && gitlabSummary.count"> · {{ gitlabSummary.count }}</span></button>
@@ -225,6 +225,7 @@
           </button>
         </div>
 
+        <MaintenanceControl v-if="canManage && ['tasks','admin'].includes(view)" :confirm="requestConfirm" />
         <template v-if="view === 'dashboard'">
           <DashboardView
             :dashboard="dashboard"
@@ -256,6 +257,7 @@
             :pending-actions="pendingActions"
             :can-manage="canManage"
             :can-operate="canOperate"
+            :can-publish="canManage || user.taskAccess.capabilities.includes('publish')"
             @release="openPackages"
             @gitlab="switchView('gitlab')"
             @search="loadTasks(true)"
@@ -299,7 +301,7 @@
         <template v-else-if="view === 'repository' && canManage"><section class="panel"><div class="panel-head"><div><h2>依赖仓库</h2><p>配置任务独立环境使用的私有 PyPI 或离线依赖。</p></div></div><div class="panel-body"><PackageRepositorySettings open /></div></section></template>
         <template v-else-if="view === 'gitlab' && canManage"><GitlabUpdates @state="acceptGitlabState" /></template>
         <template v-else-if="view === 'admin' && canManage"
-          ><AdminPanel
+          ><AdminPanel :confirm="requestConfirm"
         /></template>
         <template v-else-if="view === 'connections' && canManage"><DatabaseConnections :confirm="requestConfirm" /></template>
         <template v-else-if="canManage">
@@ -369,9 +371,10 @@
   </div>
 
   <ConfirmDialog :model-value="confirmState" @resolve="resolveConfirm" />
-  <TaskReleaseDialog v-if="packagePid && canManage" :pid="packagePid" :confirm="requestConfirm" @close="packagePid = ''" @changed="refreshPackageTasks" />
+  <TaskReleaseDialog v-if="packagePid && (canManage || user.roles.includes('maintainer'))" :pid="packagePid" :allow-operations="canManage" :confirm="requestConfirm" @execution="openExecution" @close="packagePid = ''" @changed="refreshPackageTasks" />
   <TaskDetailDialog
     :pid="detailPid"
+    :confirm="requestConfirm"
     :can-manage="canManage"
     @close="detailPid = ''"
     @execution="openExecution"
@@ -438,6 +441,7 @@ import ScheduleDialog from './components/ScheduleDialog.vue';
 import { useTaskWorkspace } from './composables/useTaskWorkspace';
 import { useLogWorkspace } from './composables/useLogWorkspace';
 import { useDashboardWorkspace } from './composables/useDashboardWorkspace';
+import MaintenanceControl from './components/MaintenanceControl.vue';
 import TaskDetailDialog from './components/TaskDetailDialog.vue';
 import ExecutionDialog from './components/ExecutionDialog.vue';
 const AdminPanel = defineAsyncComponent(
@@ -452,6 +456,7 @@ const ExecutionMatrix = defineAsyncComponent(
   () => import('./components/ExecutionMatrix.vue'),
 );
 import { canTrigger } from './executionLabels';
+import { confirmUnsaved } from './composables/useUnsavedChanges';
 import { useConfirm } from './composables/useConfirm';
 const loginVisual = shallowRef(null);
 const lowEffects = ref(Boolean(readPreference('wfs:low-effects', false)));
@@ -581,11 +586,12 @@ const user = reactive({
   name: '',
   avatar: '',
   roles: [],
+  taskAccess:{capabilities:[]},
 });
 const canManage = computed(() => user.roles.includes('admin'));
 const gitlabEnabled = computed(() => Boolean(token.value) && canManage.value);
 const { summary: gitlabSummary, showReminder: showGitlabReminder, accept: acceptGitlabState, dismiss: dismissGitlabReminder } = useGitlabUpdates(gitlabEnabled);
-const canOperate = computed(() => canManage.value);
+const canOperate = computed(() => canManage.value || user.roles.includes('maintainer'));
 const visibleNavItems = computed(() =>
   navItems.filter(
     (item) => canManage.value || ['tasks', 'matrix', 'taskLogs'].includes(item.id),
@@ -792,6 +798,7 @@ async function loadUser() {
   user.name = data.name || 'Admin';
   user.avatar = data.avatar || '/static/img/head.gif';
   user.roles = data.roles || [];
+  user.taskAccess=data.task_access || {capabilities:[]};
 
   if (data.csrf_token) {
     setToken(data.csrf_token);
@@ -830,6 +837,7 @@ async function handleLogin() {
 }
 
 async function handleLogout() {
+  if(!await confirmUnsaved(requestConfirm))return;
 
   try {
     await api.logout();
@@ -848,7 +856,8 @@ async function handleLogout() {
   stopLiveEvents();
 }
 
-function switchView(nextView) {
+async function switchView(nextView) {
+  if(nextView!==view.value && !await confirmUnsaved(requestConfirm))return;
   if (token.value && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(nextView)) nextView = 'tasks';
   view.value = nextView;
   window.location.hash = nextView;
@@ -938,6 +947,7 @@ async function handleCallTask(row) {
     await Promise.all(refreshes);
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '任务触发失败' });
+    if (error.code === 'HTTP_409' && await requestConfirm({title:'核对原执行请求',message:'请先查看执行记录，确认原请求是否已经执行。',details:['只在确认需要新的执行后清除原请求编号，否则再次点击会继续核对原请求。','清除后再次手动执行可能重复业务操作。'],confirmText:'已核对，允许新请求',cancelText:'继续保留原请求',danger:true})) api.discardManualRequest(row.id);
   } finally {
     delete pendingActions[row.id];
   }
@@ -1181,12 +1191,13 @@ watch(view, async (nextView) => {
   }
 });
 
-function applyRoute() {
+async function applyRoute() {
   const route = readRoute(window.location.hash);
   if (token.value && user.roles.length && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(route.view)) {
     switchView('tasks');
     return;
   }
+  if(route.view!==view.value && !await confirmUnsaved(requestConfirm)){window.history.replaceState(null,'','#'+view.value);return;}
   view.value = route.view;
   if (!token.value) return;
   detailPid.value = route.run ? '' : route.pid;
@@ -1269,6 +1280,7 @@ async function retryExecution(record) {
   if (!confirmed) return;
   retryingExecution.value = true;
   try {
+    api.discardManualRequest(record.pid);
     const result = await api.callTask({ pid: record.pid });
     openExecution(result.run_id);
     await loadTasks();

@@ -14,14 +14,28 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   const dialog = page.getByRole('dialog', {name:'任务代码版本',exact:true});
   await dialog.getByRole('button', {name:'获取 GitLab 版本并查看差异',exact:true}).click();
   await expect(dialog.getByLabel('发布版本预览')).toContainText('新增 2');
+  await expect(dialog.getByLabel('发布前检查')).toContainText('文件存在');
+  await expect(dialog.getByLabel('仅显示变更文件')).toBeChecked();
   await dialog.getByRole('button', {name:'新增 helper.py',exact:true}).click();
   await expect(dialog.locator('.release-code')).toContainText('+value="GITLAB_V1"');
   const publish = async () => {
     await dialog.getByRole('button', {name:'检查依赖环境',exact:true}).click();
     await expect(dialog.getByRole('button', {name:'发布此版本',exact:true})).toBeVisible({timeout:35000});
+    const headers = {'X-CSRF-Token': await page.evaluate(() => sessionStorage.getItem('wfs_csrf_token'))};
+    const policy=(await(await page.request.get('/api/admin/operational/policy/release')).json()).data;
+    expect((await page.request.post('/api/admin/operational/policy/release',{headers,data:{...policy,require_trial:true}})).status()).toBe(200);
+    await dialog.getByRole('button',{name:'使用测试连接试运行此版本',exact:true}).click();
+    await page.locator('.confirm-modal').getByRole('button',{name:'提交试运行',exact:true}).click();
+    const overview=(await(await page.request.get('/api/taskinfo/packages')).json()).data;
+    const activePid=overview.tasks.find(task=>task.folder_name==='git_new').pid;
+    await expect.poll(async()=>{
+      const rows=(await(await page.request.get('/api/admin/operational/requests?pid='+encodeURIComponent(activePid))).json()).data;
+      const row=rows.find(r=>r.kind==='trial');if(!row?.run_id)return 'pending';
+      return (await(await page.request.get('/api/taskinfo/run?run_id='+row.run_id)).json()).data.record.status;
+    },{timeout:30000}).toBe('success');
     await dialog.getByRole('button', {name:'发布此版本',exact:true}).click();
     await page.locator('.confirm-modal').getByRole('button', {name:'确认发布',exact:true}).click();
-    await expect(dialog.getByRole('status')).toContainText('任务代码已发布');
+    await expect(dialog.getByRole('status').filter({hasText:'任务代码已发布'})).toBeVisible();
   };
   await publish();
   await dialog.getByRole('button', {name:'关闭',exact:true}).click();
@@ -33,7 +47,7 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   const headers = {'X-CSRF-Token': await page.evaluate(() => sessionStorage.getItem('wfs_csrf_token'))};
   const change = async action => {
     expect((await page.request.post('/api/admin/fixture/gitlab', {headers,data:{action}})).status()).toBe(200);
-    await page.getByRole('button', {name:'刷新变更',exact:true}).click();
+    await page.getByRole('button', {name:'刷新列表',exact:true}).click();
   };
   try {
     await change('update');
@@ -53,7 +67,7 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
     await row.locator('.task-change-badge').click();
     await dialog.getByRole('button', {name:'确认删除任务',exact:true}).click();
     await page.locator('.confirm-modal').getByRole('button', {name:'确认删除',exact:true}).click();
-    await expect(dialog.getByRole('status')).toContainText('输出文件已保留');
+    await expect(dialog.getByRole('status').filter({hasText:'输出文件已保留'})).toBeVisible();
     await dialog.getByRole('button', {name:'关闭',exact:true}).click();
     await expect(row).toHaveCount(0);
   } finally { await page.request.post('/api/admin/fixture/gitlab', {headers,data:{action:'reset'}}); }

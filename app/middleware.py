@@ -12,6 +12,7 @@ PUBLIC_API_PATHS = {
     '/api/user/login',
     '/api/user/health',
     '/api/user/ready',
+    '/api/integrations/gitlab/webhook',
 }
 
 

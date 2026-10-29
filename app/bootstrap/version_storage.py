@@ -7,29 +7,43 @@ from app.bootstrap.database import GaussDB
 from app.bootstrap.task_packages import registry, release_dir
 
 
-def snapshot(keep=20):
+def snapshot(keep=20, full_references=None, scan_seconds=3, max_entries=100000):
     if not 20 <= keep <= 500:
         raise ValueError('保留版本数应在 20 至 500 之间。')
     tasks = registry()
     with GaussDB() as db:
         releases = db.execute_query_sql('SELECT payload FROM wfs_task_releases ORDER BY created_at DESC LIMIT 10001')
-        runs = db.execute_query_sql('SELECT payload FROM wfs_executions LIMIT 10001')
-    protected = set()
+        runs = db.execute_query_sql('SELECT payload FROM wfs_executions LIMIT 10001') if full_references is None else []
+    protected = set(full_references or ())
+    from app.bootstrap import admission, execution_requests
+    requests_complete=True
+    with admission.store() as local:
+        execution_requests.table(local)
+        sql="SELECT pid,payload FROM work_requests WHERE status IN ('pending','dispatching','unknown')"
+        if full_references is None: sql+=' LIMIT 10001'
+        for index,(pid,raw) in enumerate(local.execute(sql)):
+            if full_references is None and index>=10000:
+                requests_complete=False;break
+            version=json.loads(raw).get('version')
+            if version:protected.add((pid,version))
     for (payload,) in runs:
         run = json.loads(payload)
         version = (run.get('code_version') or {}).get('task_release')
         if version: protected.add((run['pid'],version))
-    truncated = len(releases)>10000 or len(runs)>10000
+    truncated = len(releases)>10000 or len(runs)>10000 or not requests_complete
     result, counts, applied_counts, entries = [], {}, {}, 0
-    deadline = time.monotonic()+3
+    deadline = time.monotonic()+scan_seconds
     total = candidate = trash = 0
     for (payload,) in releases[:10000]:
-        data = json.loads(payload); pid, version = data['pid'], data['version']
+        data = json.loads(payload)
+        if data.get('status')=='cleaned': continue
+        pid, version = data['pid'], data['version']
         task = tasks.get(pid,{})
         counts[pid] = counts.get(pid,0)+1
         if data.get('status') == 'applied':
             applied_counts[pid] = applied_counts.get(pid,0)+1
         reasons = []
+        if str(data.get('note','')).startswith('一次性迁移旧任务'): reasons.append('旧任务迁移基线，保留原始文件')
         if version == task.get('active_version'): reasons.append('当前使用')
         pending_intent = task.get('pending') or {}
         if version in (pending_intent.get('version'), (pending_intent.get('previous') or {}).get('active_version')): reasons.append('发布中')
@@ -37,12 +51,12 @@ def snapshot(keep=20):
         if (pid,version) in protected: reasons.append('执行记录引用')
         if counts[pid]<=keep: reasons.append('最近保留版本')
         if data.get('status') == 'applied' and applied_counts[pid]<=keep: reasons.append('可回退的已发布版本')
-        if len(runs)>10000: reasons.append('执行引用未完整检查')
+        if len(runs)>10000 or not requests_complete: reasons.append('执行引用未完整检查')
         directory = release_dir(pid,version)
         size, complete = 0, True
         pending = [directory]
         while pending:
-            if time.monotonic()>deadline or entries>=100000:
+            if time.monotonic()>deadline or entries>=max_entries:
                 complete=False; truncated=True; break
             current = pending.pop()
             try:
@@ -52,7 +66,7 @@ def snapshot(keep=20):
                         if item.is_symlink(): continue
                         if item.is_dir(follow_symlinks=False): pending.append(Path(item.path))
                         elif item.is_file(follow_symlinks=False): size+=item.stat(follow_symlinks=False).st_size
-                        if time.monotonic()>deadline or entries>=100000:
+                        if time.monotonic()>deadline or entries>=max_entries:
                             complete=False; truncated=True; break
             except FileNotFoundError:
                 complete=False

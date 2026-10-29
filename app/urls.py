@@ -23,3 +23,7 @@ def init_api(app):
     app.register_blueprint(artifacts_blueprint)
     from app.api.gitlab_updates import blueprint as gitlab_blueprint
     app.register_blueprint(gitlab_blueprint)
+    from app.api.operational import blueprint as operational_blueprint
+    app.register_blueprint(operational_blueprint)
+    from app.api.task_access import blueprint as task_access_blueprint
+    app.register_blueprint(task_access_blueprint)

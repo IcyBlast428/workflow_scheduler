@@ -48,7 +48,9 @@ def package_error(exc):
 
 @blueprint.get(BASE)
 def index():
-    return success_msg(packages.overview(request.args.get('pid')))
+    pid=request.args.get('pid')
+    if pid and pid not in packages.registry(): return success_msg({'task':None,'versions':[]})
+    return success_msg(packages.overview(pid))
 
 
 @blueprint.get(BASE + '/example')
@@ -101,7 +103,11 @@ def gitlab_tasks():
     from app.bootstrap.gitlab_updates import GitLabError
     try:
         if request.method == 'GET':
-            return success_msg(tasks.changes())
+            data=tasks.changes()
+            if g.identity['role']=='maintainer':
+                from app.bootstrap.task_access import for_task
+                data['items']=[i for i in data['items'] if 'publish' in for_task(g.identity,i['pid'],i.get('group_name'))]
+            return success_msg(data)
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
             raise packages.PackageError('请求内容必须为对象。')
@@ -135,7 +141,7 @@ def action():
         if type(revision) is not int or revision < 1:
             raise packages.PackageError('请携带当前任务状态版本号。', 409)
         if action in ('publish', 'rollback'):
-            result = packages.publish(pid, version, revision, actor, rollback=action == 'rollback')
+            result = packages.publish(pid, version, revision, actor, rollback=action == 'rollback',reason=body.get('reason',''))
         else:
             result = packages.recycle(pid, revision, actor, restore=action == 'restore')
     else:

@@ -1,10 +1,13 @@
 {
   "index.html": {
-    "file": "static/index-CJfZ_eU-.js",
+    "file": "static/index-C_RMZWwY.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "dynamicImports": [
+      "src/components/TaskReleaseDialog.vue",
+      "src/components/TaskOperations.vue",
+      "src/components/TaskConnections.vue",
       "src/components/AdminPanel.vue",
       "src/components/DatabaseConnections.vue",
       "src/components/GitlabUpdates.vue",
@@ -14,20 +17,23 @@
       "src/components/ExecutionMatrix.vue"
     ],
     "css": [
-      "static/index-BxzVQ5Xu.css"
+      "static/index-BugdbtKv.css"
     ]
   },
   "src/components/AdminPanel.vue": {
-    "file": "static/AdminPanel-D6DUiQBO.js",
+    "file": "static/AdminPanel-CnSfR876.js",
     "name": "AdminPanel",
     "src": "src/components/AdminPanel.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
+    ],
+    "css": [
+      "static/AdminPanel-B1M-Lw1G.css"
     ]
   },
   "src/components/DatabaseConnections.vue": {
-    "file": "static/DatabaseConnections-GfmgX1go.js",
+    "file": "static/DatabaseConnections-MCd5UY97.js",
     "name": "DatabaseConnections",
     "src": "src/components/DatabaseConnections.vue",
     "isDynamicEntry": true,
@@ -35,11 +41,11 @@
       "index.html"
     ],
     "css": [
-      "static/DatabaseConnections-BCVPhz5y.css"
+      "static/DatabaseConnections-D6ii5rCm.css"
     ]
   },
   "src/components/ExecutionMatrix.vue": {
-    "file": "static/ExecutionMatrix-XDP6eyj1.js",
+    "file": "static/ExecutionMatrix-CF6cdUBZ.js",
     "name": "ExecutionMatrix",
     "src": "src/components/ExecutionMatrix.vue",
     "isDynamicEntry": true,
@@ -51,7 +57,7 @@
     ]
   },
   "src/components/GitlabUpdates.vue": {
-    "file": "static/GitlabUpdates-C3vsnff-.js",
+    "file": "static/GitlabUpdates-CoXVTHfC.js",
     "name": "GitlabUpdates",
     "src": "src/components/GitlabUpdates.vue",
     "isDynamicEntry": true,
@@ -59,11 +65,11 @@
       "index.html"
     ],
     "css": [
-      "static/GitlabUpdates-BPI5Sanr.css"
+      "static/GitlabUpdates-3dtbM31K.css"
     ]
   },
   "src/components/PackageRepositorySettings.vue": {
-    "file": "static/PackageRepositorySettings-pXwIaV7M.js",
+    "file": "static/PackageRepositorySettings-CJ2GcpZB.js",
     "name": "PackageRepositorySettings",
     "src": "src/components/PackageRepositorySettings.vue",
     "isDynamicEntry": true,
@@ -71,11 +77,23 @@
       "index.html"
     ],
     "css": [
-      "static/PackageRepositorySettings-CZwhZpbl.css"
+      "static/PackageRepositorySettings-CjUTWpRg.css"
+    ]
+  },
+  "src/components/TaskConnections.vue": {
+    "file": "static/TaskConnections-D3h4jec2.js",
+    "name": "TaskConnections",
+    "src": "src/components/TaskConnections.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html"
+    ],
+    "css": [
+      "static/TaskConnections-D84CV5ap.css"
     ]
   },
   "src/components/TaskExamples.vue": {
-    "file": "static/TaskExamples-YO9BZTdz.js",
+    "file": "static/TaskExamples-cUHCvLBs.js",
     "name": "TaskExamples",
     "src": "src/components/TaskExamples.vue",
     "isDynamicEntry": true,
@@ -83,16 +101,31 @@
       "index.html"
     ],
     "css": [
-      "static/TaskExamples-Cz7gRg9z.css"
+      "static/TaskExamples-D5M36caQ.css"
+    ]
+  },
+  "src/components/TaskOperations.vue": {
+    "file": "static/TaskOperations-CFiaLsRU.js",
+    "name": "TaskOperations",
+    "src": "src/components/TaskOperations.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html"
+    ],
+    "css": [
+      "static/TaskOperations-JOLQIy28.css"
     ]
   },
   "src/components/TaskReleaseDialog.vue": {
-    "file": "static/TaskReleaseDialog-K7sDDTqn.js",
+    "file": "static/TaskReleaseDialog-BU5pE_RP.js",
     "name": "TaskReleaseDialog",
     "src": "src/components/TaskReleaseDialog.vue",
     "isDynamicEntry": true,
     "imports": [
       "index.html"
+    ],
+    "dynamicImports": [
+      "src/components/TaskOperations.vue"
     ],
     "css": [
       "static/TaskReleaseDialog-DOXmzl1J.css"

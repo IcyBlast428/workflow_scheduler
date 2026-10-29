@@ -32,6 +32,7 @@
                 type="checkbox"
                 :aria-label="`选择任务 ${row.id}`"
                 :checked="selected.includes(row.id)"
+                :disabled="!permitted(row,'schedule')"
                 @change="$emit('select', row.id)"
               />
               <div class="task-name-copy">
@@ -99,7 +100,7 @@
                 查看执行
               </button>
               <button
-                v-else-if="canOperate && canCallTask(row)"
+                v-else-if="canOperate && permitted(row,'run') && canCallTask(row)"
                 class="btn primary"
                 type="button"
                 :disabled="busy || pendingActions[row.id]"
@@ -109,9 +110,9 @@
                 手动执行
               </button>
               <ActionMenu>
-                <button v-if="canManage" class="btn" @click="$emit('release', row.id)">代码版本</button>
+                <button v-if="permitted(row,'publish')" class="btn" @click="$emit('release', row.id)">代码版本</button>
                 <button
-                  v-if="canOperate && canStart(row)"
+                  v-if="canOperate && permitted(row,'schedule') && canStart(row)"
                   class="btn"
                   :disabled="busy || pendingActions[row.id]"
                   @click="$emit('action', row, 'start')"
@@ -119,7 +120,7 @@
                   启用调度
                 </button>
                 <button
-                  v-if="canOperate && row.state === 'true'"
+                  v-if="canOperate && permitted(row,'schedule') && row.state === 'true'"
                   class="btn"
                   :disabled="busy || pendingActions[row.id]"
                   @click="$emit('pause', row)"
@@ -127,7 +128,7 @@
                   暂停调度
                 </button>
                 <button
-                  v-if="canManage"
+                  v-if="permitted(row,'schedule')"
                   class="btn"
                   :disabled="busy || pendingActions[row.id]"
                   @click="$emit('schedule', row)"
@@ -135,7 +136,7 @@
                   配置
                 </button>
                 <button
-                  v-if="canOperate && row.state !== 'invalid'"
+                  v-if="canOperate && permitted(row,'schedule') && row.state !== 'invalid'"
                   class="btn"
                   :disabled="busy || pendingActions[row.id]"
                   @click="$emit('action', row, 'refresh')"
@@ -208,6 +209,7 @@ defineEmits([
   'release',
 ]);
 
+function permitted(row,capability) { return props.canManage || row.permissions?.includes(capability); }
 function stateText(row) {
   if (row.state === 'invalid') {
     return '配置错误';

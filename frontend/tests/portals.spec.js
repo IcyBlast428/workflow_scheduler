@@ -57,6 +57,7 @@ test('database settings switch scopes, report test failures and preserve masked 
   });
   await login(page, 'admin', '/admin/#connections');
   await expect(page.locator('.connection-panel')).toBeVisible();
+  await page.getByRole('button',{name:'展开 MySQL / PolarDB 切换配置',exact:true}).click();
   await expect(page.getByLabel('连接标识',{exact:true})).toHaveValue('platform');
   await expect(page.getByLabel('连接加密',{exact:true})).toHaveValue('disabled');
   const boxes = await Promise.all(['连接标识','数据库地址','数据库用户名','数据库密码'].map(name => page.getByLabel(name,{exact:true}).boundingBox()));

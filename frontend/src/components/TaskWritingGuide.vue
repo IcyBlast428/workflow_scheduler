@@ -113,14 +113,14 @@
             ></textarea>
           </div>
           <details class="disclosure">
-            <summary>预览代码高亮</summary>
+            <summary>预览代码高亮</summary><div class="disclosure-body">
             <CodeBlock
               class="guide-code"
               :code="draft.code"
               :language="draft.language"
               label="编辑预览代码"
             />
-          </details>
+          </div></details>
           <div class="filter-actions">
             <button class="btn primary" :disabled="saving">
               {{ saving ? '保存中…' : '保存示例' }}</button

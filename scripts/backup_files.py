@@ -32,7 +32,7 @@ def add_task_storage(archive, data, releases=None, output=None):
     if output == release_root or release_root in output.parents:
         raise ValueError('Backup output must be outside the task release directory')
     interpreter = Path(sys.executable).resolve()
-    for root, prefix in ((release_root, 'data/task-packages'), (data / 'task-data', 'data/task-data')):
+    for root, prefix in ((release_root, 'data/task-packages'), (data / 'task-data', 'data/task-data'), (data / 'trial-data', 'data/trial-data')):
         if not root.exists():
             continue
         if root.is_symlink() or not root.is_dir():

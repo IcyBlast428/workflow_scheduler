@@ -67,7 +67,7 @@ test('login, new-tab session, dismiss pause, execution, download and history', a
   await page.locator('.confirm-modal').getByRole('button',{name:'仅暂停',exact:true}).click();
   await expect(row).toContainText('已暂停');
   await row.getByRole('button',{name:'详情',exact:true}).click();
-  await page.getByRole('tab',{name:'执行记录',exact:true}).click();
+  await page.getByRole('tab',{name:'执行与输出',exact:true}).click();
   await page.getByRole('button',{name:'查看执行',exact:true}).first().click();
   await expect(page.locator('.execution-output')).toContainText('浏览器回归完成',{timeout:20000});
   await expect(page.locator('.execution-meta')).toContainText('成功');
@@ -75,8 +75,8 @@ test('login, new-tab session, dismiss pause, execution, download and history', a
   await page.getByRole('link',{name:'下载保留日志'}).click();
   const download = await downloadEvent;
   expect(await download.failure()).toBeNull();
-  await page.locator('.execution-modal').getByTitle('关闭').click();
-  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await page.locator('.task-detail-modal .embedded-workspace').getByTitle('关闭').click();
   await page.getByRole('tab',{name:'配置历史',exact:true}).click();
   await expect(page.getByRole('button',{name:'恢复此配置'}).first()).toBeVisible();
   await page.getByRole('button',{name:'恢复此配置'}).first().click();
@@ -175,7 +175,7 @@ test('detail tabs retain code state and slow refresh keeps content and geometry'
   await dialog.getByLabel('自动换行').check();
   await dialog.getByLabel('搜索文件内容').fill('print');
   const requestsBeforeSwitch = sourceRequests;
-  for (const name of ['执行记录','配置历史','操作记录','说明与配置','查看代码']) {
+  for (const name of ['执行与输出','配置历史','操作记录','说明与配置','查看代码']) {
     await dialog.getByRole('tab',{name,exact:true}).click();
     const box = await dialog.boundingBox();
     expect(box.y).toBe(initialBox.y);

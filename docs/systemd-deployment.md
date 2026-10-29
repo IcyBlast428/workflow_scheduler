@@ -227,3 +227,34 @@ BACKUP_DIR="$PWD/backups/systemd-$(date +%Y%m%d-%H%M%S)"
 | systemd 服务已 enable 但 WSL 重启后未运行 | 检查用户会话/linger 和 Docker Desktop 数据库启动顺序 |
 
 安装和重启行为以 [systemd service](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html)、[执行环境说明](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)为依据。本次在本机 WSL 实测用户服务和 PostgreSQL；生产系统级账号、HTTPS、GaussDB/DWS、Nacos 和厂商驱动仍需在实际服务器验收。
+
+## 维护入口与执行去重
+
+日常维护可先在任务列表进入维护模式，等待活动执行与预留名额归零，再停止服务。维护状态重启后保留，更新后需由管理员明确结束维护。维护不会自动执行平台升级，也不会自动补跑跳过的任务。任务连接授权、去重与恢复注意事项见 [日常操作说明](operational-improvements.md)。
+
+## 可选任务隔离用户管理器
+
+仅在计划启用任务级 systemd 隔离时配置。普通进程模式不需要此步骤。目标内核、systemd 与 cgroup 必须支持全部隔离属性；本机实测版本为 259，目标服务器应运行实际探针。
+
+生产的系统级 Scheduler 通过同一 `wfs` 服务账户的用户管理器建立任务单元，无需授予任意 sudo/polkit 权限。先在维护窗口确认服务账号与目录权限，生成并审阅 drop-in：
+
+```bash
+sudo loginctl enable-linger wfs
+TASK_UID="$(id -u wfs)"
+sudo systemctl start "user@$TASK_UID.service"
+python3 scripts/render_task_isolation.py --user wfs --output /tmp/wfs-isolation-review.conf
+sudo install -d -m 0755 /etc/systemd/system/wfs-scheduler.service.d
+sudo install -m 0644 /tmp/wfs-isolation-review.conf /etc/systemd/system/wfs-scheduler.service.d/task-isolation.conf
+sudo systemctl daemon-reload
+# 维护模式、活动任务清零后再统一重启；不在运行中热切换 Scheduler
+```
+
+以相同账户和用户总线环境运行探针：
+
+```bash
+sudo -u wfs env XDG_RUNTIME_DIR="/run/user/$TASK_UID" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TASK_UID/bus" \
+  /data/wfs/current/.venv/bin/python scripts/probe_task_isolation.py
+```
+
+检查成功后，先为专用测试任务配置「仅允许指定连接」、新准备版本、隔离资源限额，再实际运行与取消验证。共享 SQLite 业务文件不受支持；网络仍开放。任意属性或权限不满足时拒绝启动，不降级为普通进程。具体行为与保留制品、Webhook、完整引用清理步骤见 [剩余改进手册](remaining-improvements.md)。

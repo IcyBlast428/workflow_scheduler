@@ -211,20 +211,51 @@ def _sync_job_stats(job_list, prune_missing=True):
             raise
 
 @serialized_configuration
-def call_task_once(pid, actor='admin'):
-    for spec in discover_task_specs(TASK_DIR):
+def call_task_once(pid, actor='admin', context=None):
+    from app.bootstrap.admission import ensure_open
+    ensure_open()
+    context=context or {}
+    specs = discover_task_specs(TASK_DIR)
+    if context.get('source') == 'trial' and context.get('version'):
+        from app.bootstrap.task_packages import task, release, release_dir
+        from app.bootstrap.task_loader import load_task_spec, resolve_main_file
+        record, candidate = task(pid), release(pid, context['version'])
+        if record.get('deleted_at') or record.get('pending'):
+            raise ValueError('任务已删除或正在发布，请稍后核对。')
+        root = release_dir(pid, candidate['version'])
+        spec = load_task_spec(record['group_name'], record['folder_name'], root/'code', pid_override=pid)
+        spec.update(pid=pid,task_name=record['task_name'],main_file=candidate['main_file'],
+                    main_file_path=resolve_main_file(root/'code',candidate['main_file']),
+                    main_file_error='',timeout_seconds=600)
+        specs = [spec]
+    for spec in specs:
         if spec.get('pid') != pid:
             continue
         if spec.get('error'):
             raise ValueError('invalid task config for {}: {}'.format(pid, spec.get('error')))
         if spec.get('main_file_error'):
             raise ValueError('task entry file is invalid for {}: {}'.format(pid, spec.get('main_file_error')))
-        reservation = runnings.claim(pid, spec.get('max_instances') or 1)
+        from app.bootstrap.operational_policy import load as operational_policy
+        policy=operational_policy('task',pid)
+        if context.get('source') in ('backfill','retry') and not policy['idempotent']:
+            raise ValueError('任务未声明可安全重复执行。')
+        if context.get('version'):
+            from app.bootstrap.task_packages import release, release_dir
+            data=release(pid,context['version'])
+            if data['status'] not in ('ready','applied'):
+                raise ValueError('指定任务版本尚未检查通过。')
+            spec=dict(spec,main_file_path=str(release_dir(pid,data['version'])/'code'/data['main_file']),
+                      python_executable=str(release_dir(pid,data['version'])/data['python']))
+        reservation = runnings.claim(pid, spec.get('max_instances') or 1, spec.get('group_name',''))
         if reservation is None:
-            raise ValueError('task concurrency limit reached')
+            from app.bootstrap.admission import CapacityUnavailable
+            raise CapacityUnavailable(runnings.capacity_reason(pid,spec.get('max_instances') or 1,spec.get('group_name','')))
         manual_job_id = 'manual_{}_{}'.format(pid, uuidhex())
         try:
-            run_id = create_run(pid, spec.get('task_name') or spec.get('folder_name'), source='manual', actor=actor,
+            run_id = create_run(pid, spec.get('task_name') or spec.get('folder_name'), source=context.get('source','manual'), actor=actor,
+                                parameters=context.get('parameters',policy['parameters']),business_date=context.get('business_date',''),
+                                retry_attempt=context.get('retry_attempt',0),retry_of=context.get('retry_of',''),
+                                requested_version=context.get('version',''),request_id=context.get('request_id',''),
                                 dir_name=spec.get('dir_name'), group_name=spec.get('group_name'), folder_name=spec.get('folder_name'))
         except Exception:
             runnings.remove(reservation)

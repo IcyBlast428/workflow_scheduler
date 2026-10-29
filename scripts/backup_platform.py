@@ -68,9 +68,12 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
                 encrypted_settings = add_connection_settings(archive, data, temporary)
                 add_connection_settings(archive, data, temporary, 'task-publishing.sqlite3')
                 add_connection_settings(archive, data, temporary, 'gitlab-updates.sqlite3')
+                add_connection_settings(archive, data, temporary, 'admission.sqlite3')
                 archive.writestr('manifest.json',json.dumps({'format':'wfs-platform-1','database':database,'schema':schema,
                     'dump_tool':tool,'created_at':dt.datetime.now().isoformat(' '),'dump_sha256':digest.hexdigest(),
                     'connection_passwords_included':False,'encrypted_connections_included':encrypted_settings,'restore_target':'new database only'},indent=2))
+    from scripts.backup_receipt import record
+    record(data,output)
     return output
 
 

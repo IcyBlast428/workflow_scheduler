@@ -22,11 +22,11 @@ def _linked(path):
     return path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction())
 
 
-def output_directory(pid, run_id, create=False):
+def output_directory(pid, run_id, create=False, trial=False):
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,199}', str(pid)) or not re.fullmatch(r'[a-f0-9]{32}', str(run_id)):
         raise SourceError('任务或执行编号无效。')
     base = Path(DATA_DIR).resolve()
-    relative = Path('task-data') / pid / 'runs' / run_id
+    relative = Path('trial-data' if trial else 'task-data') / pid / 'runs' / run_id
     current = base
     for part in relative.parts:
         current /= part
@@ -47,7 +47,7 @@ def _location(run_id, filename='', directory=False):
         raise SourceError('执行记录不存在。', 404)
     if record.get('output_layout') != 'per-run-v1':
         raise SourceError('此历史执行尚未使用独立输出目录。', 404)
-    root, relative, task = output_directory(record['pid'], run_id)
+    root, relative, task = output_directory(record['pid'], run_id, trial=record.get('source')=='trial')
     parts = _parts(filename, directory=directory)
     current = task
     for part in parts:

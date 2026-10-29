@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {api} from '../src/api.js';
+const values=new Map();globalThis.sessionStorage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};
+globalThis.window={setTimeout,clearTimeout};const calls=[];let lose=true;
+globalThis.fetch=async(_url,options)=>{calls.push(JSON.parse(options.body));if(lose){lose=false;throw new Error('response lost');}return {ok:true,headers:{get:()=> 'application/json'},json:async()=>({code:20000,data:{id:'accepted'}})};};
+const request={kind:'backfill',context:{business_date:'2026-01-01',parameters:{region:'CN'}}};
+await assert.rejects(api.submitExecutionRequest('task',request),/无法连接/);
+await api.submitExecutionRequest('task',request);
+assert.equal(calls[0].request_id,calls[1].request_id);
+await api.submitExecutionRequest('task',request);
+assert.notEqual(calls[1].request_id,calls[2].request_id);
+assert.equal(values.size,0);
+console.log('Lost execution-request responses reuse their receipt; a confirmed new action gets a new receipt.');

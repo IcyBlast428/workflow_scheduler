@@ -9,6 +9,7 @@ const { descriptor } = parse(await readFile(new URL('../src/components/TaskRelea
 await writeFile(mockPath, `export const requests=[]; export const api={packagePreview:(pid,version)=>new Promise((resolve,reject)=>requests.push({pid,version,resolve,reject}))};`);
 const compiled = compileScript(descriptor, {id:'release-regression'}).content
   .replace("'../api'", JSON.stringify(mockPath.href))
+  .replace("'../composables/useUnsavedChanges'", "'../src/composables/useUnsavedChanges.js'")
   .replace("import LoadingStatus from './LoadingStatus.vue';", 'const LoadingStatus = {};')
   .replace("import ModalShell from './ModalShell.vue';", 'const ModalShell = {};');
 await writeFile(compiledPath, compiled);

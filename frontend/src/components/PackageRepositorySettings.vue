@@ -88,12 +88,14 @@
 <script setup>
 import { reactive, ref } from 'vue';
 import { api } from '../api';
+import { useUnsavedChanges } from '../composables/useUnsavedChanges';
 const form = reactive({}),
   loaded = ref(false),
   loading = ref(false),
   saving = ref(false),
   error = ref(''),
   message = ref('');
+const {saved:repositorySaved}=useUnsavedChanges(()=>({...form}),()=>loaded.value);
 function opened(event) {
   if (event.target.open && !loaded.value && !loading.value) load();
 }
@@ -103,6 +105,7 @@ async function load() {
   try {
     Object.assign(form, await api.packageRepository(), { password: '' });
     loaded.value = true;
+    repositorySaved();
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -118,6 +121,7 @@ async function save() {
     Object.assign(form, await api.savePackageRepository({ ...form }), {
       password: '',
     });
+    repositorySaved();
     message.value = '仓库设置已保存，新版本检查依赖时生效。';
   } catch (err) {
     error.value = err.message;

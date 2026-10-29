@@ -31,7 +31,7 @@ def execution_version(entry, python_executable=''):
             return 'unknown'
     requirements = []
     for parent in (path.parent,path.parent.parent,BASE_DIR.parent):
-        for name in ('requirements.txt','requirements-linux-py312.lock','poetry.lock','uv.lock'):
+        for name in ('requirements.txt','requirements-linux-py312.lock','poetry.lock','uv.lock','dependencies.lock.txt','dependencies.reproducible.txt'):
             lock = parent/name
             if lock.is_file() and lock.stat().st_size<=2*1024*1024:
                 requirements.append((name,hashlib.sha256(lock.read_bytes()).hexdigest()))

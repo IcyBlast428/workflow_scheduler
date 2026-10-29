@@ -109,3 +109,16 @@ class NexusPackageTests(unittest.TestCase):
         self.assertNotIn(password,(root/'prepare.log').read_text(encoding='utf-8'))
         self.assertNotIn(password,str(data))
         self.assertFalse(list(root.rglob('credentials')))
+
+    def test_retained_wheels_rebuild_without_contacting_repository(self):
+        self.configure()
+        data=self.ready(self.new({'main.py':'from guide_parent import value;print(value)','requirements.txt':'guide-parent>=1,<2'}))
+        from scripts.rebuild_task_environment import rebuild
+        root=packages.release_dir(data['pid'],data['version'])
+        self.assertTrue(data['dependency_bundle_sha256'])
+        before=len(self.requests)
+        interpreter=rebuild(root,self.root/'rebuilt-environment')
+        import subprocess
+        value=subprocess.check_output([str(interpreter),'-c','from guide_parent import value;print(value)'],text=True)
+        self.assertIn('NEXUS_TRANSITIVE_OK',value)
+        self.assertEqual(len(self.requests),before)

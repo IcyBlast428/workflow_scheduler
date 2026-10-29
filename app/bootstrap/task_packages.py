@@ -432,48 +432,50 @@ def _command(command, root, timeout, *, environment=None, secrets=()):
 
 
 def _install_requirements(python, code, root, requirements, repository, timeout):
-    from urllib.parse import urlsplit
-    common = [str(python), '-I', '-m', 'pip', '--isolated', '--disable-pip-version-check', '--no-input']
-    if repository['mode'] == 'offline':
-        # Preserve the deterministic offline contract, without index fallback.
-        for line in requirements:
-            if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*', line):
-                raise PackageError('离线模式要求全部直接及间接依赖使用 package==version，并提供匹配 wheels；版本范围请使用 Nexus 模式。')
-        arguments = common + ['install', '--no-index', '--no-deps', '--only-binary=:all:', '--no-cache-dir']
-        wheels = [code / 'wheels']
-        if os.environ.get('WFS_TASK_WHEELHOUSE'):
-            wheels.append(Path(os.environ['WFS_TASK_WHEELHOUSE']).resolve())
-        for wheelhouse in wheels:
-            if wheelhouse.is_dir():
-                arguments += ['--find-links', str(wheelhouse)]
-        _command(arguments + ['-r', str(code / 'requirements.txt')], root, timeout)
-    else:
-        arguments = common + ['install', '--index-url', repository['index_url'], '--only-binary=:all:',
-            '--retries', '1', '--timeout', '15', '--no-cache-dir']
-        if urlsplit(repository['index_url']).scheme == 'http':
-            arguments += ['--trusted-host', urlsplit(repository['index_url']).netloc]
-        if repository.get('ca_bundle'):
-            arguments += ['--cert', repository['ca_bundle']]
-        with tempfile.TemporaryDirectory(prefix='wfs-pip-auth-') as temporary:
-            netrc = Path(temporary) / 'credentials'
-            username, password = repository.get('username', ''), repository.get('password', '')
-            credentials = ''
-            if username:
-                credentials = ('machine ' + urlsplit(repository['index_url']).hostname +
-                    ' login ' + json.dumps(username, ensure_ascii=False) +
-                    ' password ' + json.dumps(password, ensure_ascii=False) + '\n')
-            netrc.write_text(credentials, encoding='utf-8')
-            if os.name != 'nt':
-                netrc.chmod(0o600)
-            from urllib.parse import quote
-            import base64
-            redactions = (password, quote(password, safe='') if password else '',
-                          base64.b64encode(f'{username}:{password}'.encode()).decode() if username else '')
-            _command(arguments + ['-r', str(code / 'requirements.txt')], root, timeout,
-                     environment={'NETRC': str(netrc)}, secrets=redactions)
-    _command(common + ['check'], root, timeout)
-    locked = _command(common + ['freeze', '--all'], root, timeout)
-    (root / 'dependencies.lock.txt').write_text(locked, encoding='utf-8')
+    from urllib.parse import urlsplit, quote
+    from packaging.utils import parse_wheel_filename
+    import base64
+    common=[str(python),'-I','-m','pip','--isolated','--disable-pip-version-check','--no-input']
+    bundle=root/('dependency-wheels-'+Path(python).parent.parent.name)
+    bundle.mkdir(exist_ok=False)
+    with tempfile.TemporaryDirectory(prefix='wfs-pip-auth-') as temporary:
+        netrc=Path(temporary)/'credentials'
+        username,password=repository.get('username',''),repository.get('password','')
+        credentials=('machine '+urlsplit(repository['index_url']).hostname+' login '+json.dumps(username)+' password '+json.dumps(password)+'\n') if username else ''
+        netrc.write_text(credentials,encoding='utf-8')
+        if os.name!='nt': netrc.chmod(0o600)
+        redactions=tuple(v for v in (password,quote(password,safe=''),base64.b64encode(f'{username}:{password}'.encode()).decode() if username else '') if v)
+        if repository['mode']=='offline':
+            for line in requirements:
+                if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*',line):
+                    raise PackageError('离线模式要求全部直接及间接依赖使用 package==version。')
+            arguments=['--no-index','--no-deps']
+            for wheelhouse in (code/'wheels',Path(os.environ.get('WFS_TASK_WHEELHOUSE',''))):
+                if wheelhouse.is_dir() and str(wheelhouse)!='.': arguments+=['--find-links',str(wheelhouse)]
+        else:
+            arguments=['--index-url',repository['index_url'],'--retries','1','--timeout','15']
+            if urlsplit(repository['index_url']).scheme=='http': arguments+=['--trusted-host',urlsplit(repository['index_url']).netloc]
+            if repository.get('ca_bundle'): arguments+=['--cert',repository['ca_bundle']]
+        _command(common+['download','--only-binary=:all:','--no-cache-dir','--dest',str(bundle),*arguments,'-r',str(code/'requirements.txt')],
+                 root,timeout,environment={'NETRC':str(netrc)},secrets=redactions)
+    if sum(p.stat().st_size for p in bundle.iterdir())>limits()['expanded_bytes']:
+        raise PackageError('依赖下载超过版本大小限制。')
+    records=[];hashed=[]
+    for wheel in sorted(bundle.iterdir()):
+        if wheel.is_symlink() or wheel.suffix!='.whl': raise PackageError('依赖归档仅接受 wheel。')
+        name,version,_,_=parse_wheel_filename(wheel.name)
+        digest=hashlib.sha256(wheel.read_bytes()).hexdigest()
+        records.append({'file':wheel.name,'sha256':digest,'name':str(name),'version':str(version)})
+        hashed.append(str(name)+'=='+str(version)+' --hash=sha256:'+digest)
+    lock=root/'dependencies.reproducible.txt'
+    lock.write_text('\n'.join(hashed)+'\n',encoding='utf-8')
+    _command(common+['install','--no-index','--no-deps','--require-hashes','--only-binary=:all:','--find-links',str(bundle),'-r',str(lock)],root,timeout)
+    _command(common+['check'],root,timeout)
+    (root/'dependencies.lock.txt').write_text(_command(common+['freeze','--all'],root,timeout),encoding='utf-8')
+    runtime=_command([str(python),'-I','-c','import json,sys,platform; print(json.dumps([list(sys.version_info[:3]),platform.system(),platform.machine()]))'],root,timeout)
+    metadata={'directory':bundle.name,'wheels':records,'runtime':json.loads(runtime.strip())}
+    (root/'dependency-bundle.json').write_text(json.dumps(metadata,indent=2),encoding='utf-8')
+    return hashlib.sha256(json.dumps(metadata,sort_keys=True).encode()).hexdigest()
 
 
 def _prepare_worker(pid, version, token):
@@ -503,9 +505,20 @@ def _prepare_worker(pid, version, token):
             data['dependency_source'] = {key: source[key] for key in ('mode', 'index_url', 'revision')}
             _command([str(python), '-I', '-m', 'ensurepip', '--default-pip'], root, timeout)
             stage('从 Nexus 安装依赖' if source['mode'] == 'nexus' else '安装离线依赖')
-            _install_requirements(python, code, root, data['requirements'], source, timeout)
+            data['dependency_bundle_sha256']=_install_requirements(python,code,root,data['requirements'],source,timeout)
         # Marker is outside user code; it follows nested entry files as well.
-        marker = {'task_release': version, 'package_sha256': data['checksum'], 'pid': pid}
+        from packaging.requirements import Requirement
+        from packaging.utils import canonicalize_name
+        external_sdk=any(canonicalize_name(Requirement(line).name)=='workflow-scheduler-task-sdk' for line in data['requirements'])
+        if external_sdk:
+            data['shared_sdk_package']=_command([str(python),'-I','-c',"import importlib.metadata as m; print(m.version('workflow-scheduler-task-sdk'))"],root,timeout).strip()
+            data['shared_sdk_sha256']=data.get('dependency_bundle_sha256','')
+        else:
+            from app.bootstrap.shared_sdk import freeze
+            data['shared_sdk_sha256']=freeze(root)
+        marker = {'task_release': version, 'package_sha256': data['checksum'], 'pid': pid,
+                  'shared_sdk_sha256':data['shared_sdk_sha256'],'shared_sdk_package':data.get('shared_sdk_package',''),
+                  'dependency_bundle_sha256':data.get('dependency_bundle_sha256','stdlib')}
         (root / '.release.json').write_text(json.dumps(marker), encoding='utf-8')
         if os.name != 'nt':
             for path in code.rglob('*'):
@@ -530,13 +543,18 @@ def _prepare_worker(pid, version, token):
         _slots.release()
 
 
-def publish(pid, version, revision, actor, rollback=False):
+def publish(pid, version, revision, actor, rollback=False, reason=''):
+    if not isinstance(reason,str) or len(reason)>500: raise PackageError('发布说明最多 500 字。')
     from app.bootstrap.core import _configuration_lock, aps_start
     from app.bootstrap.schedule_config import load_schedule
     if not rollback:
         from app.bootstrap.gitlab_tasks import validate_release
         validate_release(release(pid, version))
-    with _configuration_lock:
+    from app.bootstrap.release_controls import enforce, recheck
+    from app.bootstrap import admission
+    receipt = enforce(release(pid,version))
+    with _configuration_lock, admission.lock:
+        recheck(receipt)
         record, data = task(pid), release(pid, version)
         if record['revision'] != revision or record.get('deleted_at') or record.get('pending'):
             raise PackageError('任务状态已变化，请刷新后重新发布。', 409)
@@ -556,6 +574,9 @@ def publish(pid, version, revision, actor, rollback=False):
         if selected not in {f['path'] for f in data['manifest'] if f['path'].endswith('.py')}:
             raise PackageError('任务包缺少当前调度配置使用的入口文件，请保留入口后重新上传。', 409)
         root = release_dir(pid, version)
+        if data.get('shared_sdk_sha256') and not data.get('shared_sdk_package'):
+            from app.bootstrap.shared_sdk import verify
+            if not verify(root,data['shared_sdk_sha256']): raise PackageError('公共 SDK 快照校验失败。',409)
         if _checksum(_manifest(root / 'code')) != data['checksum'] or not (root / data['python']).is_file():
             raise PackageError('版本文件或环境校验失败，请重新准备或上传。', 409)
         previous = {**record}
@@ -575,7 +596,7 @@ def publish(pid, version, revision, actor, rollback=False):
             record.pop('pending', None)
             record['last_published_at'] = str(business_now())
             record['last_published_by'] = actor
-            data.update(status='applied', message='调度器已确认此版本。', published_at=record['last_published_at'])
+            data.update(status='applied', message='调度器已确认此版本。', published_at=record['last_published_at'],published_by=actor,publish_reason=reason.strip())
             try:
                 data['schedule_snapshot'] = load_schedule(pid)
             except ValueError:
@@ -719,6 +740,22 @@ def preview(pid, version, filename=None):
                for name in sorted(old.keys() | new.keys()) if old.get(name) != new.get(name)]
     result = {'release': data, 'changes': changes, 'current_revision': record['revision'],
               'against_version': record.get('active_version')}
+    from app.bootstrap.global_vars import runnings
+    from app.bootstrap.task_loader import _record_maps
+    config = _record_maps().get(pid) or {}
+    selected = config.get('main_file') or data['main_file']
+    result['preflight'] = dict(active_instances=runnings.count(pid), entry=selected,
+        entry_present=selected in new, entry_changed=bool(base and base['main_file'] != data['main_file']),
+        shared_sdk_changed=bool(base and base.get('shared_sdk_sha256')!=data.get('shared_sdk_sha256')),
+        shared_sdk_current=(base or {}).get('shared_sdk_sha256',''),shared_sdk_candidate=data.get('shared_sdk_sha256',''),
+        dependencies_changed=any(c['path'] in ('requirements.txt','requirements.lock','pyproject.toml') or c['path'].startswith('wheels/') for c in changes),
+        environment_ready=data['status'] in ('ready','applied'),
+        schedule_enabled=str(config.get('enabled','')).lower() in ('1','true','yes','on'),
+        current_version=record.get('active_version'), candidate_version=version,
+        business_verified=False)
+    if filename is None:
+        from app.bootstrap.release_controls import preview as gates
+        result['gates']=gates(data)
     if filename is not None:
         if filename not in old and filename not in new:
             raise PackageError('文件不在版本清单中。', 404)

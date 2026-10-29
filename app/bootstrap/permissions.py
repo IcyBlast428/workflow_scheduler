@@ -9,7 +9,7 @@ from werkzeug.security import check_password_hash
 from app.bootstrap.database import GaussDB
 from app.settings import AUTH_ADMIN_PASSWORD_HASH, AUTH_ADMIN_USERNAME
 
-ROLES = {'viewer', 'operator', 'admin'}
+ROLES = {'viewer', 'operator', 'admin', 'maintainer'}
 READ_POSTS = {'/api/user/logout', '/api/taskinfo/taskLogs', '/api/taskinfo/taskLogDetail',
               '/api/taskinfo/systemLogs', '/api/taskinfo/taskids', '/api/taskinfo/groups',
               '/api/taskinfo/systemids', '/api/taskinfo/logview', '/api/taskinfo/schedule'}
@@ -39,6 +39,11 @@ def identity():
 def allowed(path, method, role):
     if role == 'admin':
         return True
+    if role=='maintainer':
+        from flask import has_request_context
+        if not has_request_context(): return False
+        from app.bootstrap.task_access import request_allowed
+        return request_allowed(identity())
     # The legacy operator role now follows the same read-only policy. Unknown
     # roles never receive access, and newly added endpoints default to denied.
     if role not in {'viewer', 'operator'}:

@@ -1,5 +1,6 @@
 <template>
-  <div v-if="open" ref="backdrop" class="modal-backdrop" :class="backdropClass" @click.self="$emit('close')">
+  <section v-if="embedded && open" class="embedded-workspace"><slot /></section>
+  <div v-else-if="open" ref="backdrop" class="modal-backdrop" :class="backdropClass" @click.self="$emit('close')">
     <section ref="panel" v-glass class="modal glass-surface glass-floating" :class="panelClass" role="dialog" aria-modal="true" :aria-label="label" tabindex="-1">
       <slot />
     </section>
@@ -8,7 +9,7 @@
 <script setup>
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { dialogStack, enterDialog, leaveDialog } from '../dialogStack';
-const props = defineProps({ open: Boolean, label: { type: String, required: true }, panelClass: String, backdropClass: String });
+const props = defineProps({ open: Boolean, embedded: Boolean, label: { type: String, required: true }, panelClass: String, backdropClass: String });
 const emit = defineEmits(['close']);
 const backdrop = ref(null), panel = ref(null);
 let previousFocus, openedElement;
@@ -36,7 +37,7 @@ function cleanup() {
   nextTick(() => { if (previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus(); });
 }
 watch(() => props.open, async open => {
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined' || props.embedded) return;
   if (!open) { cleanup(); return; }
   previousFocus = document.activeElement;
   await nextTick();

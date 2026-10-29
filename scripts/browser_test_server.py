@@ -51,7 +51,7 @@ from app.extensions import scheduler
 app = create_app()
 from app.bootstrap.database import GaussDB
 with GaussDB() as db:
-    for username,role in [('browser-viewer','viewer'), ('browser-operator','operator')]:
+    for username,role in [('browser-viewer','viewer'), ('browser-operator','operator'), ('browser-maintainer','maintainer')]:
         db.execute_sql('INSERT INTO wfs_users(username,password_hash,role,enabled) VALUES(?,?,?,1)',
                        params=(username,os.environ['WFS_ADMIN_PASSWORD_HASH'],role))
 if scheduler.get_job('MAIN_TASK_JOB'):
@@ -62,6 +62,8 @@ for fixture_spec in legacy_specs(global_vars.TASK_DIR):
         fixture_spec.update(task_name='目录与输出验收', main_file='src/report_job/main.py')
     migrate_task(fixture_spec, actor='browser-fixture')
 save_schedule('acceptance__slow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})
+from app.bootstrap.task_access import save as save_access
+save_access('browser-maintainer',{'revision':0,'tasks':['acceptance__slow'],'groups':[],'capabilities':['run','schedule','view_code']},'browser-fixture')
 if os.environ.get('WFS_BROWSER_FLOW_FIXTURE') == '1':
     save_schedule('acceptance__flow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})
 aps_start()

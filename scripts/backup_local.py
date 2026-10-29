@@ -51,7 +51,10 @@ def backup(database, data, output, releases=None):
                 encrypted_settings = add_connection_settings(archive, data, temporary)
                 add_connection_settings(archive, data, temporary, 'task-publishing.sqlite3')
                 add_connection_settings(archive, data, temporary, 'gitlab-updates.sqlite3')
+                add_connection_settings(archive, data, temporary, 'admission.sqlite3')
                 archive.writestr('manifest.json', json.dumps({'format':2,'database':'database.sqlite3','data':'data','credentials_included':False,'encrypted_connections_included':encrypted_settings}))
+    from scripts.backup_receipt import record
+    record(data,output)
     return output
 
 

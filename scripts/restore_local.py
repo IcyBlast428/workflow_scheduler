@@ -44,7 +44,7 @@ def restore(backup, destination):
                     mode = (item.external_attr >> 16) & 0o777
                     if mode:
                         target.chmod(mode)
-            for database in (destination/'database.sqlite3',destination/'data/executions/journal.sqlite3',destination/'data/database-connections.sqlite3',destination/'data/task-publishing.sqlite3',destination/'data/gitlab-updates.sqlite3'):
+            for database in (destination/'database.sqlite3',destination/'data/executions/journal.sqlite3',destination/'data/database-connections.sqlite3',destination/'data/task-publishing.sqlite3',destination/'data/gitlab-updates.sqlite3',destination/'data/admission.sqlite3'):
                 if database.exists():
                     with contextlib.closing(sqlite3.connect(f'file:{database}?mode=ro',uri=True)) as db:
                         if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
@@ -55,6 +55,13 @@ def restore(backup, destination):
         except Exception:
             # Preserve failed material for inspection; never remove a computed tree.
             raise
+    receipt={'at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+             'scope':'archive and SQLite integrity checks','database_restore_verified':False}
+    receipt_path=destination/'data/admission.sqlite3'
+    receipt_path.parent.mkdir(parents=True,exist_ok=True)
+    with sqlite3.connect(receipt_path) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,payload TEXT NOT NULL)')
+        db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',('restore:last',json.dumps(receipt)))
     return destination
 
 

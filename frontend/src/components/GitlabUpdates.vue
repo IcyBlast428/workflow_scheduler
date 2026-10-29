@@ -90,10 +90,12 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
 import { api } from '../api';
+import { useUnsavedChanges } from '../composables/useUnsavedChanges';
 const emit = defineEmits(['state']);
 const settings = ref(null), state = ref(null), tasks = ref([]), loading = ref(false), saving = ref(false), checking = ref(false);
 const error = ref(''), message = ref(''), selected = ref(null), fileDiff = ref(null), fileIndex = ref(-1), diffLoading = ref(false), diffError = ref('');
 const form = reactive({ tasks: [] }), taskRoots = ref(''), sharedPaths = ref(''), filter = ref('all');
+const {saved:settingsSaved}=useUnsavedChanges(()=>({form,roots:taskRoots.value,paths:sharedPaths.value}),()=>Boolean(settings.value));
 let timer, sequence = 0, stateSequence = 0, alive = true;
 const filters = [{ id: 'all', label: '全部' }, { id: 'branch', label: '待合并' }, { id: 'release', label: '待部署 / 发布' }];
 const filtered = computed(() => (state.value?.items || []).filter(item => filter.value === 'all' || (filter.value === 'branch' ? item.kind === 'branch' : item.kind !== 'branch')));
@@ -107,6 +109,7 @@ function applySettings(value) {
   settings.value = value;
   Object.assign(form, JSON.parse(JSON.stringify(value)), { token: '', clear_token: false });
   taskRoots.value = value.task_roots.join('\n'); sharedPaths.value = value.shared_paths.join('\n');
+  settingsSaved();
 }
 function applyState(value) {
   state.value = value; emit('state', value);

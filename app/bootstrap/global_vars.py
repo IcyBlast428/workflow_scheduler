@@ -9,7 +9,7 @@ import pathlib
 BASE_DIR = pathlib.Path(__file__).resolve().parents[1]  # 项目根路径
 
 # CONFIG_DIR = os.path.join(BASE_DIR, 'config')
-CONFIG_DIR = BASE_DIR/("config")
+CONFIG_DIR = pathlib.Path(os.environ.get('WFS_TASK_CONFIG_DIR',str(BASE_DIR/"config")))
 
 ROOT_LOG_DIR = os.environ.get('WFS_LOG_DIR', str(BASE_DIR.parent / 'logs'))
 
@@ -97,22 +97,36 @@ class RunningState:
         with self._lock:
             return sum(pid is None or pid in item for item in self._peddings)
 
-    def claim(self, pid, limit=1):
+    def claim(self, pid, limit=1, group_name=''):
         with self._lock:
             if len(self._peddings) >= int(os.environ.get('WFS_MAX_ACTIVE_RUNS', '20')):
                 return None
             if sum(pid in item for item in self._peddings) >= limit:
                 return None
+            if group_name:
+                from app.bootstrap.operational_policy import quota
+                capacity=quota(group_name)
+                groups=getattr(self,'_groups',{})
+                if capacity and sum(groups.get(id(item))==group_name for item in self._peddings)>=capacity:
+                    return None
+            if not hasattr(self,'_groups'): self._groups={}
             reservation = {pid: None}
+            self._groups[id(reservation)]=group_name
             self._peddings.append(reservation)
             return reservation
 
-    def capacity_reason(self, pid, limit=1):
+    def capacity_reason(self, pid, limit=1, group_name=''):
         with self._lock:
             if len(self._peddings) >= int(os.environ.get('WFS_MAX_ACTIVE_RUNS','20')):
                 return '全局执行名额已满，本次调度跳过。'
             if sum(pid in item for item in self._peddings) >= int(limit):
                 return '此任务的并发名额已满，本次调度跳过。'
+            if group_name:
+                from app.bootstrap.operational_policy import quota
+                capacity=quota(group_name)
+                groups=getattr(self,'_groups',{})
+                if capacity and sum(groups.get(id(item))==group_name for item in self._peddings)>=capacity:
+                    return '任务分组 '+group_name+' 的并发名额已满，本次计划跳过。'
             return '执行名额申请失败，本次调度跳过。'
 
     def set_process(self, reservation, pid, process_id):
@@ -152,6 +166,7 @@ class RunningState:
         with self._lock:
             self._peddings = [item for item in self._peddings if item is not obj]
             self._cancelled.discard(id(obj))
+            getattr(self,'_groups',{}).pop(id(obj),None)
 
     def __contains__(self, item):
         with self._lock:

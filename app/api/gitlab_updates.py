@@ -12,6 +12,20 @@ def error(exc):
     return error_msg(str(exc)), exc.status
 
 
+@blueprint.post('/api/integrations/gitlab/webhook')
+def webhook():
+    from app.bootstrap.gitlab_webhook import receive
+    if request.content_length is None or request.content_length>65536:
+        return error_msg('Webhook 内容过大。'),413
+    body=request.get_json(silent=True)
+    if not isinstance(body,dict): return error_msg('事件格式无效。'),400
+    try:
+        accepted=receive(request.headers.get('X-Gitlab-Token',''),request.headers.get('X-Gitlab-Event',''),
+            request.headers.get('X-Gitlab-Event-UUID',''),body)
+    except PermissionError: return error_msg('Webhook 验证失败。'),401
+    except ValueError as exc: return error_msg(str(exc)),400
+    return success_msg({'accepted':accepted}),202
+
 @blueprint.before_request
 def limits():
     if request.method == 'POST' and (request.content_length is None or request.content_length > 100000):

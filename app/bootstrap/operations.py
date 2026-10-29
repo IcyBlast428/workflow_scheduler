@@ -161,6 +161,9 @@ def save_history(record):
     """Idempotent completion: inserts and statistics update share a transaction."""
     if record.get('history_saved') or record['status'] not in TERMINAL:
         return
+    if record.get('source')=='trial':
+        update_run(record['run_id'],history_saved=True)
+        return
     try:
         path = run_path(record['run_id'], 'log')
         if path.exists():
@@ -223,6 +226,9 @@ def service_state():
 
 
 def _recover_record(record):
+    if record and record.get('systemd_unit'):
+        from app.bootstrap.task_isolation import stop
+        stop(record['systemd_unit'])
     if record['status'] in TERMINAL:
         return
     process_id = record.get('process_id')
@@ -262,6 +268,8 @@ def maintenance(recover=False):
                     _persist_record(record)
                     record['db_synced'] = True
                     _write_file(record)
+                from app.bootstrap.execution_requests import retry_result
+                retry_result(record)
                 save_history(record)
                 if not read_run(record['run_id']).get('history_saved') and record['status'] in TERMINAL:
                     journal.defer(_directory, record['run_id'])
@@ -336,3 +344,5 @@ def start_operations():
     threading.Thread(target=loop, name='wfs-journal', daemon=True).start()
     from app.bootstrap.notifications import start_notifications
     start_notifications()
+    from app.bootstrap.execution_requests import start as start_requests
+    start_requests()

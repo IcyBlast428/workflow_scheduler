@@ -78,11 +78,20 @@ def profiles():
 
 
 def business_profile(identifier):
+    scoped = os.environ.get('WFS_TASK_CONNECTIONS_JSON')
+    if scoped is not None:
+        profile = json.loads(scoped).get(identifier)
+        if identifier == 'platform' or not profile:
+            raise PermissionError('此任务未获授权使用业务连接：' + str(identifier))
+        if not profile.get('enabled',True): raise PermissionError('业务连接已停用：'+identifier)
+        return profile
     if identifier == 'platform' or not isinstance(identifier, str) or not PROFILE_ID.fullmatch(identifier) or not _path().exists():
         return None
     with _store() as db:
         row = db.execute('SELECT payload FROM profiles WHERE id=?', (identifier,)).fetchone()
-    return _decode(row[0], identifier) if row else None
+    value=_decode(row[0],identifier) if row else None
+    if value and not value.get('enabled',True): raise PermissionError('业务连接已停用：'+identifier)
+    return value
 
 
 def active_platform():
@@ -177,6 +186,14 @@ def validate(form):
         if not minimum <= value <= maximum:
             raise ValueError(f'{key} 应在 {minimum} 至 {maximum} 之间。')
         result[key] = value
+    for key,maximum in [('name',100),('purpose',500),('owner',100),('environment',30)]:
+        value=form.get(key,previous.get(key,''))
+        if not isinstance(value,str) or len(value)>maximum or any(ord(c)<32 for c in value):
+            raise ValueError('连接说明格式无效。')
+        result[key]=value.strip()
+    result['enabled']=form.get('enabled',previous.get('enabled',True))
+    if type(result['enabled'])is not bool: raise ValueError('连接启用状态无效。')
+    if identifier=='platform' and not result['enabled']: raise ValueError('不能在此停用平台库。')
     result['pool_enabled'] = form.get('pool_enabled', previous.get('pool_enabled', True))
     if not isinstance(result['pool_enabled'], bool):
         raise ValueError('连接池开关必须为布尔值。')

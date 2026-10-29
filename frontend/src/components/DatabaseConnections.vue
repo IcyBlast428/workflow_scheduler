@@ -30,7 +30,8 @@
         <p v-if="state.restart_required" class="inline-alert warning">
           平台连接已保存，等待统一重启所有 Web 和调度进程后生效。
         </p>
-        <p v-else class="hint">
+        <p class="hint">配置来源：{{ state.configuration_source || '读取中' }} · 环境：{{ state.environment || '—' }}</p>
+        <p v-if="!state.restart_required" class="hint">
           平台库保存任务配置、执行记录和账户。切换连接不会搬迁原库数据。
         </p>
       </div>
@@ -63,7 +64,7 @@
           :key="profile.id"
           class="btn"
           :disabled="Boolean(busy)"
-          @click="edit(profile)"
+          @click="chooseProfile(profile)"
         >
           {{ profile.id }} · {{ typeLabel(profile.dialect) }}</button
         ><button class="btn" :disabled="Boolean(busy)" @click="newBusiness">
@@ -100,8 +101,15 @@
           兼容方式展示，驱动和协议兼容性需按实际产品、版本验证。
         </p>
       </section>
-      <form class="connection-form" @submit.prevent="run('save')">
+      <section v-if="scope === 'platform' && !state.platform_editable && !switchPlatform" class="surface-card">
+        <h3>当前平台连接由 {{ state.configuration_source }} 管理</h3>
+        <p class="hint">GaussDB/DWS 的生产连接通过 Nacos 和服务环境配置维护。本机 PostgreSQL 使用本地配置。此处保存 MySQL 连接不会迁移现有数据。</p>
+        <button class="btn" @click="switchPlatform = true">展开 MySQL / PolarDB 切换配置</button>
+      </section>
+      <section v-if="scope === 'business' && form.revision" class="surface-card"><h3>连接使用与状态</h3><p>{{ form.enabled === false ? '已停用' : '启用中' }} · {{ connectionInfo?.usage?.length || 0 }} 个任务声明或授权使用</p><p class="hint" v-for="item in connectionInfo?.usage || []" :key="item.pid">{{ item.name }} · {{ item.pid }}</p><p class="hint">最近测试：{{ connectionInfo?.last_test?.at || '尚无记录' }} · {{ connectionInfo?.last_test?.ready ? '通过' : '未通过 / 未测试' }} · {{ connectionInfo?.last_test?.elapsed_ms ?? '—' }} ms</p><p class="hint">声明之外的动态引用无法完整识别，停用前仍需核对兼容任务。</p><div class="filter-actions"><button class="btn" :disabled="Boolean(busy)" @click="lifecycle(form.enabled === false ? 'enable' : 'disable')">{{ form.enabled === false ? '启用连接' : '停用连接' }}</button><button class="btn" :disabled="Boolean(busy)" @click="lifecycle('archive')">归档连接</button><button class="btn danger" :disabled="busy || form.enabled !== false || connectionInfo?.usage?.length" @click="lifecycle('delete')">删除已停用连接</button></div><input v-if="form.enabled === false" v-model="deleteConfirmation" class="input" aria-label="删除连接确认" placeholder="删除前输入完整连接标识"></section>
+      <form v-if="scope === 'business' || state.platform_editable || switchPlatform" class="connection-form" @submit.prevent="run('save')">
         <fieldset :disabled="busy || loading">
+          <div v-if="scope === 'business'" class="filter-grid"><label>连接名称<input v-model.trim="form.name" class="input" maxlength="100"></label><label>负责人<input v-model.trim="form.owner" class="input" maxlength="100"></label><label>用途<input v-model.trim="form.purpose" class="input" maxlength="500"></label><label>环境标签<input v-model.trim="form.environment" class="input" maxlength="30" placeholder="例如 测试 / 生产"></label></div>
           <div class="filter-grid">
             <div v-if="scope === 'business'" class="form-row connection-wide">
               <label for="db-type">数据库类型</label
@@ -237,7 +245,7 @@
             </div>
           </div>
           <details v-if="scope === 'business'" class="disclosure pool-options">
-            <summary>连接池设置</summary>
+            <summary>连接池设置</summary><div class="disclosure-body">
             <p class="hint">
               同一进程按连接标识共享连接池，关闭 NewDB
               会归还连接。不同任务子进程不共享连接池。
@@ -298,7 +306,7 @@
                 />
               </div>
             </div>
-          </details>
+          </div></details>
           <div class="filter-actions">
             <button class="btn" type="button" @click="run('test')">
               {{ busy === 'test' ? '测试中…' : '测试连接' }}</button
@@ -313,7 +321,7 @@
             </button>
           </div>
           <details v-if="scope === 'platform'" class="disclosure">
-            <summary>新数据库初始化</summary>
+            <summary>新数据库初始化</summary><div class="disclosure-body">
             <p class="hint">
               仅用于没有平台表的新库，需要建表权限。已有数据的库请先完成数据迁移和结构核对。
             </p>
@@ -334,7 +342,7 @@
             >
               初始化新库平台表
             </button>
-          </details>
+          </div></details>
         </fieldset>
       </form>
       <div
@@ -357,8 +365,12 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { api } from '../api';
+import { useUnsavedChanges } from '../composables/useUnsavedChanges';
 import LoadingStatus from './LoadingStatus.vue';
 const props = defineProps({ confirm: { type: Function, required: true } });
+const usage=ref([]),deleteConfirmation=ref('');
+const connectionInfo=computed(()=>usage.value.find(i=>i.id===form.id));
+const switchPlatform = ref(false);
 const state = ref({}),
   scope = ref('platform'),
   busy = ref(''),
@@ -369,6 +381,7 @@ const state = ref({}),
   editing = ref(false),
   confirmDatabase = ref('');
 const empty = () => ({
+  name:'',purpose:'',owner:'',environment:'',enabled:true,
   dialect: 'mysql',
   id: '',
   host: '',
@@ -387,11 +400,13 @@ const empty = () => ({
   pool_timeout: 10,
 });
 const form = reactive(empty());
+const {dirty:connectionDirty,saved:connectionSaved}=useUnsavedChanges(()=>({...form}),()=>!loading.value);
 const databaseTypes = computed(
   () =>
     state.value.supported_databases || [
       {
-        dialect: 'mysql',
+        name:'',purpose:'',owner:'',environment:'',enabled:true,
+  dialect: 'mysql',
         label: 'MySQL / PolarDB / MariaDB',
         port: 3306,
         available: true,
@@ -424,11 +439,12 @@ function edit(profile) {
   message.value = '';
   result.value = null;
   confirmDatabase.value = '';
+  connectionSaved();
 }
-function newBusiness() {
-  edit(empty());
-}
-function selectScope(value) {
+async function chooseProfile(profile){if(connectionDirty.value && !await props.confirm({title:'放弃未保存的连接修改？',message:'选择另一连接后，未保存内容会丢失。',confirmText:'放弃修改',cancelText:'继续编辑'}))return;edit(profile);}
+function newBusiness() { chooseProfile(empty()); }
+async function selectScope(value) {
+  if(connectionDirty.value && !await props.confirm({title:'放弃未保存的连接修改？',message:'切换连接类型后，未保存的修改会丢失。',confirmText:'放弃修改',cancelText:'继续编辑'}))return;
   scope.value = value;
   edit(
     value === 'platform'
@@ -444,6 +460,7 @@ async function load(preserve = false) {
   error.value = '';
   try {
     state.value = await api.databaseConnections();
+    usage.value = await api.connectionUsage();
     if (!preserve) selectScope(scope.value);
   } catch (err) {
     error.value = err.message;
@@ -470,6 +487,7 @@ async function run(action) {
       form.revision = response.profile.revision;
       form.password_set = response.profile.password_set;
       form.password = '';
+      connectionSaved();
       editing.value = true;
       await load(true);
     }
@@ -488,6 +506,7 @@ async function run(action) {
     busy.value = '';
   }
 }
+async function lifecycle(action){if(!await props.confirm({title:action==='delete'?'删除业务连接':'变更业务连接状态',message:`${form.id} 将执行 ${({enable:'启用',disable:'停用',archive:'归档',delete:'删除'})[action]} 操作。`,details:['现有已打开的连接不会被此操作强行关闭。请核对依赖任务及动态引用。'],confirmText:'确认操作',danger:action!=='enable'}))return;busy.value=action;try{await api.connectionLifecycle({id:form.id,action,revision:form.revision,confirm:deleteConfirmation.value});connectionSaved();await load();message.value='连接状态已更新。';}catch(e){error.value=e.message;}finally{busy.value='';}}
 async function initialize() {
   if (confirmDatabase.value !== form.database) return;
   const yes = await props.confirm({

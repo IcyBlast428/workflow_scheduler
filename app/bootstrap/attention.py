@@ -20,6 +20,8 @@ def snapshot(admin=False):
     def add(key, title, message, **extra):
         issues.append(dict(key=key, title=title, message=message, **extra))
     specs = {spec['pid']:spec for spec in discover_task_specs()}
+    from app.bootstrap.operational_policy import all_tasks,TASK_DEFAULT
+    task_policies=all_tasks()
     with GaussDB() as db:
         applications = db.execute_query_sql("SELECT pid,status,message FROM wfs_config_application WHERE status<>'applied' LIMIT 100")
         runs = db.execute_query_sql("SELECT run_id,pid,status,payload FROM wfs_executions WHERE (status IN ('running','queued') OR (status IN ('failed','timed_out','interrupted','skipped','missed') AND created_at>=?)) ORDER BY created_at DESC LIMIT 101", params=(now-dt.timedelta(hours=24),))
@@ -31,9 +33,9 @@ def snapshot(admin=False):
             record = json.loads(payload)
             began = record.get('start_time') or record['created_at']
             age = max(0,(now-dt.datetime.fromisoformat(began)).total_seconds())
-            if status in ('running','queued') and age < int(os.environ.get('WFS_LONG_RUN_SECONDS','3600')):
+            if status in ('running','queued') and age < task_policies.get(pid,TASK_DEFAULT)['slow_minutes']*60:
                 continue
-            title = {'failed':'执行失败','timed_out':'执行超时','interrupted':'重启中断','skipped':'并发跳过','missed':'错过调度','running':'长时间执行','queued':'长时间等待'}.get(status,status)
+            title = {'failed':'执行失败','timed_out':'执行超时','interrupted':'重启中断','skipped':'已跳过','missed':'错过调度','running':'长时间执行','queued':'长时间等待'}.get(status,status)
             add('run-'+run_id, (record.get('task_name') or pid)+' · '+title, (record.get('reason') or f'已持续 {int(age//60)} 分钟')[:400], pid=pid,run_id=run_id,time=record.get('end_time') or began)
         if admin:
             alerts = dict(db.execute_query_sql("SELECT status,COUNT(*) FROM wfs_notifications WHERE status IN ('failed','unknown','pending') GROUP BY status"))
@@ -48,5 +50,21 @@ def snapshot(admin=False):
     for pid,spec in specs.items():
         if spec.get('error') or spec.get('main_file_error'):
             add('invalid-'+pid,(spec.get('task_name') or pid)+' · 配置异常',str(spec.get('error') or spec.get('main_file_error'))[:400],pid=pid)
+    from app.bootstrap import admission
+    due=[pid for pid,spec in specs.items() if task_policies.get(pid,TASK_DEFAULT)['expected_by'] and spec.get('schedule_enabled') and now.strftime('%H:%M')>=task_policies[pid]['expected_by']]
+    completed=set()
+    with GaussDB() as db:
+        for offset in range(0,len(due),200):
+            group=due[offset:offset+200]
+            rows=db.execute_query_sql('SELECT DISTINCT pid FROM wfs_run_history WHERE state=0 AND end_time>=? AND pid IN ('+','.join('?' for _ in group)+')',params=(now.replace(hour=0,minute=0,second=0,microsecond=0),*group))
+            completed.update(row[0] for row in rows)
+    for pid in due:
+        if pid not in completed:
+            add('deadline-'+str(now.date())+'-'+pid,(specs[pid].get('task_name') or pid)+' · 今日尚未完成',
+                '期望在 '+task_policies[pid]['expected_by']+' 前成功完成，请核对执行记录与业务数据。',pid=pid)
+    with admission.store() as db:
+        handled={key[6:]:json.loads(raw) for key,raw in db.execute("SELECT key,payload FROM settings WHERE key LIKE 'issue:%'")}
+    for item in issues:
+        item['resolution']=handled.get(item['key'],{})
     return {'scheduler':{'healthy':healthy,'message':'心跳异常或尚未就绪' if not healthy else '正常'},'database':dialect,
             'timezone':TIMEZONE_NAME,'issues':issues[:100],'truncated':len(runs)>100 or len(issues)>100}

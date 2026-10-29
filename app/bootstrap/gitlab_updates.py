@@ -318,6 +318,11 @@ def scan(config, previous=None):
         if len(branches) >= 100:
             warnings.append('本项目分支较多，仅检查 API 排序中的前 100 个分支，请清理旧分支或到 GitLab 核对。')
 
+        from app.bootstrap.operational_policy import load as policy
+        import fnmatch
+        filters=policy('release')['branches']
+        branches=[b for b in branches if any(fnmatch.fnmatchcase(str(b.get('name','')),pattern) for pattern in filters)]
+
         def compare(base, head, straight):
             nonlocal count
             key = '|'.join([base, head, str(straight)])
@@ -487,7 +492,8 @@ def start():
         while True:
             try:
                 if configuration()['enabled']:
-                    request_scan()
+                    from app.bootstrap.gitlab_webhook import request_pending
+                    if not request_pending(): request_scan()
             except Exception:
                 # External GitLab availability must never affect scheduler readiness.
                 pass
