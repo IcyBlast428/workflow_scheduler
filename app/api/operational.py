@@ -31,7 +31,7 @@ def audit(action,target,details=''):
 
 @blueprint.route('/api/admin/operational/policy/<kind>',methods=['GET','POST'])
 def operational_policy(kind):
-    if kind not in ('task','release','groups'): raise ValueError('未知策略。')
+    if kind not in ('task','release','groups','dispatch'): raise ValueError('未知策略。')
     pid=task_id() if kind=='task' else ''
     if request.method=='POST':
         value=policy.save(kind,pid,request.get_json(silent=True) or {},g.identity['username'])
@@ -136,3 +136,8 @@ def backup_status():
 def isolation_probe():
     from app.bootstrap.task_isolation import probe
     return success_msg(probe())
+
+
+@blueprint.get('/api/admin/operational/dispatch')
+def dispatch_status():
+    return success_msg(requests.queue_status(request.args.get('status',''),request.args.get('query',''),int(request.args.get('page','1')),include_names=True))

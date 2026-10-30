@@ -233,10 +233,12 @@
             @detail="detailPid = $event"
             @execution="openExecution"
             @admin="switchView('admin')"
+            @queue="switchView('queue')"
             @tasks="showFilteredTasks"
           />
         </template>
 
+        <template v-else-if="view === 'queue' && canManage"><ExecutionQueue :confirm="requestConfirm" @execution="openExecution" @detail="detailPid=$event" @settings="switchView('admin')" /></template>
         <template v-else-if="view === 'matrix'">
           <ExecutionMatrix
             :user-key="user.name"
@@ -444,6 +446,7 @@ import { useDashboardWorkspace } from './composables/useDashboardWorkspace';
 import MaintenanceControl from './components/MaintenanceControl.vue';
 import TaskDetailDialog from './components/TaskDetailDialog.vue';
 import ExecutionDialog from './components/ExecutionDialog.vue';
+const ExecutionQueue = defineAsyncComponent(() => import('./components/ExecutionQueue.vue'));
 const AdminPanel = defineAsyncComponent(
   () => import('./components/AdminPanel.vue'),
 );
@@ -507,6 +510,7 @@ const navItems = [
     ],
     description: '已发布任务、调度状态与运行控制。',
   },
+  { id: 'queue', label: '执行队列', iconPaths: ['M8 6h12','M8 12h12','M8 18h7','M3 6h1','M3 12h1','M3 18h1','M18 16v5m-2-2 2 2 2-2'], description: '等待派发的任务、等待原因与执行去向。' },
   {
     id: 'matrix',
     label: '执行矩阵',
@@ -544,9 +548,9 @@ const navItems = [
   },
   {
     id: 'admin',
-    label: '账户与审计',
-    iconPaths: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
-    description: '账户权限与操作记录。',
+    label: '系统管理',
+    iconPaths: ['M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8','M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z'],
+    description: '运行策略、发布设置、账户权限与审计。',
   },
   { id: 'gitlab', label: '代码更新', iconPaths: ['M7 4v11a4 4 0 0 0 4 4h6', 'M17 4v4a4 4 0 0 1-4 4H7', 'M4 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0', 'M14 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0'], description: 'GitLab 分支检查、更新提醒与代码差异。' },
   {id: 'connections', label: '数据库连接', iconPaths: ['M4 6c0-4 16-4 16 0s-16 4-16 0','M4 6v12c0 4 16 4 16 0V6','M4 12c0 4 16 4 16 0'], description: '平台与任务业务数据库连接设置。'},

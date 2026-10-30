@@ -87,6 +87,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  dispatchStatus(params={}) { return request('/api/admin/operational/dispatch',{params}); },
   operationalPolicy(kind,pid='') { return request(`/api/admin/operational/policy/${kind}`,{params:{pid}}); },
   saveOperationalPolicy(kind,body,pid='') { return request(`/api/admin/operational/policy/${kind}`,{method:'POST',params:{pid},body}); },
   cancelExecutionRequest(id) {return request('/api/admin/operational/requests',{method:'POST',body:{action:'cancel',id}});},

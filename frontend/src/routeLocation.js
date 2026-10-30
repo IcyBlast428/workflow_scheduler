@@ -1,4 +1,4 @@
-const views = new Set(['dashboard','tasks','taskLogs','systemLogs','matrix','packages','repository','admin','connections','gitlab']);
+const views = new Set(['queue','dashboard','tasks','taskLogs','systemLogs','matrix','packages','repository','admin','connections','gitlab']);
 export function readRoute(hash) {
   const [raw, query = ''] = hash.replace(/^#/, '').split('?');
   const params = new URLSearchParams(query);

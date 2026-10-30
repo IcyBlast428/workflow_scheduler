@@ -135,3 +135,9 @@ html[data-effects="low"] .hint,html[data-effects="low"] .muted { color:#b4c6d0; 
 .attention-list > li { flex-wrap: wrap; }
 .attention-list > li > div:first-child { flex: 1 1 260px; min-width: 0; }
 .attention-resolution { flex-basis: 100%; display: grid; gap: 12px; }
+
+/* Prioritize task identity and state on narrow screens without duplicating actions. */
+.mobile-task-status{display:none}
+@media(max-width:560px){
+.task-table{min-width:0;width:100%;table-layout:auto}.task-table colgroup,.task-table thead{display:none}.task-table tbody,.task-table tr{display:block}.task-table tbody tr{padding:14px;border-bottom:1px solid var(--line)}.task-table tr>td{display:none}.task-table tr>.task-name-cell,.task-table tr>.action-cell{display:block;position:static;width:auto;max-width:none;padding:0;border:0;box-shadow:none}.task-table .task-name-copy{width:100%}.task-table .task-name-link{white-space:normal}.task-table .action-cell{margin-top:12px}.task-table .mobile-task-status{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mobile-task-status small{color:var(--muted);overflow-wrap:anywhere}.mobile-task-status small:last-child{flex-basis:100%}.task-table .task-actions{flex-wrap:wrap}
+}

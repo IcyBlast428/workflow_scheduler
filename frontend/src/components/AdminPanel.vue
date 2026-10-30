@@ -1,10 +1,12 @@
 <template>
   <section class="panel admin-panel">
-    <div class="panel-head"><div><h2>账户与操作记录</h2><p>普通用户仅查看任务；管理员拥有全部管理功能。原操作员账户按只读用户处理。</p></div><button class="btn" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></div>
+    <div class="panel-head"><div><h2>系统管理</h2><p>按用途管理平台，切换分栏会保留正在编辑的内容。</p></div><button class="btn" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></div>
     <LoadingStatus :active="loading" label="正在更新维护状态与账户…" />
+    <nav class="settings-nav" aria-label="系统管理分栏"><button v-for="item in sections" :key="item.id" class="btn" :class="{primary:section===item.id}" :aria-pressed="section===item.id" @click="selectSection(item.id)">{{ item.label }}</button></nav>
     <div class="panel-body">
     <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div><div v-if="message" class="inline-alert success" role="status">{{ message }}</div>
-    <section class="surface-card runtime-status" aria-labelledby="runtime-heading">
+    <DispatchSettings v-show="section==='runtime'" />
+    <section v-show="section==='runtime'" class="surface-card runtime-status" aria-labelledby="runtime-heading">
       <div class="section-heading"><h3 id="runtime-heading">运行维护状态</h3><p>查看记录补写、历史汇总与通知发送情况。</p></div>
       <div class="admin-metrics">
         <div class="mini-stat"><span>剩余空间</span><strong>{{ runtime.free_mb ?? '-' }} <small>MiB</small></strong></div>
@@ -19,10 +21,10 @@
         <div class="table-wrap"><table class="runtime-metrics"><thead><tr><th>接口 / 数据库操作</th><th>P95</th><th>最大耗时</th></tr></thead><tbody><tr v-for="(metric,name) in runtime.metrics || {}" :key="name"><td class="mono">{{ name }}</td><td>{{ metric.p95_ms }} ms</td><td>{{ metric.max_ms }} ms</td></tr></tbody></table><p v-if="!Object.keys(runtime.metrics || {}).length" class="table-empty-note">暂无采样记录。</p></div>
       </div></details>
     </section>
-    <OperationalWorkbench />
-    <VersionStorage />
-    <TaskAccessEditor :confirm="confirm" />
-    <section class="admin-section" aria-labelledby="accounts-heading">
+    <OperationalWorkbench v-show="['runtime','release','storage'].includes(section)" :section="section" />
+    <VersionStorage v-show="section==='storage'" />
+    <TaskAccessEditor v-show="section==='accounts'" :confirm="confirm" />
+    <section v-show="section==='accounts'" class="admin-section" aria-labelledby="accounts-heading">
     <div class="section-heading"><h3 id="accounts-heading">账户管理</h3><p>填写账户信息，或从列表中选择已有账户。</p></div>
     <form class="filter-grid account-form" @submit.prevent="save">
       <div class="form-row"><label for="account-name">用户名</label><input id="account-name" v-model.trim="form.username" class="input" required maxlength="100"></div>
@@ -32,19 +34,25 @@
     </form>
     <div class="table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in accounts" :key="item.username"><td>{{ item.username }}</td><td>{{ roles[item.role] }}</td><td>{{ item.enabled ? '启用' : '禁用' }}</td><td><span v-if="item.managed_by">通过服务配置管理</span><button v-else class="btn" @click="edit(item)">编辑</button></td></tr></tbody></table></div>
     </section>
-    <section class="admin-section" aria-labelledby="audit-heading"><div class="section-heading"><h3 id="audit-heading">最近 100 条操作记录</h3></div><div class="table-wrap"><table><thead><tr><th>操作人</th><th>操作</th><th>对象</th><th>结果</th><th>时间</th></tr></thead><tbody><tr v-for="(item,index) in records" :key="index"><td>{{ item.actor }}</td><td>{{ actionLabel(item.action) }}</td><td>{{ item.target || '-' }}</td><td><span class="tag" :class="item.outcome === 'success' ? 'success' : 'danger'">{{ item.outcome === 'success' ? '成功' : '失败' }}</span></td><td class="nowrap">{{ item.created_at }}</td></tr></tbody></table><p v-if="!records.length" class="table-empty-note">暂无操作记录。</p></div></section>
+    <section v-show="section==='audit'" class="admin-section" aria-labelledby="audit-heading"><div class="section-heading"><h3 id="audit-heading">最近 100 条操作记录</h3></div><div class="table-wrap"><table><thead><tr><th>操作人</th><th>操作</th><th>对象</th><th>结果</th><th>时间</th></tr></thead><tbody><tr v-for="(item,index) in records" :key="index"><td>{{ item.actor }}</td><td>{{ actionLabel(item.action) }}</td><td>{{ item.target || '-' }}</td><td><span class="tag" :class="item.outcome === 'success' ? 'success' : 'danger'">{{ item.outcome === 'success' ? '成功' : '失败' }}</span></td><td class="nowrap">{{ item.created_at }}</td></tr></tbody></table><p v-if="!records.length" class="table-empty-note">暂无操作记录。</p></div></section>
     </div>
   </section>
 </template>
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
 import { api } from '../api';
 import { actionLabel } from '../executionLabels';
 import LoadingStatus from './LoadingStatus.vue';
+import DispatchSettings from './DispatchSettings.vue';
 import OperationalWorkbench from './OperationalWorkbench.vue';
 import TaskAccessEditor from './TaskAccessEditor.vue';
 import VersionStorage from './VersionStorage.vue';
 defineProps({confirm:Function});
+const sections=[{id:'runtime',label:'运行策略'},{id:'release',label:'发布设置'},{id:'accounts',label:'账户权限'},{id:'audit',label:'审计记录'},{id:'storage',label:'存储备份'}];
+const section=ref('runtime');
+function readSection(){const id=new URLSearchParams(location.hash.split('?')[1] || '').get('section');section.value=sections.some(s=>s.id===id)?id:'runtime';}
+function selectSection(id){section.value=id;history.replaceState(null,'',location.pathname+'#admin?section='+id);}
+onMounted(()=>{readSection();window.addEventListener('hashchange',readSection);});onBeforeUnmount(()=>window.removeEventListener('hashchange',readSection));
 const accounts = ref([]), records = ref([]), error = ref(''), message = ref(''), saving = ref(false);
 const runtime = ref({});
 const loading = ref(false);
@@ -55,3 +63,5 @@ async function load() { if (loading.value) return; loading.value = true; try { [
 async function save() { saving.value = true; try { message.value = await api.saveUser({...form}); form.password = ''; await load(); } catch (err) { error.value = err.message; } finally { saving.value = false; } }
 onMounted(load);
 </script>
+
+<style scoped>.settings-nav{display:flex;gap:8px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid var(--line)}.settings-nav .btn{min-height:40px}</style>

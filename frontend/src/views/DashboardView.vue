@@ -7,7 +7,9 @@
       @detail="$emit('detail', $event)"
       @execution="$emit('execution', $event)"
       @admin="$emit('admin')"
+      @queue="$emit('queue')"
     />
+    <QueueOverview v-if="canManage" @queue="$emit('queue')" />
     <DashboardSummary
       :summary="dashboard.summary"
       :failures="dashboard.failure_rank"
@@ -43,6 +45,7 @@
 </template>
 <script setup>
 import { computed } from 'vue';
+import QueueOverview from '../components/QueueOverview.vue';
 import RuntimeOverview from '../components/RuntimeOverview.vue';
 import DashboardSummary from '../components/DashboardSummary.vue';
 import CpuTimelineChart from '../components/CpuTimelineChart.vue';
@@ -51,7 +54,7 @@ const props = defineProps({
   dashboard: { type: Object, required: true },
   canManage: Boolean,
 });
-defineEmits(['detail', 'execution', 'admin', 'tasks']);
+defineEmits(['detail', 'execution', 'admin', 'tasks', 'queue']);
 const percent = (value) =>
   value == null || !Number.isFinite(Number(value))
     ? '--'

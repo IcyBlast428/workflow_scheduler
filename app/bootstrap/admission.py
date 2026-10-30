@@ -56,6 +56,9 @@ def set_maintenance(enabled, revision, reason, actor):
 class CapacityUnavailable(ValueError):
     pass
 
+class PlanCancelled(ValueError):
+    pass
+
 class MaintenanceClosed(RuntimeError):
     pass
 
@@ -76,7 +79,7 @@ def manual_request(actor, pid, key, submit):
             ensure_open()
             db.execute('INSERT INTO receipts VALUES(?,?,?,?,?,?,?)',(actor,key,pid,'pending','','',str(business_now())))
         try: run_id=submit()
-        except (CapacityUnavailable,MaintenanceClosed):
+        except (CapacityUnavailable,MaintenanceClosed,PlanCancelled):
             with store() as db: db.execute('DELETE FROM receipts WHERE actor=? AND key=?',(actor,key))
             raise
         except Exception:

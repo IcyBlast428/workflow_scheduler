@@ -43,6 +43,14 @@ def snapshot(admin=False):
             if alerts.get('failed'): add('alerts-failed','通知发送失败',f"{alerts['failed']} 条通知发送失败。")
             if alerts.get('pending'): add('alerts-pending','通知等待发送',f"{alerts['pending']} 条通知在等待发送。")
     if admin:
+        from app.bootstrap.execution_requests import queue_status
+        queue=queue_status();counts=queue['counts']
+        if counts.get('pending'):
+            add('queue-pending','任务等待派发',f"{counts['pending']} 个请求等待执行。"+(queue['reason'] or '按名额与启动间隔依次派发。'))
+        if counts.get('expired') or counts.get('rejected'):
+            add('queue-expired','计划未能启动',f"最近 24 小时 {counts.get('expired',0)} 个请求等待超时、{counts.get('rejected',0)} 个计划被拒绝。请在执行队列中核对。")
+        if counts.get('unknown'):
+            add('queue-unknown','执行请求需要核对',f"{counts['unknown']} 个请求派发结果不明，不会自动重放。")
         health = journal.health(operations._directory)
         if health['pending_writes']: add('journal','执行记录等待补写',f"{health['pending_writes']} 条记录尚未完成数据库补写。")
         free = shutil.disk_usage(DATA_DIR).free // 1024**2

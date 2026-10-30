@@ -7,14 +7,18 @@ from app.bootstrap import admission
 from app.bootstrap.timebase import business_now
 
 TASK_DEFAULT = dict(revision=0, idempotent=False, retry_enabled=False, retry_limit=0,
-                    retry_delay=60, expected_by='', slow_minutes=60, parameters={},
+                    retry_delay=60, stagger_seconds=0, expected_by='', slow_minutes=60, parameters={},
                     declared_connections=[], test_connections={}, isolation='process',
                     resources={'memory_mb':512,'processes':64,'cpu_percent':100})
 RELEASE_DEFAULT = dict(revision=0, require_ci=False, required_jobs=[], branches=['*'],
                        window_start='', window_end='', require_trial=False, environment='development')
 
+DISPATCH_DEFAULT = dict(revision=0, max_active=4, start_interval_ms=1000, max_pending=1000,
+                        max_pending_per_task=10, max_wait_seconds=600, load_protection=False,
+                        cpu_high=85, memory_high=90)
+
 def load(kind, identifier=''):
-    default = TASK_DEFAULT if kind=='task' else RELEASE_DEFAULT if kind=='release' else {'revision':0,'quotas':{}}
+    default = TASK_DEFAULT if kind=='task' else RELEASE_DEFAULT if kind=='release' else DISPATCH_DEFAULT if kind=='dispatch' else {'revision':0,'quotas':{}}
     baseline=json.loads(json.dumps(default))
     return {**baseline,**admission.policy(kind+':'+identifier,baseline)}
 
@@ -24,6 +28,7 @@ def save(kind, identifier, form, actor):
         raise RuntimeError('策略已被修改，请刷新后重试。')
     if kind=='task': value=validate_task(form)
     elif kind=='release': value=validate_release(form)
+    elif kind=='dispatch': value=validate_dispatch(form)
     elif kind=='groups':
         quotas=form.get('quotas',{})
         if not isinstance(quotas,dict) or len(quotas)>200 or any(not isinstance(k,str) or not k or len(k)>100 or type(v)is not int or not 1<=v<=100 for k,v in quotas.items()):
@@ -63,7 +68,7 @@ def validate_task(form):
     value={k:form.get(k,v) for k,v in TASK_DEFAULT.items() if k!='revision'}
     if type(value['idempotent']) is not bool or type(value['retry_enabled']) is not bool:
         raise ValueError('任务幂等与重试开关无效。')
-    for key,low,high in [('retry_limit',0,3),('retry_delay',10,86400),('slow_minutes',1,10080)]:
+    for key,low,high in [('stagger_seconds',0,300),('retry_limit',0,3),('retry_delay',10,86400),('slow_minutes',1,10080)]:
         if type(value[key])is not int or not low<=value[key]<=high: raise ValueError(key+' 超出范围。')
     if value['retry_enabled'] and (not value['idempotent'] or not value['retry_limit']):
         raise ValueError('启用自动重试前须声明可安全重复执行，并设置重试次数。')
@@ -106,3 +111,14 @@ def all_tasks():
     with admission.store() as db:
         rows=db.execute("SELECT key,payload FROM settings WHERE key LIKE 'task:%'").fetchall()
     return {key[5:]:{**TASK_DEFAULT,**json.loads(raw)} for key,raw in rows}
+
+
+def validate_dispatch(form):
+    value={k:form.get(k,v) for k,v in DISPATCH_DEFAULT.items() if k!='revision'}
+    for key,low,high in [('max_active',1,20),('start_interval_ms',100,60000),
+                         ('max_pending',1,10000),('max_pending_per_task',1,1000),
+                         ('max_wait_seconds',1,86400),('cpu_high',20,99),('memory_high',20,99)]:
+        if type(value[key]) is not int or not low<=value[key]<=high:
+            raise ValueError(key+' 超出允许范围。')
+    if type(value['load_protection']) is not bool: raise ValueError('负载保护开关无效。')
+    return value

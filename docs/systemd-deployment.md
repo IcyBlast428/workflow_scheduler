@@ -258,3 +258,6 @@ sudo -u wfs env XDG_RUNTIME_DIR="/run/user/$TASK_UID" \
 ```
 
 检查成功后，先为专用测试任务配置「仅允许指定连接」、新准备版本、隔离资源限额，再实际运行与取消验证。共享 SQLite 业务文件不受支持；网络仍开放。任意属性或权限不满足时拒绝启动，不降级为普通进程。具体行为与保留制品、Webhook、完整引用清理步骤见 [剩余改进手册](remaining-improvements.md)。
+
+
+任务集中触发时的排队、限速和负载保护配置见 [任务派发手册](task-dispatch.md)。默认全局并发名额为 4，与 `WFS_MAX_ACTIVE_RUNS` 取较小值。

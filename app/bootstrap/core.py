@@ -5,7 +5,6 @@ from app.bootstrap.timebase import business_now
 import datetime
 import logging
 import os
-import random
 import re
 import threading
 from functools import wraps
@@ -32,8 +31,6 @@ if FLASK_ENV == 'development':
     dev_run_all = dev_run_job.get('run_all')
 
 
-# 项目重启时 interval 任务可能同时进入下一次运行，这里只给首轮注册加内存态错峰。
-INTERVAL_START_STAGGER_MAX_SECONDS = 300
 _manual_reservations = {}
 _manual_lock = threading.Lock()
 _configuration_lock = threading.RLock()
@@ -237,6 +234,15 @@ def call_task_once(pid, actor='admin', context=None):
             raise ValueError('task entry file is invalid for {}: {}'.format(pid, spec.get('main_file_error')))
         from app.bootstrap.operational_policy import load as operational_policy
         policy=operational_policy('task',pid)
+        if context.get('source')=='scheduled':
+            from app.bootstrap.admission import PlanCancelled
+            if pid in ignores or not spec.get('schedule_enabled'):
+                raise PlanCancelled('任务调度已停用，待执行计划已取消。')
+            if (spec.get('config_record') or {}).get('version',0)!=context.get('schedule_revision',0):
+                raise PlanCancelled('调度配置已改变，旧计划不再执行。')
+            # Frozen invocation uses the code and limits selected at trigger time.
+            fields=('main_file_path','pid','task_name','dir_name','timeout_seconds','group_name','folder_name','python_executable','max_instances')
+            spec={**spec,**dict(zip(fields,context['scheduled_args'])),'schedule_form':context['scheduled_limits']}
         if context.get('source') in ('backfill','retry') and not policy['idempotent']:
             raise ValueError('任务未声明可安全重复执行。')
         if context.get('version'):
@@ -256,6 +262,7 @@ def call_task_once(pid, actor='admin', context=None):
                                 parameters=context.get('parameters',policy['parameters']),business_date=context.get('business_date',''),
                                 retry_attempt=context.get('retry_attempt',0),retry_of=context.get('retry_of',''),
                                 requested_version=context.get('version',''),request_id=context.get('request_id',''),
+                                scheduled_time=context.get('scheduled_time',''),queue_expires_at=context.get('expires_at') or str(business_now()+datetime.timedelta(seconds=operational_policy('dispatch')['max_wait_seconds'])),
                                 dir_name=spec.get('dir_name'), group_name=spec.get('group_name'), folder_name=spec.get('folder_name'))
         except Exception:
             runnings.remove(reservation)
@@ -293,6 +300,9 @@ def call_task_once(pid, actor='admin', context=None):
             update_run(run_id, status='interrupted', state=-1, end_time=now(), reason='Could not enqueue execution.')
             raise
         return run_id
+    if context.get('source')=='scheduled':
+        from app.bootstrap.admission import PlanCancelled
+        raise PlanCancelled('任务已删除或不可用，旧计划不再执行。')
     raise ValueError('task not found: {}'.format(pid))
 
 
@@ -311,28 +321,6 @@ def _interval_seconds(rules):
         + _rule_int(rules, 'MINUTES') * 60
         + _rule_int(rules, 'SECONDS')
     )
-
-
-def _stagger_interval_rules(pid, rules, enabled=True):
-    if not enabled:
-        return rules
-    if (rules or {}).get('START_DATE'):
-        return rules
-
-    seconds = _interval_seconds(rules)
-    if seconds <= 1:
-        return rules
-
-    max_offset = min(seconds - 1, INTERVAL_START_STAGGER_MAX_SECONDS)
-    offset = random.randint(0, max_offset)
-    if offset <= 0:
-        return rules
-
-    next_rules = dict(rules or {})
-    # 只改本次注册用的 trigger 参数，不回写数据库，因此不会改变用户配置的调度策略。
-    next_rules['START_DATE'] = datetime.datetime.now(SCHEDULER_TZ) + datetime.timedelta(seconds=offset)
-    logging.getLogger(__name__).info('stagger interval job %s by %s seconds after scheduler bootstrap', pid, offset)
-    return next_rules
 
 
 @serialized_configuration
@@ -428,12 +416,8 @@ def aps_start(task_pid=None, action='refresh'):
             raw_rules = spec.get('schedule_rules')
             if raw_rules is None:
                 raw_rules = {}
-            # 仅全量启动时对 interval 任务错峰，单个任务手动启动不额外延迟。
-            raw_rules = _stagger_interval_rules(
-                pid,
-                raw_rules,
-                enabled=(task_pid is None and spec.get('trigger') == 'interval'),
-            )
+            # Opt-in stable offsets are applied by the durable queue, without
+            # changing the configured trigger or its recorded planned time.
             trigger = build_scheduler_trigger(spec.get('trigger'), raw_rules)
             if expired_once(trigger):
                 # DateTrigger returns its old timestamp again when re-created.
@@ -455,7 +439,7 @@ def aps_start(task_pid=None, action='refresh'):
                     spec.get('max_instances') or 1,
                 ],
                 name=spec.get('task_name') or pid,
-                kwargs={'limits': spec.get('schedule_form') or {}},
+                kwargs={'limits': {**(spec.get('schedule_form') or {}),'_schedule_revision':version}},
                 replace_existing=True,
                 max_instances=spec.get('max_instances') or 1,
                 coalesce=True,

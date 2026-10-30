@@ -44,6 +44,7 @@
                   {{ row.name }}
                 </button>
                 <div class="mono muted clip" :title="row.id">{{ row.id }}</div>
+                <div class="mobile-task-status"><span class="tag" :class="stateClass(row)">{{ stateText(row) }}</span><span class="tag" :class="lastStatusClass(row.last_status)">{{ lastStatusText(row.last_status) }}</span><small>活动 {{ row.running_instances || 0 }} / {{ row.max_instances || 1 }}</small><small>下次 {{ row.next_run_time || '未安排' }}</small></div>
                 <button v-if="canManage && change(row.id)" class="task-change-badge tag" :class="change(row.id).kind === 'delete' ? 'danger' : 'warning'" @click="$emit('release', row.id)">{{ change(row.id).kind === 'delete' ? 'GitLab 已删除 · 确认删除' : 'GitLab 有更新 · 审查发布' }}</button>
                 <div
                   v-if="row.config_error"

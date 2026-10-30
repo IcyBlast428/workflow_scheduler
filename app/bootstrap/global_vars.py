@@ -99,7 +99,8 @@ class RunningState:
 
     def claim(self, pid, limit=1, group_name=''):
         with self._lock:
-            if len(self._peddings) >= int(os.environ.get('WFS_MAX_ACTIVE_RUNS', '20')):
+            from app.bootstrap.operational_policy import load
+            if len(self._peddings) >= min(load('dispatch')['max_active'],int(os.environ.get('WFS_MAX_ACTIVE_RUNS', '20'))):
                 return None
             if sum(pid in item for item in self._peddings) >= limit:
                 return None
@@ -117,7 +118,8 @@ class RunningState:
 
     def capacity_reason(self, pid, limit=1, group_name=''):
         with self._lock:
-            if len(self._peddings) >= int(os.environ.get('WFS_MAX_ACTIVE_RUNS','20')):
+            from app.bootstrap.operational_policy import load
+            if len(self._peddings) >= min(load('dispatch')['max_active'],int(os.environ.get('WFS_MAX_ACTIVE_RUNS','20'))):
                 return '全局执行名额已满，本次调度跳过。'
             if sum(pid in item for item in self._peddings) >= int(limit):
                 return '此任务的并发名额已满，本次调度跳过。'

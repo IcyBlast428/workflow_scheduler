@@ -14,7 +14,8 @@ import time
 import queue
 
 from app.bootstrap.database import GaussDB
-from app.bootstrap.execution_state import SKIPPED
+from app.bootstrap.execution_state import SKIPPED, MISSED
+from app.bootstrap.dispatch_control import LaunchExpired, LaunchCancelled
 from app.bootstrap.code_version import execution_version
 from app.bootstrap.global_vars import BASE_DIR, runnings
 from app.bootstrap.system_metrics import record_task_end, record_task_start
@@ -110,8 +111,6 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
         current = read_run(run_id)
         provenance = execution_version(path, python_executable)
         update_run(run_id, code_version=provenance, start_delay_seconds=max(0,(start-datetime.datetime.fromisoformat(current.get('scheduled_time') or current['created_at'])).total_seconds()))
-        if current.get('source') != 'trial':
-            record_task_start(PID, task_name, group_name, folder_name, start)
         if runnings.is_cancelled(reservation):
             state, output = -15, 'Task stopped before execution.'
         else:
@@ -194,15 +193,21 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 from app.bootstrap.task_isolation import wrapper
                 command,child_env,isolated_unit=wrapper(command,child_env,task_root,sdk_root,data_dir,output_dir,run_id,runtime_policy['resources'])
                 update_run(run_id,systemd_unit=isolated_unit)
-            # Final admission and process creation share the maintenance lock.
-            with admission.lock:
-                admission.ensure_open()
-                process = subprocess.Popen(command, cwd=str(task_root), stdin=subprocess.DEVNULL,
-                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0, shell=False, env=child_env, **kwargs)
-                runnings.set_process(reservation, PID, process.pid)
-                if isolated_unit:
-                    from app.bootstrap.task_isolation import register
-                    register(process.pid,isolated_unit)
+            from app.bootstrap.dispatch_control import wait_for_launch
+            def launch():
+                child = subprocess.Popen(command, cwd=str(task_root), stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0, shell=False, env=child_env, **kwargs)
+                runnings.set_process(reservation, PID, child.pid)
+                return child
+            # The spacing reservation and Popen are atomic with maintenance and other starts.
+            process = wait_for_launch(reservation,current.get('queue_expires_at',''),launch)
+            start = business_now()
+            if current.get('source') != 'trial':
+                record_task_start(PID, task_name, group_name, folder_name, start)
+            update_run(run_id,start_delay_seconds=max(0,(start-datetime.datetime.fromisoformat(current.get('scheduled_time') or current['created_at'])).total_seconds()))
+            if isolated_unit:
+                from app.bootstrap.task_isolation import register
+                register(process.pid,isolated_unit)
             identity = Path(f'/proc/{process.pid}/stat').read_text().split()[21] if os.name != 'nt' else ''
             update_run(run_id, status='running', start_time=str(start), process_id=process.pid, process_identity=identity)
             reader = threading.Thread(target=_drain_output, args=(process.stdout, chunks, run_id, flags), daemon=True)
@@ -230,6 +235,10 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                     break
                 except subprocess.TimeoutExpired:
                     continue
+    except LaunchExpired as exc:
+        state, output = MISSED, str(exc)
+    except LaunchCancelled as exc:
+        state, output = -15, str(exc)
     except admission.MaintenanceClosed:
         state, output = SKIPPED, '维护模式：本次计划未启动，恢复后不会自动补跑。'
     except Exception as exc:
@@ -249,11 +258,11 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
         end = business_now()
         runnings.remove(reservation)
         try:
-            if current.get('source') != 'trial':
+            if process is not None and current.get('source') != 'trial':
                 record_task_end(PID, start, end)
         except Exception:
             logger.exception('timeline completion failed')
-        status = {0: 'success', -9: 'timed_out', -15: 'cancelled', SKIPPED:'skipped'}.get(state, 'failed')
+        status = {0: 'success', -9: 'timed_out', -15: 'cancelled', SKIPPED:'skipped', MISSED:'missed'}.get(state, 'failed')
         if not output and state:
             output = f'Process exited with code {state}.'
         try:
