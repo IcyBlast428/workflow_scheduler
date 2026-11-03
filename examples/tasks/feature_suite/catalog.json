@@ -1,0 +1,96 @@
+[
+  {
+    "folder": "report_flow",
+    "task_name": "示例 · 多文件参数报表",
+    "tags": [
+      "示例",
+      "报表",
+      "多文件",
+      "参数"
+    ],
+    "parameters": {
+      "region": "CN"
+    },
+    "idempotent": true,
+    "retry_enabled": false,
+    "retry_limit": 0,
+    "retry_delay": 10,
+    "stagger_seconds": 0,
+    "slow_minutes": 1
+  },
+  {
+    "folder": "sqlite_transaction",
+    "task_name": "示例 · 多表事务与 DDL",
+    "tags": [
+      "示例",
+      "数据库",
+      "DDL",
+      "事务"
+    ],
+    "parameters": {
+      "simulate_rollback": false
+    },
+    "idempotent": true,
+    "retry_enabled": false,
+    "retry_limit": 0,
+    "retry_delay": 10,
+    "stagger_seconds": 0,
+    "slow_minutes": 1
+  },
+  {
+    "folder": "retry_once",
+    "task_name": "示例 · 失败与自动重试",
+    "tags": [
+      "示例",
+      "重试",
+      "告警"
+    ],
+    "parameters": {
+      "simulate_failure": true
+    },
+    "idempotent": true,
+    "retry_enabled": true,
+    "retry_limit": 1,
+    "retry_delay": 10,
+    "stagger_seconds": 0,
+    "slow_minutes": 1
+  },
+  {
+    "folder": "business_backfill",
+    "task_name": "示例 · 业务日期补跑",
+    "tags": [
+      "示例",
+      "补跑",
+      "幂等"
+    ],
+    "parameters": {
+      "unit": "示例部门"
+    },
+    "idempotent": true,
+    "retry_enabled": false,
+    "retry_limit": 0,
+    "retry_delay": 10,
+    "stagger_seconds": 0,
+    "slow_minutes": 1
+  },
+  {
+    "folder": "queue_observer",
+    "task_name": "示例 · 排队与资源观察",
+    "tags": [
+      "示例",
+      "排队",
+      "日志",
+      "资源"
+    ],
+    "parameters": {
+      "seconds": 5,
+      "cpu_seconds": 0
+    },
+    "idempotent": true,
+    "retry_enabled": false,
+    "retry_limit": 0,
+    "retry_delay": 10,
+    "stagger_seconds": 0,
+    "slow_minutes": 1
+  }
+]

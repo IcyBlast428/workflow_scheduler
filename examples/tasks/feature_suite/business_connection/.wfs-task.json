@@ -1,0 +1,5 @@
+{
+  "task_id": "demo_business_connection",
+  "task_name": "业务连接查询模板",
+  "main_file": "main.py"
+}

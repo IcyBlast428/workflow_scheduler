@@ -1,0 +1,5 @@
+{
+  "task_id": "demo_retry_once",
+  "task_name": "失败与自动重试",
+  "main_file": "main.py"
+}

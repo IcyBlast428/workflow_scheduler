@@ -1,0 +1,20 @@
+{
+  "folder": "queue_observer",
+  "task_name": "示例 · 排队与资源观察",
+  "tags": [
+    "示例",
+    "排队",
+    "日志",
+    "资源"
+  ],
+  "parameters": {
+    "seconds": 5,
+    "cpu_seconds": 0
+  },
+  "idempotent": true,
+  "retry_enabled": false,
+  "retry_limit": 0,
+  "retry_delay": 10,
+  "stagger_seconds": 0,
+  "slow_minutes": 1
+}

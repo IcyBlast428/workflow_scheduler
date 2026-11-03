@@ -57,7 +57,11 @@ def request_allowed(user):
     if method in ('GET','HEAD') and path in VIEWER_GETS or method=='POST' and path in VIEWER_POSTS:
         return True
     pid=request.args.get('pid') or body.get('pid') or request.args.get('id')
-    if path=='/api/taskinfo/call_task': capability='run'
+    if path=='/api/taskinfo/ddl' and method in ('GET','HEAD'):
+        return bool(set(for_task(user,pid)) & {'view_code','publish'})
+    if path in ('/api/taskinfo/ddl','/api/taskinfo/tags'):
+        capability='view_code' if method in ('GET','HEAD') else 'publish'
+    elif path=='/api/taskinfo/call_task': capability='run'
     elif path in ('/api/taskinfo/schedule','/api/taskinfo/editTask','/api/taskinfo/restore'): capability='schedule'
     elif path=='/api/taskinfo/batch':
         ids=body.get('ids')

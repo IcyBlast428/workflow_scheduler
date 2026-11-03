@@ -25,3 +25,6 @@ README.md          # 可选，说明
 不打包额外外层目录、.venv、.task-build、.git、.env、账号、密码或密钥。纯标准库示例不需要 requirements.txt 与 wheels。输出不写进代码目录；读取包内资源时用 `Path(__file__).resolve().parent` 定位。新版本发布后先手动执行确认，再启用调度；不要在任务内创建另一个定时器。
 
 管理员在任务发布页选择 Nexus 后，平台准备每个版本的独立虚拟环境并安装依赖，依赖环境检查通过才能发布。每次运行只启动该环境中的新子进程，不重复安装。仓库和运行关系详见[任务环境与 Nexus](../../docs/task-environments-and-nexus.md)。
+
+
+完整功能示例与操作矩阵见 [功能示例指南](feature_suite/README.md)，包含五个可运行示例及一个业务连接模板。

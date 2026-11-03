@@ -1,0 +1,7 @@
+# Versions match the repository dependency lists. Private PyPI must provide wheels
+# for these packages and their transitive dependencies on the target platform.
+SQLAlchemy==2.0.46
+configobj==5.0.8
+cryptography==50.0.2
+pyodbc==5.3.0
+psycopg[binary]==3.3.6

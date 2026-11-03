@@ -1,0 +1,18 @@
+{
+  "folder": "retry_once",
+  "task_name": "示例 · 失败与自动重试",
+  "tags": [
+    "示例",
+    "重试",
+    "告警"
+  ],
+  "parameters": {
+    "simulate_failure": true
+  },
+  "idempotent": true,
+  "retry_enabled": true,
+  "retry_limit": 1,
+  "retry_delay": 10,
+  "stagger_seconds": 0,
+  "slow_minutes": 1
+}

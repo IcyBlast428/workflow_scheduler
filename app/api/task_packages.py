@@ -59,7 +59,7 @@ def example_package():
     import zipfile
     import json
     from pathlib import Path
-    examples = {'outputs': 'file_output', 'nested': 'nested_report'}
+    examples = {'outputs': 'file_output', 'nested': 'nested_report', **{name:'feature_suite/'+name for name in ('report_flow','sqlite_transaction','retry_once','business_backfill','queue_observer','business_connection')}}
     kind = request.args.get('kind', 'outputs')
     if kind not in examples:
         raise packages.PackageError('示例类型不存在。', 404)
@@ -68,7 +68,7 @@ def example_package():
     with zipfile.ZipFile(result, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('.wfs-task.json', json.dumps({'task_id': 'example_' + kind, 'task_name': '示例任务（请修改编号与名称）', 'main_file': 'main.py'}, ensure_ascii=False, indent=2))
         for path in sorted(root.rglob('*')):
-            if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts:
+            if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts and path.name != '.wfs-task.json':
                 archive.write(path, path.relative_to(root).as_posix())
     result.seek(0)
     return send_file(result, mimetype='application/zip', as_attachment=True, download_name=f'{kind}-task-example.zip')

@@ -1,0 +1,5 @@
+{
+  "task_id": "demo_queue_observer",
+  "task_name": "排队与资源观察",
+  "main_file": "main.py"
+}

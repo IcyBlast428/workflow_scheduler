@@ -29,6 +29,7 @@
     <form class="task-search" @submit.prevent="$emit('search')">
       <div class="task-search-basic">
         <label>任务名称<input id="taskname" v-model.trim="tasks.params.taskname" class="input" placeholder="搜索名称关键字"></label>
+        <label>标签<input v-model.trim="tasks.params.tag" class="input" placeholder="搜索标签"></label>
         <label>任务状态<select v-model="tasks.params.status" class="select" aria-label="任务状态"><option value="">全部状态</option><option value="active">有活动实例</option><option value="failed">最近结果异常</option><option value="invalid">配置异常</option><option value="enabled">调度已启用</option></select></label>
         <div class="filter-actions"><button class="btn primary" type="submit"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>搜索</button><button class="btn" type="button" @click="$emit('reset')">清空</button><button class="btn" type="button" :aria-expanded="advancedOpen" aria-controls="task-advanced-filters" @click="advancedOpen=!advancedOpen">更多筛选{{ advancedCount ? ' · '+advancedCount : '' }}</button><label class="checkbox-row"><input :checked="onlyFavorites" type="checkbox" @change="$emit('favorites-only',$event.target.checked)">仅看收藏</label></div>
       </div>

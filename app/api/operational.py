@@ -141,3 +141,36 @@ def isolation_probe():
 @blueprint.get('/api/admin/operational/dispatch')
 def dispatch_status():
     return success_msg(requests.queue_status(request.args.get('status',''),request.args.get('query',''),int(request.args.get('page','1')),include_names=True))
+
+
+@blueprint.route('/api/taskinfo/tags',methods=['GET','POST'])
+def task_tags():
+    from app.bootstrap import task_schema as schema
+    pid=request.args.get('pid','');schema.spec(pid)
+    if request.method=='POST':
+        value=schema.save_tags(pid,request.get_json(silent=True) or {},g.identity['username']);audit('task_tags',pid)
+        from app.bootstrap.snapshot_cache import invalidate
+        invalidate()
+        return success_msg(value)
+    return success_msg(schema.tags(pid))
+
+@blueprint.route('/api/taskinfo/ddl',methods=['GET','POST'])
+def task_ddl():
+    from app.bootstrap import task_schema as schema
+    pid=request.args.get('pid','');schema.spec(pid)
+    if request.method=='GET':
+        current=schema.current(pid)
+        return success_msg(dict(current=current,history=schema.history(pid),diff=schema.diff(current['base'],current['content']),file=schema.FILE))
+    form=request.get_json(silent=True) or {};action=form.get('action','save');actor=g.identity['username']
+    if action=='save':value=schema.save(pid,form,actor)
+    elif action=='import':
+        _,_,_,content,_=schema.remote(pid)
+        value=schema.save(pid,dict(revision=form.get('revision'),content=content,note='载入 GitLab 目标分支 DDL'),actor,remote_base=content)
+    elif action=='preview':return success_msg(schema.preview(pid,form.get('revision')))
+    elif action=='submit':
+        try:value=schema.submit(pid,form.get('token'),actor)
+        except (ValueError,RuntimeError):raise
+        except Exception:raise RuntimeError('GitLab 提交结果未确认，请核对分支后再操作。') from None
+    else:raise ValueError('未知 DDL 操作。')
+    audit('task_ddl_'+action,pid,str(value.get('revision',value.get('commit',''))))
+    return success_msg(value)

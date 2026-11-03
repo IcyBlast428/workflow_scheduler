@@ -87,6 +87,10 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  taskTags(pid) {return request('/api/taskinfo/tags',{params:{pid}});},
+  saveTaskTags(pid,body) {return request('/api/taskinfo/tags',{method:'POST',params:{pid},body});},
+  taskDdl(pid) {return request('/api/taskinfo/ddl',{params:{pid}});},
+  changeTaskDdl(pid,body) {return request('/api/taskinfo/ddl',{method:'POST',params:{pid},body});},
   dispatchStatus(params={}) { return request('/api/admin/operational/dispatch',{params}); },
   operationalPolicy(kind,pid='') { return request(`/api/admin/operational/policy/${kind}`,{params:{pid}}); },
   saveOperationalPolicy(kind,body,pid='') { return request(`/api/admin/operational/policy/${kind}`,{method:'POST',params:{pid},body}); },

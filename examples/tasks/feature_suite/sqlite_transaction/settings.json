@@ -1,0 +1,19 @@
+{
+  "folder": "sqlite_transaction",
+  "task_name": "示例 · 多表事务与 DDL",
+  "tags": [
+    "示例",
+    "数据库",
+    "DDL",
+    "事务"
+  ],
+  "parameters": {
+    "simulate_rollback": false
+  },
+  "idempotent": true,
+  "retry_enabled": false,
+  "retry_limit": 0,
+  "retry_delay": 10,
+  "stagger_seconds": 0,
+  "slow_minutes": 1
+}

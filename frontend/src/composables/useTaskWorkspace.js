@@ -10,6 +10,7 @@ const defaults = () => ({
   taskgroup: '',
   status: '',
   owner: '',
+  tag: '',
 });
 export function useTaskWorkspace(
   identity,
@@ -121,6 +122,7 @@ export function useTaskWorkspace(
     tasks.params.taskgroup = '';
     tasks.params.status = '';
     tasks.params.owner = '';
+    tasks.params.tag = '';
     onlyFavorites.value = false;
     loadTasks(true);
   }

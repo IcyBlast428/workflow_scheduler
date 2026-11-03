@@ -1,0 +1,19 @@
+{
+  "folder": "report_flow",
+  "task_name": "示例 · 多文件参数报表",
+  "tags": [
+    "示例",
+    "报表",
+    "多文件",
+    "参数"
+  ],
+  "parameters": {
+    "region": "CN"
+  },
+  "idempotent": true,
+  "retry_enabled": false,
+  "retry_limit": 0,
+  "retry_delay": 10,
+  "stagger_seconds": 0,
+  "slow_minutes": 1
+}

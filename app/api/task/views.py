@@ -541,6 +541,9 @@ class State(Resource):
         taskname = request.args.get("taskname")
         taskid = request.args.get("taskid")
         owner = request.args.get("owner")
+        tag = request.args.get("tag", "").strip().casefold()
+        from app.bootstrap.task_schema import tags_all
+        task_tags = tags_all()
         selected_ids = set(request.args.getlist("ids[]"))
 
         state_list = []
@@ -562,9 +565,12 @@ class State(Resource):
                 continue
             if owner and owner.lower() not in str((spec.get('schedule_form') or {}).get('owner','')).lower():
                 continue
+            labels=task_tags.get(display_pid,{}).get('tags',[])
+            if tag and not any(tag in label.casefold() for label in labels):continue
             stats = job_stats.get(display_pid) or {}
             task_state = {
                 'id': display_pid,
+                'tags': labels,
                 'name': display_name,
                 'dirname': spec.get('dir_name'),
                 'group_name': spec.get('group_name') or stats.get('group_name') or '',

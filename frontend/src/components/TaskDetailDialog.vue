@@ -1,6 +1,6 @@
 <template>
   <ModalShell :open="Boolean(pid)" :label="`任务详情：${data.task_name || pid}`" panel-class="task-detail-modal" @close="close">
-      <header class="modal-head"><h3>任务详情：{{ data.task_name || pid }}</h3><button class="btn icon-only" title="关闭" @click="close">×</button></header>
+      <header class="modal-head"><h3>任务详情：{{ data.task_name || pid }}</h3><button class="btn icon-only" title="关闭" aria-label="关闭" @click="close">×</button></header>
       <div class="modal-body task-detail-body">
         <div class="detail-toolbar">
           <div class="filter-actions detail-tabs" role="tablist" aria-label="详情内容"><button v-for="(item,index) in tabs" :key="item.id" :id="`${dialogId}-${item.id}`" role="tab" :aria-controls="`${dialogId}-panel-${item.id}`" :aria-selected="tab === item.id" :tabindex="tab === item.id ? 0 : -1" class="btn" :class="tab === item.id ? 'primary' : ''" @keydown="tabKey($event,index)" @click="selectTab(item.id)">{{ item.label }}</button></div>
@@ -23,6 +23,7 @@
           <h4>调度诊断</h4><p>全局活动实例 {{ data.diagnostics?.active }} / {{ data.diagnostics?.capacity }} · 下次计划 {{ data.diagnostics?.next_run_time || '暂无' }}</p><p v-if="data.diagnostics?.last_not_started">最近未启动：{{ data.diagnostics.last_not_started.reason }} · {{ data.diagnostics.last_not_started.scheduled_time || data.diagnostics.last_not_started.created_at }}</p>
           <h4>最近告警</h4><p v-for="alert in data.notifications || []" :key="alert.id">{{ alert.channel === 'sms' ? '短信' : '邮件' }} · {{ {pending:'待发送',sending:'发送中',sent:'网关已接受',unknown:'发送结果待核对',failed:'发送失败',resolved_sent:'人工确认已送达',resolved_not_sent:'人工确认未送达',resolved_manual:'已人工处理'}[alert.status] }} · {{ alert.message }} · {{ alert.created_at }}</p><p v-if="!data.notifications?.length" class="hint">暂无告警记录</p>
         </div>
+        <div v-if="tab === 'schema'" class="detail-tab-panel"><TaskSchema :pid="pid" :editable="permitted('publish')" :confirm="confirm" /></div>
         <div v-show="tab === 'runs'" role="tabpanel" :id="`${dialogId}-panel-runs`" :aria-labelledby="`${dialogId}-runs`" tabindex="0" class="table-wrap detail-tab-panel" aria-label="执行记录"><table><thead><tr><th>执行编号</th><th>状态</th><th>来源 / 操作人</th><th>时间 / 耗时</th><th>操作</th></tr></thead><tbody>
           <tr v-for="run in data.runs || []" :key="run.run_id"><td class="mono">{{ run.run_id.slice(0,12) }}</td><td><span class="tag" :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span><small class="cell-subtitle">{{ run.reason }}</small></td><td>{{ ({manual:'手动',trial:'试运行',retry:'自动重试',backfill:'业务日期补跑'})[run.source] || '自动调度' }} / {{ run.actor }}</td><td>{{ run.created_at }}<small class="cell-subtitle">{{ duration(run) }}</small></td><td><button class="btn" @click="selectedRun = run.run_id">查看执行</button></td></tr>
         </tbody></table><p v-if="!data.runs?.length" class="hint">还没有新版本的执行记录；旧历史可在执行记录中查看。</p></div>
@@ -45,6 +46,7 @@ import { timestamp } from '../timebase';
 const TaskReleaseDialog = defineAsyncComponent(() => import('./TaskReleaseDialog.vue'));
 const TaskOperations = defineAsyncComponent(() => import('./TaskOperations.vue'));
 const TaskConnections = defineAsyncComponent(() => import('./TaskConnections.vue'));
+import TaskSchema from './TaskSchema.vue';
 import ExecutionDialog from './ExecutionDialog.vue';
 import ModalShell from './ModalShell.vue';
 import { defineAsyncComponent, computed, onBeforeUnmount, ref, watch, nextTick, useId } from 'vue';
@@ -65,7 +67,7 @@ async function close(){if(await confirmUnsaved(props.confirm))emit('close');}
 async function selectTab(id) { if(id!==tab.value && !await confirmUnsaved(props.confirm))return; if (id === 'source') sourceVisited.value = true; if(id === 'flow')flowVisited.value=true; tab.value = id; }
 function showFlowSource(location) { sourceLocation.value={...location,key:Date.now()};sourceVisited.value=true;tab.value='source'; }
 const permitted = capability => props.canManage || data.value.permissions?.includes(capability);
-const tabs = computed(() => [{id:'description',label:'说明与配置'},{id:'flow',label:'执行流程'},{id:'source',label:'查看代码'},{id:'runs',label:props.canManage ? '执行与输出' : '执行记录'},{id:'releases',label:'代码版本'},{id:'connections',label:'连接授权'},{id:'operations',label:'运行策略'},{id:'versions',label:'配置历史'},{id:'audit',label:'操作记录'}].filter(item => props.canManage || ['description','runs'].includes(item.id) || ['source','flow'].includes(item.id) && permitted('view_code') || item.id==='releases' && permitted('publish') || item.id==='versions' && permitted('schedule')));
+const tabs = computed(() => [{id:'description',label:'说明与配置'},{id:'schema',label:'DDL 与标签'},{id:'flow',label:'执行流程'},{id:'source',label:'查看代码'},{id:'runs',label:props.canManage ? '执行与输出' : '执行记录'},{id:'releases',label:'代码版本'},{id:'connections',label:'连接授权'},{id:'operations',label:'运行策略'},{id:'versions',label:'配置历史'},{id:'audit',label:'操作记录'}].filter(item => props.canManage || ['description','runs'].includes(item.id) || ['source','flow'].includes(item.id) && permitted('view_code') || item.id==='schema' && (permitted('view_code') || permitted('publish')) || item.id==='releases' && permitted('publish') || item.id==='versions' && permitted('schedule')));
 const dialogId = useId();
 watch(() => props.canManage, value => { if (!value) { tab.value = 'description'; sourceVisited.value = false; flowVisited.value = false; sourceLocation.value = null; } });
 async function tabKey(event,index) {
