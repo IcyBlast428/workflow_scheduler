@@ -113,7 +113,9 @@ class Store:
 def gauss_store(namespace):
     from app.bootstrap.database import GaussDB
     with GaussDB(managed=False) as database:
-        if database.dialect!='GaussDB/DWS':
+        local_postgres = (os.environ.get('WFS_POSTGRES_TEST')=='true' and database.dialect=='PostgreSQL'
+                          and os.environ.get('WFS_DB_ID','').startswith('wfstest_'))
+        if database.dialect!='GaussDB/DWS' and not local_postgres:
             raise RuntimeError('GaussDB state storage requires GaussDB/DWS')
         database.begin_transaction()
         try:

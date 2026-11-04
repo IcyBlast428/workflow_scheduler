@@ -3,6 +3,7 @@
 ## 当前使用与运维
 
 - [项目总说明](../README.md)：运行结构、登录与权限、连接配置。
+- [Windows 本机 PostgreSQL 验证](local-postgres-windows.md)：Docker 测试库、隔离数据目录、真实执行与输出验收。
 - [systemd 部署](systemd-deployment.md)、[平台升级与旧任务迁移](platform-releases.md)、[部署与存储](deployment-and-storage.md)。
 - [GitLab 接入](gitlab-updates.md)、[任务发布与回滚](task-packages.md)、[任务依赖与 Nexus](task-environments-and-nexus.md)。
 - [多层目录与输出文件](task-outputs-and-projects.md)、[任务 DDL 与标签](task-schema-and-tags.md)、[任务调度与队列](task-dispatch.md)。

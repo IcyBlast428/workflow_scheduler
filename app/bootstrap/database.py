@@ -47,6 +47,38 @@ def measured(name):
     return decorate
 
 
+def qmark_parameters(sql):
+    # PyMySQL and psycopg use %-style parameters. Escape literal percents and replace
+    # question-mark parameters only outside literals/comments/identifiers.
+    result, quote, index = [], '', 0
+    while index < len(sql):
+        char = sql[index]
+        if quote:
+            result.append('%%' if char == '%' else char)
+            if char == '\\' and index + 1 < len(sql):
+                index += 1
+                result.append('%%' if sql[index] == '%' else sql[index])
+            elif char == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    result.append(quote)
+                    index += 1
+                else:
+                    quote = ''
+        elif char in "'\"`":
+            quote = char
+            result.append(char)
+        elif sql.startswith('--', index) or char == '#' or sql.startswith('/*', index):
+            end = sql.find('*/', index + 2) + 2 if char == '/' else sql.find('\n', index)
+            if end < index + 1:
+                end = len(sql)
+            result.append(sql[index:end].replace('%', '%%'))
+            index = end - 1
+        else:
+            result.append('%s' if char == '?' else '%%' if char == '%' else char)
+        index += 1
+    return ''.join(result)
+
+
 def _split_db_id(db_id):
     """db_id 约定为 <database>_<schema>，例如 sysimemedb_wfs。"""
     parts = str(db_id or DEFAULT_DB_ID).split('_', 1)
@@ -116,6 +148,20 @@ class GaussDB:
         if self.__password and self.current_env == 'production':
             self.__password = base64.b64decode(self.__password).decode("utf-8")
 
+        if self.__driver == 'psycopg' and os.environ.get('WFS_POSTGRES_TEST') == 'true':
+            if self.__db != 'wfstest' or self.__host not in ('127.0.0.1','localhost'):
+                raise RuntimeError('Native PostgreSQL acceptance is restricted to localhost/wfstest')
+            from app.bootstrap.postgres_native import Connection
+            self.conn = Connection(host=self.__host, port=int(self.__port), dbname=self.__db,
+                                   user=self.__user, password=self.__password)
+            self.cursor = self.conn.cursor()
+            try:
+                self.cursor.execute('SET statement_timeout = 10000')
+                self.cursor.execute(f"SET search_path TO {schema}")
+            except Exception:
+                self.close()
+                raise
+            return
         if pyodbc is None:
             raise RuntimeError("pyodbc is not installed; please run pip install -r requirements.txt and configure the DWS ODBC driver")
 
@@ -258,35 +304,7 @@ class GaussDB:
     def _parameters(self, sql):
         if not self._mysql:
             return sql
-        # PyMySQL uses %-formatting. Escape literal percent signs and replace
-        # question-mark parameters only outside literals/comments/identifiers.
-        result, quote, index = [], '', 0
-        while index < len(sql):
-            char = sql[index]
-            if quote:
-                result.append('%%' if char == '%' else char)
-                if char == '\\' and index + 1 < len(sql):
-                    index += 1
-                    result.append('%%' if sql[index] == '%' else sql[index])
-                elif char == quote:
-                    if index + 1 < len(sql) and sql[index + 1] == quote:
-                        result.append(quote)
-                        index += 1
-                    else:
-                        quote = ''
-            elif char in "'\"`":
-                quote = char
-                result.append(char)
-            elif sql.startswith('--', index) or char == '#' or sql.startswith('/*', index):
-                end = sql.find('*/', index + 2) + 2 if char == '/' else sql.find('\n', index)
-                if end < index + 1:
-                    end = len(sql)
-                result.append(sql[index:end].replace('%', '%%'))
-                index = end - 1
-            else:
-                result.append('%s' if char == '?' else '%%' if char == '%' else char)
-            index += 1
-        return ''.join(result)
+        return qmark_parameters(sql)
 
     def __get_db_config(self, db_name, schema):
         conf_dic = dict()

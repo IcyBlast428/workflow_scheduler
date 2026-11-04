@@ -1,0 +1,38 @@
+import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
+test('real PostgreSQL login, retained execution, CSV download and persisted settings', async ({ page }) => {
+  const record = await readFile(new URL('../../data/local-login.txt', import.meta.url), 'utf8');
+  const password = record.split(/\r?\n/).find(line => line.startsWith('Password')).split(': ').slice(1).join(': ');
+  await page.goto('/admin/#tasks');
+  await page.getByLabel('用户名', { exact: true }).fill('admin');
+  await page.getByLabel('密码', { exact: true }).fill(password);
+  await page.getByRole('button', { name: '登录', exact: true }).click();
+  const row = page.locator('.task-table tbody tr').filter({ hasText: 'pg_nested_demo' });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: '详情', exact: true }).click();
+  const detail = page.getByRole('dialog', { name: /任务详情/ });
+  await detail.getByRole('tab', { name: /执行与输出|执行记录/ }).click();
+  await detail.getByRole('button', { name: '查看执行', exact: true }).first().click();
+  const execution = detail.locator('.embedded-workspace');
+  await expect(execution.locator('.execution-meta')).toContainText('成功');
+  await execution.getByRole('button', { name: '输出文件', exact: true }).click();
+  await execution.getByRole('button', { name: '打开目录 reports', exact: true }).click();
+  await execution.getByRole('button', { name: '预览文件 details.csv', exact: true }).click();
+  await expect(execution.locator('.artifact-csv')).toContainText('项目甲');
+  const pending = page.waitForEvent('download');
+  await execution.getByRole('link', { name: '下载文件 details.csv', exact: true }).click();
+  const downloaded = await pending;
+  expect(await readFile(await downloaded.path(), 'utf8')).toContain('项目甲');
+  await page.screenshot({ path: fileURLToPath(new URL('../../data/postgres-native/browser-acceptance.png', import.meta.url)), fullPage: true });
+  await execution.getByTitle('关闭').click();
+  await detail.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.getByRole('button', { name: '数据库连接', exact: true }).click();
+  await page.getByRole('button', { name: '任务业务数据库', exact: true }).click();
+  await expect(page.locator('.content')).toContainText('pg_local');
+  await page.getByRole('button', { name: '依赖仓库', exact: true }).click();
+  await expect(page.getByLabel('依赖安装方式', { exact: true })).toHaveValue('offline');
+  await page.reload();
+  await expect(page.getByLabel('依赖安装方式', { exact: true })).toHaveValue('offline');
+});

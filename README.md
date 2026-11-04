@@ -2,6 +2,8 @@
 
 内网 root 部署和固定目录 `/data/workflow_scheduler` 见[root 简化部署](deploy/root-test/README.md)：创建 `.venv`、安装依赖，配置 GaussDB/Nacos 并完成建表检查后，初始化脚本安装两个 systemd 服务并直接开放 8008。平台主库、配置、队列和索引全部使用 GaussDB，生产不创建 SQLite 文件。
 
+Windows 本机使用 Docker PostgreSQL 替代 GaussDB 的启动及实库验收见[本机 PostgreSQL 验证](docs/local-postgres-windows.md)，数据与旧本机环境隔离。
+
 使用与运维手册见[文档导航](docs/README.md)。旧阶段检查记录与未实施提案已集中到[历史归档](docs/archive/README.md)，不作为当前投产步骤。
 
 正式部署统一采用 **systemd 管理 Web 和独立 Scheduler**，完整步骤见 [systemd 部署手册](docs/systemd-deployment.md)。生产沿用现有 GaussDB/DWS；本机 PostgreSQL 测试库仍可保留 Docker。
@@ -17,7 +19,7 @@
 - Web：提供页面与 API，可运行多个 worker。
 - Scheduler：运行 APScheduler 和任务控制接口，必须只有一个 worker；Web 将控制请求转发给它。
 - 每次执行：独立 Python 子进程；手动和自动执行共享任务并发限制；超时、强停与服务退出清理子进程组。
-- 生产数据库：支持管理员界面配置 PolarDB for MySQL / MySQL 8.0+；保留 GaussDB/DWS 的旧配置入口。
+- 本版生产数据库：按 root 部署流程使用 GaussDB/DWS，主表与辅助状态统一入库；历史 MySQL/PolarDB 连接适配器继续保留，但不属于本版 GaussDB 部署入口。
 - 本地验证：显式启用独立 SQLite 或 PostgreSQL 18.1 测试库。
 
 生产默认 Web 8008、Scheduler 127.0.0.1:8009；WSL 本地默认 18008、18009。状态每 5 秒轮询，页面隐藏时暂停，不占用 SSE 长连接。
@@ -73,7 +75,7 @@ with NewDB('mysql_orders') as db:
 
 Web 测试连接的环境可用 `pip install -r requirements-databases.txt` 安装驱动合集。任务使用独立环境，不继承 Web 已安装的包；按[任务编写示例](examples/tasks/README.md)准备 requirements.txt，通过管理员配置的 Nexus 安装，或完整锁定后准备离线 wheels。未安装驱动时前端会明确标识，不会将“已接入类型”等同于目标数据库已通过验收。MySQL/SQLite 有真实本地验收，其余类型仍需对应数据库实例验收。
 
-连接配置保存在共享 `WFS_DATA_DIR/database-connections.sqlite3`，内容使用 Fernet 认证加密。默认从高强度 `WFS_SECRET_KEY` 派生独立密钥；生产可另设固定的 `WFS_CONNECTIONS_KEY`，所有服务保持一致。平台和业务连接使用不同的派生密钥；任务仅获得业务连接的派生密钥，不获得会话签名密钥、主配置密钥或平台连接解密能力。使用 NewDB 的任务独立环境需要 SQLAlchemy、configobj、cryptography、目标数据库驱动及其间接依赖；仅使用 NewDB 不会加载平台数据库与 Nacos 组件。
+本版生产的连接配置保存在 `wfs_state_connections_profiles` 表，内容使用 Fernet 认证加密；旧开发后端才使用 `WFS_DATA_DIR/database-connections.sqlite3`。默认从高强度 `WFS_SECRET_KEY` 派生独立密钥；生产可另设固定的 `WFS_CONNECTIONS_KEY`，所有服务保持一致。平台和业务连接使用不同的派生密钥；任务仅获得业务连接的派生密钥，不获得会话签名密钥、主配置密钥或平台连接解密能力。使用 NewDB 的任务独立环境需要 SQLAlchemy、configobj、cryptography、目标数据库驱动及其间接依赖；仅使用 NewDB 不会加载平台数据库与 Nacos 组件。
 
 密码不回传浏览器；编辑时留空保留原密码。连接测试/保存错误仅返回错误码和排查提示，审计不保存请求密码。共享目录不要放入 Git；Linux 配置文件权限为 0600，Windows 应限制数据目录 ACL。备份工具会一致备份加密配置，恢复时必须另行保留原密钥，不能直接轮换或丢失密钥。
 
@@ -85,7 +87,7 @@ MySQL 的显式平台写事务先锁定 `wfs_platform_lock` 中的单行，以�
 
 ## 任务入门与部署选型
 
-“任务示例”页提供“任务编写示例”，查看高亮代码、复制或下载；管理员可以编辑既有示例或新增示例类型，选择 Python / SQL / Shell / JSON / 纯文本。初始内容来自 [examples/tasks](examples/tasks/README.md)，编辑内容保存在共享 `WFS_DATA_DIR/task-publishing.sqlite3`，重启与前端重新构建后保留。示例更新有版本冲突检查，不会执行管理员填写的代码；普通用户不能访问维护接口。
+“任务示例”页提供“任务编写示例”，查看高亮代码、复制或下载；管理员可以编辑既有示例或新增示例类型，选择 Python / SQL / Shell / JSON / 纯文本。初始内容来自 [examples/tasks](examples/tasks/README.md)，本版生产的编辑内容保存在 `wfs_state_publishing_settings` 表，旧开发后端才使用 `WFS_DATA_DIR/task-publishing.sqlite3`，重启与前端重新构建后保留。示例更新有版本冲突检查，不会执行管理员填写的代码；普通用户不能访问维护接口。
 
 独立导航“依赖仓库”可选择 Nexus 或离线安装。预填生产仓库为 `http://nexus.immp.icbc/repository/pypi-hosted/simple/`，无需认证；初次部署保持离线模式，管理员保存选择后，新版本检查依赖时生效。Nexus 模式自动解析间接依赖，支持标准版本约束和环境标记，建议直接依赖固定版本；离线模式继续要求所有依赖精确锁定并提供 wheel。详细流程见[任务环境与 Nexus](docs/task-environments-and-nexus.md)。
 
@@ -142,6 +144,8 @@ journalctl --user -u wfs-local.service -u wfs-local-scheduler.service -f
 平台业务时间为 Asia/Shanghai（UTC+8）；修改服务管理方式不改写历史时间或现有数据。单进程调试仍可使用 `bash run.sh single`，调试前先停止 systemd 服务，避免双调度器。
 
 ### PostgreSQL 18.1 兼容性测试
+
+当前 Windows 原生启动改用 `wfs-postgres-native` 容器与 psycopg，配置和数据在 `data/postgres-native/`，步骤见[Windows 本机 PostgreSQL 验证](docs/local-postgres-windows.md)。以下为保留的 WSL / ODBC 测试流程，两套入口使用同一端口，应择一启动。
 
 本机 PostgreSQL 兼容性测试使用 `postgres:18.1` 镜像，容器为 `wfs-postgres18-test`。数据库连接为 `127.0.0.1:15432`，数据库/用户为 `wfstest`，schema 为 `wfs`；数据卷为 `wfs-postgres18-test-data`，挂载到 PostgreSQL 18 的 `/var/lib/postgresql`。密码和配置保存在 Git 忽略的 `.env.postgres.local` 与 `.wfs-secrets/`，管理员登录沿用原本地账户。
 

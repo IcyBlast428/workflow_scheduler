@@ -14,6 +14,7 @@ import time
 import logging
 import uuid
 from app.bootstrap.auxiliary_store import enabled
+from app.bootstrap.recovery_files import open_shared_read, replace_recovery
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ def _spooled(directory, limit=1000):
             if index >= limit: break
             if not entry.name.endswith('.json') or not entry.is_file(follow_symlinks=False): continue
             try:
-                record=json.loads(Path(entry.path).read_text(encoding='utf-8'))
+                with open_shared_read(entry.path) as source:
+                    record=json.load(source)
                 import re
                 if re.fullmatch('[a-f0-9]{32}',record.get('run_id','')) and entry.name==record['run_id']+'.json':
                     records.append(record)
@@ -46,7 +48,7 @@ def _spool(directory, record):
             if os.name!='nt': os.chmod(temporary,0o600)
             json.dump(record,output,ensure_ascii=False)
             output.flush();os.fsync(output.fileno())
-        os.replace(temporary,path/(record['run_id']+'.json'))
+        replace_recovery(temporary,path/(record['run_id']+'.json'))
         if os.name!='nt':
             descriptor=os.open(path,os.O_RDONLY | os.O_DIRECTORY)
             try: os.fsync(descriptor)
@@ -115,7 +117,11 @@ def read(directory, run_id):
         if not re.fullmatch('[a-f0-9]{32}',str(run_id)): raise ValueError('invalid run ID')
         pending_file=Path(directory)/(run_id+'.json')
         if pending_file.is_file() and not pending_file.is_symlink():
-            return json.loads(pending_file.read_text(encoding='utf-8'))
+            try:
+                with open_shared_read(pending_file) as source:
+                    return json.load(source)
+            except FileNotFoundError:
+                pass  # Writer committed and removed the pending file; read DB.
     with connection(directory) as db:
         row = db.execute('SELECT payload FROM journal WHERE run_id=?', (run_id,)).fetchone()
     return json.loads(row[0]) if row else None
@@ -190,7 +196,8 @@ def import_legacy(directory, terminal, limit):
             continue
         path = Path(entry.path)
         try:
-            record = json.loads(path.read_text(encoding='utf-8'))
+            with open_shared_read(path) as source:
+                record = json.load(source)
             import re
             if not re.fullmatch('[a-f0-9]{32}', record.get('run_id', '')) or path.stem != record['run_id']:
                 continue

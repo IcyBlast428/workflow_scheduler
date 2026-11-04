@@ -130,3 +130,20 @@ class GaussStateTests(unittest.TestCase):
         self.assertEqual(len(journal.recent(directory,'task')),1)
         self.assertEqual(journal.active(directory),[])
         self.assertFalse(list(self.root.rglob('*.sqlite3')))
+
+    def test_transient_reader_does_not_fail_recovery_update(self):
+        from app.bootstrap.recovery_files import open_shared_read
+        import threading
+        directory=self.root/'data/executions'
+        record=dict(run_id=uuid.uuid4().hex,pid='task',status='running',created_at='2030-01-01',db_synced=False)
+        journal._spool(directory,record)
+        reader=open_shared_read(directory/(record['run_id']+'.json'))
+        self.assertEqual(json.load(reader)['status'],'running')
+        release=threading.Timer(.1,reader.close);release.start()
+        try:
+            record['status']='success'
+            journal.write(directory,record,{'success'})
+        finally:
+            release.join();reader.close()
+        self.assertFalse((directory/(record['run_id']+'.json')).exists())
+        self.assertEqual(journal.read(directory,record['run_id'])['status'],'success')
