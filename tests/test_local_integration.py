@@ -37,6 +37,19 @@ class LocalIntegrationTests(unittest.TestCase):
         cls.app = create_app()
         cls.app.testing = True
 
+    def test_public_favicons_do_not_return_spa_html(self):
+        client = self.app.test_client()
+        for name in ('favicon.svg', 'favicon.ico'):
+            with self.subTest(name=name):
+                response = client.get('/' + name)
+                try:
+                    self.assertEqual(response.status_code, 200)
+                    self.assertTrue(response.content_type.startswith('image/'))
+                    expected = Path(self.app.root_path) / 'dist' / name
+                    self.assertEqual(response.data, expected.read_bytes())
+                finally:
+                    response.close()
+
     def test_login_cookie_and_csrf(self):
         client = self.app.test_client()
         self.assertEqual(client.get('/api/taskinfo/state').status_code, 401)

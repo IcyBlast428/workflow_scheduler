@@ -32,6 +32,8 @@ test('dialogs keep focus, protect unsaved edits and restore task deep links', as
   const detail = page.getByRole('dialog',{name:/任务详情/});
   await expect(detail).toBeVisible();
   await detail.getByRole('tab',{name:'说明与配置',exact:true}).press('ArrowRight');
+  await expect(detail.getByRole('tab',{name:'DDL 与标签',exact:true})).toHaveAttribute('aria-selected','true');
+  await detail.getByRole('tab',{name:'DDL 与标签',exact:true}).press('ArrowRight');
   await expect(detail.getByRole('tab',{name:'执行流程',exact:true})).toHaveAttribute('aria-selected','true');
   await detail.press('Escape');
   await expect(detail).not.toBeVisible();

@@ -1,5 +1,7 @@
 # Workflow Scheduler
 
+使用与运维手册见[文档导航](docs/README.md)。旧阶段检查记录与未实施提案已集中到[历史归档](docs/archive/README.md)，不作为当前投产步骤。
+
 正式部署统一采用 **systemd 管理 Web 和独立 Scheduler**，完整步骤见 [systemd 部署手册](docs/systemd-deployment.md)。生产沿用现有 GaussDB/DWS；本机 PostgreSQL 测试库仍可保留 Docker。
 
 长期运行优化、升级步骤和验证范围见 [优化说明](docs/runtime-scale-improvements.md)。

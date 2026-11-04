@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "prebuild": "node scripts/clean-dist.mjs",
     "build": "vite build",
     "test:e2e": "playwright test",
     "test:e2e:gitlab": "playwright test --config playwright.gitlab.config.js",

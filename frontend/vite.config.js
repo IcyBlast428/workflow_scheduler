@@ -8,7 +8,8 @@ export default defineConfig({
     manifest: true,
     outDir: '../app/dist',
     assetsDir: 'static',
-    emptyOutDir: false,
+    // dist is generated only from source and public/, including the default avatar.
+    emptyOutDir: true,
     sourcemap: false,
     rollupOptions: {
       output: {

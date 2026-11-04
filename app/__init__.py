@@ -47,6 +47,8 @@ def create_app():
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def index(path):
+        if path in ('favicon.svg', 'favicon.ico'):
+            return send_from_directory(os.path.join(app.root_path, 'dist'), path)
         if path.startswith('api/'):
             msg = error_msg('api not found')
             msg['code'] = 404
