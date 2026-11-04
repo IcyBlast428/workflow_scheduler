@@ -30,10 +30,11 @@
       document.documentElement.setAttribute('data-theme', 'dark');
       document.documentElement.style.colorScheme = 'dark';
       try { localStorage.removeItem('workflow_scheduler_theme'); } catch (error) {}
+      try { localStorage.removeItem('wfs:low-effects'); } catch (error) {}
     }
   </script>
-  <script type="module" crossorigin src="/static/index-BNfvI9js.js"></script>
-  <link rel="stylesheet" crossorigin href="/static/index-BiSfZxXC.css">
+  <script type="module" crossorigin src="/static/index-ufk23Na5.js"></script>
+  <link rel="stylesheet" crossorigin href="/static/index-CVfc15hI.css">
 </head>
 <body>
   <div class="browser-unsupported-notice" role="alert" aria-labelledby="browser-notice-title">
@@ -45,6 +46,5 @@
   </div>
   <noscript>定时任务调度需要启用 JavaScript 才能正常使用。</noscript>
   <div id="app"></div>
-
 </body>
 </html>

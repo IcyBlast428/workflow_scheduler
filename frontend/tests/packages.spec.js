@@ -1,3 +1,4 @@
+import {navigate} from './navigation-helpers.js';
 import { test, expect } from '@playwright/test';
 
 test('task examples replace ZIP uploads and repository settings have their own navigation', async ({page}) => {
@@ -9,8 +10,8 @@ test('task examples replace ZIP uploads and repository settings have their own n
   await expect(page.getByRole('heading', {name:'任务示例',exact:true})).toBeVisible();
   await expect(page.locator('input[type=file]')).toHaveCount(0);
   await expect(page.locator('.repository-settings')).toHaveCount(0);
-  await page.getByRole('button', {name:'依赖仓库',exact:true}).click();
-  await expect(page).toHaveURL(/#repository$/);
+  await navigate(page,'依赖仓库');
+  await expect(page).toHaveURL(/#admin\?section=repository$/);
   await expect(page.getByLabel('依赖安装方式')).toBeVisible();
   await page.getByRole('button', {name:'任务列表',exact:true}).click();
   await expect(page.getByLabel('GitLab 任务变更')).toContainText('配置 GitLab');

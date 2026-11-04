@@ -1709,6 +1709,9 @@ tbody tr:hover {
 .user-menu-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px; min-height: 44px; border: 0; border-radius: 8px; color: var(--danger); background: transparent; font: inherit; cursor: pointer; }
 .user-menu-item svg { width: 20px; height: 20px; flex: none; }
 .user-menu-item:hover, .user-menu-item:focus-visible { background: var(--danger-soft); }
+.account-navigation { color:var(--ink); }
+.account-navigation:hover,.account-navigation:focus-visible,.account-navigation[aria-current="page"] { background:var(--brand-soft); color:var(--brand); }
+.account-menu-divider { border-top:1px solid var(--line); margin:8px 0; }
 
 /* One glass material for the authenticated workspace. The optical filter
    samples backgrounds only; foreground controls and text remain unfiltered. */

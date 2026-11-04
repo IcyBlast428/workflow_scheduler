@@ -133,12 +133,18 @@ def list_runs(pid=None, limit=50):
 def read_log(run_id, offset=0):
     record = read_run(run_id)
     path = run_path(run_id, 'log')
-    offset = max(0, int(offset))
+    size = path.stat().st_size if path.is_file() else 0
+    offset = max(0, size - 64 * 1024) if offset == 'tail' else min(size, max(0, int(offset)))
     data = b''
     if path.is_file():
         with path.open('rb') as source:
             source.seek(offset)
             data = source.read(64 * 1024)
+            # A tail/page may begin within a multibyte character.
+            if offset:
+                while data and data[0] & 0xc0 == 0x80:
+                    data = data[1:]
+                    offset += 1
             # Do not split a valid UTF-8 character between polling responses.
             import codecs
             decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
@@ -148,7 +154,8 @@ def read_log(run_id, offset=0):
                 data = data[:-len(pending)]
     if not path.is_file():
         content = ''
-    return dict(record=record, content=content, next_offset=offset + len(data),
+    return dict(record=record, content=content, start_offset=offset, log_size=size,
+                log_unavailable=not path.is_file(), next_offset=offset + len(data),
                 has_more=path.is_file() and path.stat().st_size > offset + len(data))
 
 

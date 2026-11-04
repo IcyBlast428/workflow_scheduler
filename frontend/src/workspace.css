@@ -83,13 +83,6 @@
 .heatmap-cell:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .modal:focus { outline: none; }
 .log-pre, .execution-output { background: var(--panel); }
-html[data-effects="low"] .glass-surface, html[data-effects="low"] .topbar,
-html[data-effects="low"] .metric-card, html[data-effects="low"] .sidebar,
-html[data-effects="low"] .nav-button, html[data-effects="low"] .user-chip,
-html[data-effects="low"] .graphic-brand, html[data-effects="low"] .liquid-glass {
-  --glass-pointer-glow: none; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; transition: none !important;
-}
-html[data-effects="low"] .glass-surface { background-color: var(--panel); }
 @media(max-width:760px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
   .summary-grid .metric-card { padding: 14px; min-height: 86px; }
@@ -100,17 +93,11 @@ html[data-effects="low"] .glass-surface { background-color: var(--panel); }
   .task-table tr > :nth-child(2), .task-table tr > :nth-child(6) { display: none; }
   .task-table th:first-child, .task-table .task-name-cell { position: static; }
   .task-table .col-name { width: 220px; }
-  .effects-toggle { font-size: 11px; padding: 6px 9px; }
   .nav-tooltip { display: none; }
   .attention-list > li { gap: 10px; }
   .log-shortcuts { padding: 0 16px 14px; }
 }
 
-/* The existing low-effect switch also provides a quieter, denser operations view. */
-html[data-effects="low"] .glass-optics { display:none!important; }
-html[data-effects="low"] .panel,html[data-effects="low"] .surface-card { background:#13232c; }
-html[data-effects="low"] .task-table td,html[data-effects="low"] .log-table td { padding-top:10px;padding-bottom:10px; }
-html[data-effects="low"] .hint,html[data-effects="low"] .muted { color:#b4c6d0; }
 
 /* Expandable surfaces share one inset body, including forms and nested tools. */
 .disclosure > .disclosure-body {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { defaultCamera, moveCamera, layoutTasks, minuteOf, createMatrixScene, createPerspectiveProjection } from '../src/executionMatrixScene.js';
+import { defaultCamera, moveCamera, layoutTasks, minuteOf, createMatrixScene, createPerspectiveProjection, createTimelineProjection } from '../src/executionMatrixScene.js';
 const camera=defaultCamera();
 moveCamera(camera,0,50,0);
 assert.equal(camera.yaw,-32,'Right drag must subtract yaw');
@@ -58,7 +58,7 @@ handlers.get('pointerdown')(event({altKey:true}));handlers.get('pointermove')(ev
 assert.equal(flush(),original,'Two vertical turns must return to the same scene without pole locking');
 handlers.get('pointerdown')(event({altKey:true}));handlers.get('pointermove')(event({clientY:-180,altKey:true}));handlers.get('pointerup')(event({clientY:-180}));flush();
 const sceneBounds={min:[-1.3,-.1,0],max:[layout.width,7.5,layout.depth+1]};
-const inverted=createPerspectiveProjection(sceneBounds,{...defaultCamera(),pitch:-96},1400,700);
+const inverted=createTimelineProjection(sceneBounds,{...defaultCamera(),pitch:-96},1400,700);
 const taskPosition=layout.positions.get('0-000'),recordY=720*7.1/810+.045;
 const point=inverted.project(taskPosition.x,recordY-.065,taskPosition.z);
 handlers.get('pointerdown')(event({clientX:point[0],clientY:point[1]}));handlers.get('pointerup')(event({clientX:point[0],clientY:point[1]}));
@@ -68,4 +68,7 @@ handlers.get('pointerdown')(event({altKey:true,button:2}));handlers.get('pointer
 assert.ok(blocked,'Right drag must suppress context menu even after Alt is released');
 handlers.get('pointerdown')(event({button:2}));blocked=false;handlers.get('contextmenu')(event({preventDefault(){blocked=true;}}));assert.equal(blocked,false);
 scene.dispose();assert.equal(handlers.size,0,'Unmount must release all pointer handlers');
+const horizontal=createTimelineProjection(sceneBounds,defaultCamera(),1400,700);
+const timeStart=horizontal.project(0,0,0),timeEnd=horizontal.project(0,7,0);
+assert.ok(timeEnd[0]>timeStart[0] && Math.abs(timeEnd[0]-timeStart[0])>4*Math.abs(timeEnd[1]-timeStart[1]),'Time advances predominantly left to right in the default panorama');
 console.log('Perspective depth, full rotations, inverted picking, camera, layout, context menu and cleanup passed.');

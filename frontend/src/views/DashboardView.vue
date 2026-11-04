@@ -1,5 +1,5 @@
 <template>
-  <LoadingStatus v-if="dashboard.loading" class="dashboard-loading" :active="dashboard.loading" label="正在更新总览…" />
+  <LoadingStatus v-if="dashboard.loading && !dashboard.loaded" class="dashboard-loading" :active="dashboard.loading" label="正在更新总览…" />
   <div v-if="dashboard.error" class="error-state">{{ dashboard.error }}</div>
   <template v-if="!dashboard.error || dashboard.loaded">
     <RuntimeOverview

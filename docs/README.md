@@ -11,6 +11,7 @@
 - [输出与项目目录](task-outputs-and-projects.md)
 - [DDL 与标签](task-schema-and-tags.md)
 - [排队与负载控制](task-dispatch.md)
+- [导航与日志清理](navigation-and-log-storage.md)
 - [执行矩阵](execution-matrix.md)
 - [任务流程分析](task-flow.md)
 - [全新架构检查](fresh-gauss-audit.md)

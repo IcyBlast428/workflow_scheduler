@@ -137,7 +137,7 @@ test('favorites persist and batch controls preview effects before applying', asy
 });
 
 test('matrix filters survive reload and historical mode pauses polling', async ({page}) => {
-  await page.goto('/#matrix');
+  await page.goto('/#matrix?tab=timeline');
   await page.getByLabel('用户名').fill('admin');
   await page.getByLabel('密码').fill('browser-test-password');
   await page.getByRole('button',{name:'登录',exact:true}).click();
@@ -267,6 +267,8 @@ test('account dropdown supports keyboard, outside dismissal and logout on mobile
   await expect(trigger).toBeVisible();
   await trigger.press('ArrowDown');
   const exit = page.getByRole('menuitem',{name:'退出登录'});
+  await expect(page.getByRole('menuitem',{name:'平台设置',exact:true})).toBeFocused();
+  await page.keyboard.press('End');
   await expect(exit).toBeFocused();
   await exit.press('Escape');
   await expect(trigger).toBeFocused();

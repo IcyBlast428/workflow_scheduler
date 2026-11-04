@@ -96,7 +96,7 @@ const settings = ref(null), state = ref(null), tasks = ref([]), loading = ref(fa
 const error = ref(''), message = ref(''), selected = ref(null), fileDiff = ref(null), fileIndex = ref(-1), diffLoading = ref(false), diffError = ref('');
 const form = reactive({ tasks: [] }), taskRoots = ref(''), sharedPaths = ref(''), filter = ref('all');
 const {saved:settingsSaved}=useUnsavedChanges(()=>({form,roots:taskRoots.value,paths:sharedPaths.value}),()=>Boolean(settings.value));
-let timer, sequence = 0, stateSequence = 0, alive = true;
+let timer, sequence = 0, stateSequence = 0, alive = true,refreshInFlight=0,visibleRefreshes=0;
 const filters = [{ id: 'all', label: '全部' }, { id: 'branch', label: '待合并' }, { id: 'release', label: '待部署 / 发布' }];
 const filtered = computed(() => (state.value?.items || []).filter(item => filter.value === 'all' || (filter.value === 'branch' ? item.kind === 'branch' : item.kind !== 'branch')));
 const diffLines = computed(() => (fileDiff.value?.diff || '').split('\n'));
@@ -123,12 +123,14 @@ function applyState(value) {
   }
   if (!selected.value && value.items.length) select(value.items[0]);
 }
-async function refresh() {
+async function refresh(silent=false) {
+  if(silent===true && refreshInFlight)return;
   const current = ++stateSequence;
-  loading.value = true; error.value = '';
+  refreshInFlight++;
+  if(silent!==true){visibleRefreshes++;loading.value = true;}
   try { const value = await api.gitlabState(); if (alive && current === stateSequence) applyState(value); }
   catch (exc) { if (alive && current === stateSequence) error.value = exc.message; }
-  finally { if (alive && current === stateSequence) loading.value = false; }
+  finally { refreshInFlight--;if(silent!==true)visibleRefreshes--;if(alive)loading.value=visibleRefreshes>0; }
 }
 async function save() {
   stateSequence += 1;
@@ -167,7 +169,7 @@ onMounted(async () => {
     applySettings(configuration); tasks.value = packages.tasks.filter(task => !task.deleted_at);
     await refresh();
   } catch (exc) { if (alive) error.value = exc.message; }
-  if (alive) timer = setInterval(() => { if (!document.hidden && !saving.value) refresh(); }, 5000);
+  if (alive) timer = setInterval(() => { if (!document.hidden && !saving.value && !checking.value && !loading.value) refresh(true); }, 5000);
 });
 onBeforeUnmount(() => { alive = false; sequence += 1; stateSequence += 1; clearInterval(timer); });
 </script>

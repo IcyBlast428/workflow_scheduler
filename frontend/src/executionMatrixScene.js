@@ -51,6 +51,21 @@ function shade(color, factor) {
   return '#'+[1,3,5].map(i=>Math.round(parseInt(color.slice(i,i+2),16)*factor).toString(16).padStart(2,'0')).join('');
 }
 
+// Lay the former vertical time dimension along world X. Task categories span
+// the Y/Z cross-section; transform normals as well so picking and face culling
+// agree with the geometry through a full camera orbit.
+export function createTimelineProjection(bounds,camera,width,height){
+  const point=(x,y,z)=>[y*1.8,z,-x];
+  const transformed={min:[bounds.min[1]*1.8,bounds.min[2],-bounds.max[0]],max:[bounds.max[1]*1.8,bounds.max[2],-bounds.min[0]]};
+  const lens=createPerspectiveProjection(transformed,{...camera,zoom:1,x:0,y:0},width,height);
+  const corners=[];
+  for(const x of [transformed.min[0],transformed.max[0]])for(const y of [transformed.min[1],transformed.max[1]])for(const z of [transformed.min[2],transformed.max[2]])corners.push(lens.project(x,y,z));
+  const xs=corners.map(p=>p[0]),ys=corners.map(p=>p[1]);
+  const centerX=(Math.min(...xs)+Math.max(...xs))/2,centerY=(Math.min(...ys)+Math.max(...ys))/2;
+  const fit=.9*Math.min(Math.max(1,width-120)/Math.max(1,Math.max(...xs)-Math.min(...xs)),Math.max(1,height-150)/Math.max(1,Math.max(...ys)-Math.min(...ys)));
+  return {project(x,y,z){const p=lens.project(...point(x,y,z));return [width/2+(p[0]-centerX)*fit*camera.zoom+camera.x,height/2+(p[1]-centerY)*fit*camera.zoom+camera.y];},depth:(x,y,z)=>lens.depth(...point(x,y,z)),facing:(p,n)=>lens.facing(point(...p),[n[1],n[2],-n[0]])};
+}
+
 function inside(p, vertices) {
   let result = false;
   for (let i=0,j=vertices.length-1; i<vertices.length; j=i++) {
@@ -79,7 +94,7 @@ export function createMatrixScene(canvas, onSelect, options = {}) {
     const marks=[...data.records,...data.active,...pending];
     const heightAt=r => r.status==='running'||r.status==='queued' ? currentY : minuteOf(r.time)*unit;
     const bounds={min:[-1.3,-.1,0],max:[layout.width,Math.max(currentY+.4,...pending.map(r=>heightAt(r)+.2)),layout.depth+1]};
-    const projection=createPerspectiveProjection(bounds,camera,width,height),project=projection.project,depth=projection.depth;
+    const projection=createTimelineProjection(bounds,camera,width,height),project=projection.project,depth=projection.depth;
     const poly=(vertices,fill,stroke,alpha=1,line=1) => { ctx.save(); ctx.globalAlpha=alpha; ctx.beginPath(); vertices.forEach((p,i)=>i?ctx.lineTo(...p):ctx.moveTo(...p));ctx.closePath();if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=line;ctx.stroke();}ctx.restore(); };
     const plane=(p,y,half=.5) => [[p.x-half,y,p.z-half],[p.x+half,y,p.z-half],[p.x+half,y,p.z+half],[p.x-half,y,p.z+half]].map(v=>project(...v));
     const objects=[];
@@ -116,9 +131,9 @@ export function createMatrixScene(canvas, onSelect, options = {}) {
     objects.sort((a,b)=>a.depth-b.depth).forEach(o=>o.paint());
     const axisStart=project(-1,0,0),axisEnd=project(-1,currentY+.3,0);
     ctx.strokeStyle=colors.muted;ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(...axisStart);ctx.lineTo(...axisEnd);ctx.stroke();
-    ctx.font='12px sans-serif';ctx.textAlign='right';ctx.fillStyle=colors.muted;
-    ctx.fillText('00:00',axisStart[0]-8,axisStart[1]+4);
-    ctx.fillText(today?data.server_time.slice(11,16):'24:00',axisEnd[0]-8,axisEnd[1]);
+    ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillStyle=colors.muted;
+    ctx.fillText('00:00',axisStart[0],axisStart[1]+20);
+    ctx.fillText(today?data.server_time.slice(11,16):'24:00',axisEnd[0],axisEnd[1]+20);
     const labels=[];
     layout.groups.forEach(g => {
       const p=project(g.x+g.cols/2,0,g.rows+.55),text=`${g.name} · ${g.tasks.length}`,tw=ctx.measureText(text).width+18;

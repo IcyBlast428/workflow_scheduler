@@ -33,6 +33,16 @@ def audit(action, target, details=''):
     record(g.identity['username'], action, target, details=details)
     g.audit_forwarded = True
 
+
+@blueprint.route('/api/admin/operational/log-storage', methods=['GET', 'POST'])
+def log_storage():
+    from app.bootstrap import log_storage as logs
+    if request.method == 'GET':
+        return success_msg(logs.preview(int(request.args.get('days', 90))))
+    value = logs.execute(request.get_json(silent=True) or {})
+    audit('log_cleanup', 'platform', json.dumps(value, ensure_ascii=False))
+    return success_msg(value)
+
 @blueprint.route('/api/admin/operational/policy/<kind>', methods=['GET', 'POST'])
 def operational_policy(kind):
     if kind not in ('task', 'release', 'groups', 'dispatch'):

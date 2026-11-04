@@ -13,6 +13,10 @@
     <Teleport to="body">
     <div v-if="open" id="account-menu" ref="dropdown" v-glass class="user-dropdown glass-surface glass-floating" :style="menuPosition" role="menu" :aria-label="`${name} 账户操作`" @focusout="onFocusOut" @keydown="onKeydown">
       <div class="user-dropdown-heading" role="presentation"><strong>{{ name }}</strong><span>当前登录账户</span></div>
+      <template v-if="admin">
+        <button v-for="item in entries" :key="item.id" class="user-menu-item account-navigation" type="button" role="menuitem" :aria-current="current === item.id || item.id === 'admin' && ['connections','repository'].includes(current) ? 'page' : undefined" @click="navigate(item.id)">{{ item.label }}</button>
+        <div class="account-menu-divider" role="separator" />
+      </template>
       <button ref="logout" class="user-menu-item" type="button" role="menuitem" @click="exit">
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M8 4H4v12h4M8 10h9m-3-3 3 3-3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
         退出登录
@@ -23,8 +27,10 @@
 </template>
 <script setup>
 import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
-const props = defineProps({ name: { type: String, default: 'Admin' }, avatar: String, placement: { type: String, default: 'topbar' } });
-const emit = defineEmits(['logout']);
+const props = defineProps({ name: { type: String, default: 'Admin' }, avatar: String, admin:Boolean, current:String, placement: { type: String, default: 'topbar' } });
+const emit = defineEmits(['logout','navigate']);
+const entries = [{id:'admin',label:'平台设置'},{id:'systemLogs',label:'平台事件'},{id:'packages',label:'任务示例与文档'}];
+function navigate(id) { close(); emit('navigate',id); }
 const root = ref(null), dropdown = ref(null), trigger = ref(null), logout = ref(null), open = ref(false);
 const menuPosition = ref({});
 function positionMenu() {
@@ -42,7 +48,7 @@ function positionMenu() {
   const top = anchor.bottom + 10 + height <= window.innerHeight - 14 ? anchor.bottom + 10 : Math.max(14, anchor.top - height - 10);
   menuPosition.value = { left:`${Math.max(14, Math.min(anchor.right - width, window.innerWidth - width - 14))}px`, top:`${top}px` };
 }
-async function toggle() { open.value = !open.value; if (open.value) { positionMenu(); await nextTick(); positionMenu(); logout.value?.focus(); } }
+async function toggle() { open.value = !open.value; if (open.value) { positionMenu(); await nextTick(); positionMenu(); dropdown.value?.querySelector('[role="menuitem"]')?.focus(); } }
 function close(restoreFocus = false) { open.value = false; if (restoreFocus) trigger.value?.focus(); }
 function exit() { close(); emit('logout'); }
 function contains(target) { return root.value?.contains(target) || dropdown.value?.contains(target); }
@@ -51,7 +57,11 @@ function onFocusOut(event) { if (!contains(event.relatedTarget)) close(); }
 async function onKeydown(event) {
   if (event.key === 'Escape' && open.value) { event.preventDefault(); event.stopPropagation(); close(true); }
   if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-    event.preventDefault(); open.value = true; positionMenu(); await nextTick(); positionMenu(); logout.value?.focus();
+    event.preventDefault(); const wasOpen=open.value; open.value = true; positionMenu(); await nextTick(); positionMenu();
+    const items=[...dropdown.value.querySelectorAll('[role="menuitem"]')];
+    const index=items.indexOf(document.activeElement);
+    const next=event.key==='Home'?0:event.key==='End'?items.length-1:!wasOpen?(event.key==='ArrowUp'?items.length-1:0):(index+(event.key==='ArrowUp'?-1:1)+items.length)%items.length;
+    items[next]?.focus();
   }
 }
 function onScroll(event) { if (!dropdown.value?.contains(event.target)) close(); }

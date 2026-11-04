@@ -28,7 +28,7 @@
     class="login-screen"
     :style="{ '--login-radius': `${LOGIN_CORNER_RADIUS}px` }"
   >
-    <LoginBackdrop v-if="!lowEffects" @scene-change="loginVisual = $event" />
+    <LoginBackdrop @scene-change="loginVisual = $event" />
     <LiquidGlassPanel :snapshot="loginVisual">
       <div class="login-brief">
         <div class="login-brand-row">
@@ -147,6 +147,9 @@
         class="btn icon-only mobile-menu"
         type="button"
         title="菜单"
+        aria-label="菜单"
+        :aria-expanded="mobileNavOpen"
+        aria-controls="workspace-navigation"
         @click="mobileNavOpen = !mobileNavOpen"
       >
         ≡
@@ -180,10 +183,14 @@
         </button>
       </nav>
       <div class="sidebar-account">
+        <ServiceStatus :status="backendStatus" />
         <UserMenu
           placement="sidebar"
           :name="user.name || 'Admin'"
           :avatar="user.avatar"
+          :admin="canManage"
+          :current="view"
+          @navigate="switchView"
           @logout="handleLogout"
         />
       </div>
@@ -197,14 +204,7 @@
         </div>
         <div class="top-actions">
           <button v-if="canManage" class="btn" type="button" @click="switchView('gitlab')">代码更新<span v-if="gitlabSummary?.unread && gitlabSummary.count"> · {{ gitlabSummary.count }}</span></button>
-          <button
-            class="btn effects-toggle"
-            :aria-pressed="lowEffects"
-            @click="lowEffects = !lowEffects"
-          >
-            {{ lowEffects ? '恢复特效' : '简化特效' }}
-          </button>
-          <ServiceStatus :status="backendStatus" />
+          <button v-if="canManage && (!backendStatus.reachable || Object.values(backendStatus.components || {}).some(item => item.status === 'unavailable'))" class="btn warning" @click="switchView('systemLogs')">查看平台事件</button>
 
         </div>
       </header>
@@ -243,10 +243,12 @@
           />
         </template>
 
-        <template v-else-if="view === 'queue' && canManage"><ExecutionQueue :confirm="requestConfirm" @execution="openExecution" @detail="detailPid=$event" @settings="switchView('admin')" /></template>
-        <template v-else-if="view === 'matrix'">
-          <ExecutionMatrix
+        <template v-else-if="view === 'matrix' || view === 'queue' && canManage">
+          <ExecutionMatrixWorkspace
             :user-key="user.name"
+            :can-manage="canManage"
+            :confirm="requestConfirm"
+            @settings="switchView('admin')"
             @task="detailPid = $event"
             @execution="openExecution"
             @logs="openMatrixLogs"
@@ -300,17 +302,17 @@
             @open="openTaskLog"
             @page="setTaskLogPage"
             @page-size="setTaskLogPageSize"
+            @updates="loadTaskLogs(true)"
+            @tasks="switchView('tasks')"
           />
         </template>
 
         <template v-else-if="view === 'packages' && canManage"
           ><TaskExamples /></template>
-        <template v-else-if="view === 'repository' && canManage"><section class="panel"><div class="panel-head"><div><h2>依赖仓库</h2><p>配置任务独立环境使用的私有 PyPI 或离线依赖。</p></div></div><div class="panel-body"><PackageRepositorySettings open /></div></section></template>
         <template v-else-if="view === 'gitlab' && canManage"><GitlabUpdates @state="acceptGitlabState" /></template>
-        <template v-else-if="view === 'admin' && canManage"
+        <template v-else-if="['admin','connections','repository'].includes(view) && canManage"
           ><AdminPanel :confirm="requestConfirm"
         /></template>
-        <template v-else-if="view === 'connections' && canManage"><DatabaseConnections :confirm="requestConfirm" /></template>
         <template v-else-if="canManage">
           <SystemEventsView
             :system-logs="systemLogs"
@@ -453,17 +455,14 @@ import { useDashboardWorkspace } from './composables/useDashboardWorkspace';
 import MaintenanceControl from './components/MaintenanceControl.vue';
 import TaskDetailDialog from './components/TaskDetailDialog.vue';
 import ExecutionDialog from './components/ExecutionDialog.vue';
-const ExecutionQueue = defineAsyncComponent(() => import('./components/ExecutionQueue.vue'));
 const AdminPanel = defineAsyncComponent(
   () => import('./components/AdminPanel.vue'),
 );
-const DatabaseConnections = defineAsyncComponent(() => import('./components/DatabaseConnections.vue'));
 const GitlabUpdates = defineAsyncComponent(() => import('./components/GitlabUpdates.vue'));
 const TaskExamples = defineAsyncComponent(() => import('./components/TaskExamples.vue'));
 const TaskReleaseDialog = defineAsyncComponent(() => import('./components/TaskReleaseDialog.vue'));
-const PackageRepositorySettings = defineAsyncComponent(() => import('./components/PackageRepositorySettings.vue'));
-const ExecutionMatrix = defineAsyncComponent(
-  () => import('./components/ExecutionMatrix.vue'),
+const ExecutionMatrixWorkspace = defineAsyncComponent(
+  () => import('./components/ExecutionMatrixWorkspace.vue'),
 );
 import { canTrigger } from './executionLabels';
 import { confirmUnsaved } from './composables/useUnsavedChanges';
@@ -477,16 +476,6 @@ async function refreshPageAssets() {
 }
 
 const loginVisual = shallowRef(null);
-const lowEffects = ref(Boolean(readPreference('wfs:low-effects', false)));
-watch(
-  lowEffects,
-  (value) => {
-    document.documentElement.dataset.effects = value ? 'low' : 'full';
-    writePreference('wfs:low-effects', value);
-    window.dispatchEvent(new Event('wfs:effects'));
-  },
-  { immediate: true },
-);
 const navHint = ref(null);
 const navExpanded = ref(Boolean(readPreference('wfs:nav-expanded', true)));
 watch(navExpanded, (value) => writePreference('wfs:nav-expanded', value));
@@ -530,7 +519,7 @@ const navItems = [
     id: 'matrix',
     label: '执行矩阵',
     iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 12l9 4 9-4', 'M3 17l9 4 9-4'],
-    description: '按任务分类查看当日执行轨迹。',
+    description: '最近执行结果、当日轨迹与队列管理。',
   },
   {
     id: 'taskLogs',
@@ -551,7 +540,7 @@ const navItems = [
   },
   {
     id: 'packages',
-    label: '任务示例',
+    label: '任务示例与文档',
     iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 7v10l9 4 9-4V7', 'M12 11v10'],
     description: '任务编写示例、完整项目与 GitLab 发布说明。',
   },
@@ -563,7 +552,7 @@ const navItems = [
   },
   {
     id: 'admin',
-    label: '系统管理',
+    label: '平台设置',
     iconPaths: ['M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8','M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z'],
     description: '运行策略、发布设置、账户权限与审计。',
   },
@@ -613,7 +602,7 @@ const { summary: gitlabSummary, showReminder: showGitlabReminder, accept: accept
 const canOperate = computed(() => canManage.value || user.roles.includes('maintainer'));
 const visibleNavItems = computed(() =>
   navItems.filter(
-    (item) => canManage.value || ['tasks', 'matrix', 'taskLogs'].includes(item.id),
+    (item) => canManage.value ? ['dashboard','tasks','matrix','taskLogs','gitlab'].includes(item.id) : ['tasks', 'matrix', 'taskLogs'].includes(item.id),
   ),
 );
 
@@ -694,7 +683,7 @@ const scheduleDialog = reactive({
 });
 
 const activeNav = computed(
-  () => navItems.find((item) => item.id === view.value) || navItems[0],
+  () => navItems.find((item) => item.id === (view.value==='queue'?'matrix':['connections','repository'].includes(view.value)?'admin':view.value)) || navItems[0],
 );
 
 function pushToast(type, title, message) {
@@ -876,10 +865,12 @@ async function handleLogout() {
 }
 
 async function switchView(nextView) {
+  const queueTab=nextView==='queue';
+  if(queueTab)nextView='matrix';
   if(nextView!==view.value && !await confirmUnsaved(requestConfirm))return;
   if (token.value && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(nextView)) nextView = 'tasks';
   view.value = nextView;
-  window.location.hash = nextView;
+  window.location.hash = queueTab ? 'matrix?tab=queue' : nextView;
   mobileNavOpen.value = false;
   syncDashboardPolling();
 }
@@ -893,24 +884,25 @@ async function refreshPackageTasks() {
   await Promise.all([loadTasks(), loadGroups()]);
 }
 
-async function refreshActiveView() {
+async function refreshActiveView(options = {}) {
+  const silent=options.silent===true;
   const reachable = await checkBackend({ silent: true });
   if (!reachable) {
-    pushToast('error', '刷新失败', backendStatus.error);
+    if(!silent)pushToast('error', '刷新失败', backendStatus.error);
     return;
   }
 
   if (view.value === 'dashboard') {
-    await loadDashboard();
+    await loadDashboard({silent});
   } else if (view.value === 'tasks') {
-    await Promise.all([loadTasks(), loadGroups()]);
+    await Promise.all([loadTasks(false,{silent}), ...(silent?[]:[loadGroups()])]);
   } else if (view.value === 'taskLogs') {
-    await Promise.all([loadTaskLogs(), loadTaskIds()]);
-  } else if (view.value === 'matrix') {
-    window.dispatchEvent(new Event('wfs:matrix-refresh'));
+    await Promise.all([loadTaskLogs(false,{silent,buffer:silent}), ...(silent?[]:[loadTaskIds()])]);
+  } else if (['matrix','queue'].includes(view.value)) {
+    window.dispatchEvent(new CustomEvent('wfs:matrix-refresh',{detail:{silent}}));
   } else if (view.value === 'packages') {
     window.dispatchEvent(new Event('wfs:packages-refresh'));
-  } else {
+  } else if(view.value==='systemLogs') {
     await Promise.all([loadSystemLogs(), loadSystemIds()]);
   }
 }
@@ -1185,10 +1177,8 @@ function handleVisibilityChange() {
   if (!token.value || document.visibilityState === 'hidden') {
     return;
   }
-  if (!eventSource) {
-    startLiveEvents();
-  }
-  refreshActiveView();
+  startLiveEvents();
+  refreshActiveView({silent:true});
 }
 
 watch(view, async (nextView) => {
@@ -1277,7 +1267,7 @@ async function openActiveExecution(row) {
 function openMatrixLogs(record) {
   taskLogs.params.taskid = record.pid;
   taskLogs.params.taskname = '';
-  taskLogs.params.scope = 'online';
+  taskLogs.params.scope = record.scope || 'online';
   taskLogs.params.startDate = record.start_time.slice(0, 10);
   taskLogs.params.endDate = record.end_time.slice(0, 10);
   taskLogs.params.taskstate = '';

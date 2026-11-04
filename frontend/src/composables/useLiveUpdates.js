@@ -17,6 +17,7 @@ export function useLiveUpdates({
     liveRefreshInFlight = false,
     liveTaskSignature = '',
     liveLogSignature = '',
+    logsDirty = false,
     epoch = 0,
     stopped = false;
   async function pollLiveEvents() {
@@ -61,6 +62,7 @@ export function useLiveUpdates({
     liveState.lastEvent = '';
     liveTaskSignature = '';
     liveLogSignature = '';
+    logsDirty = false;
     liveRefreshInFlight = false;
   }
 
@@ -80,6 +82,7 @@ export function useLiveUpdates({
   }
 
   async function refreshFromLiveSnapshot({ taskChanged, logsChanged }) {
+    if(logsChanged)logsDirty=true;
     if (liveRefreshInFlight || document.visibilityState === 'hidden') {
       return;
     }
@@ -92,18 +95,20 @@ export function useLiveUpdates({
       }
       if (
         view.value === 'taskLogs' &&
-        logsChanged &&
-        taskLogs.params.currentPage === 1 &&
+        logsDirty &&
+        taskLogs.loaded &&
         !taskLogs.loading &&
         taskLogs.params.scope !== 'archive' &&
         taskLogs.params.endDate === recentLogDates().end
       ) {
-        jobs.push(loadTaskLogs(false, { silent: true }));
+        logsDirty=false;
+        jobs.push(loadTaskLogs(false, { silent: true, buffer: true }));
       }
       if (jobs.length) {
         await Promise.all(jobs);
       }
     } finally {
+      if(taskLogs.refreshError)logsDirty=true;
       liveRefreshInFlight = false;
     }
   }

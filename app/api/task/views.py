@@ -19,6 +19,7 @@ from app.bootstrap.run_summary import coverage
 from app.bootstrap.snapshot_cache import cached
 from app.settings import WFS_ENABLE_SCHEDULER, WFS_SCHEDULER_CONTROL_URL
 MAX_PAGE_SIZE = 100
+LOG_PREVIEW_SQL = "CASE WHEN length(tasklog)>65536 THEN '[日志较大，仅显示末尾 65536 字符；完整保留日志请进入执行详情下载。]' || chr(10) || right(tasklog,65536) ELSE tasklog END"
 RECENT_HOURS = 24
 CPU_TIMELINE_HOURS = 6
 
@@ -599,7 +600,7 @@ class DetailLog(Resource):
     def post(self):
         try:
             pid = request.args.get('id')
-            sql = 'SELECT tasklog FROM wfs_run_history where pid=? order by end_time desc limit 1'
+            sql = 'SELECT ' + LOG_PREVIEW_SQL + ' FROM wfs_run_history where pid=? order by end_time desc limit 1'
             with GaussDB() as db:
                 res = db.execute_query_sql(sql=sql, return_json=False, params=(pid,))
         except Exception as exc:
@@ -614,13 +615,13 @@ class TaskLogDetail(Resource):
             end_time = request.args.get('end_time')
             pid = request.args.get('pid')
             if log_id and end_time:
-                sql = 'SELECT tasklog FROM wfs_run_history WHERE id=? AND end_time=? LIMIT 1'
+                sql = 'SELECT ' + LOG_PREVIEW_SQL + ' FROM wfs_run_history WHERE id=? AND end_time=? LIMIT 1'
                 with GaussDB() as db:
                     res = db.execute_query_sql(sql=sql, return_json=False, params=(log_id, end_time))
                     if not res:
                         res = db.execute_query_sql(sql=sql.replace('wfs_run_history', 'wfs_run_history_archive'), return_json=False, params=(log_id, end_time))
             elif pid:
-                sql = 'SELECT tasklog FROM wfs_run_history WHERE pid=? ORDER BY end_time DESC LIMIT 1'
+                sql = 'SELECT ' + LOG_PREVIEW_SQL + ' FROM wfs_run_history WHERE pid=? ORDER BY end_time DESC LIMIT 1'
                 with GaussDB() as db:
                     res = db.execute_query_sql(sql=sql, return_json=False, params=(pid,))
             else:

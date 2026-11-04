@@ -26,7 +26,7 @@ function hide() {
 
 function draw() {
   frame = 0;
-  if (document.documentElement.dataset.effects === 'low' || !pointer || !enabled.matches || transparency.matches || document.hidden) return hide();
+  if (!pointer || !enabled.matches || transparency.matches || document.hidden) return hide();
   // A dialog's backdrop shields the workspace behind it from the pointer light.
   const scope = document.elementFromPoint(pointer.x, pointer.y)?.closest('.modal-backdrop') || document;
   const illuminated = new Set();
@@ -56,7 +56,7 @@ function schedule() {
 }
 
 function move(event) {
-  if (document.documentElement.dataset.effects === 'low' || event.pointerType !== 'mouse' || !enabled.matches || transparency.matches || document.hidden) return hide();
+  if (event.pointerType !== 'mouse' || !enabled.matches || transparency.matches || document.hidden) return hide();
   pointer = { x: event.clientX, y: event.clientY };
   schedule();
 }
@@ -74,7 +74,6 @@ onMounted(() => {
   window.addEventListener('scroll', schedule, { passive: true, capture: true });
   window.addEventListener('resize', schedule, { passive: true });
   window.addEventListener('blur', hide);
-  window.addEventListener('wfs:effects',hide);
   document.documentElement.addEventListener('pointerleave', hide);
   document.addEventListener('visibilitychange', visibility);
   enabled.addEventListener('change', hide);
@@ -88,7 +87,6 @@ onUnmounted(() => {
   window.removeEventListener('scroll', schedule, true);
   window.removeEventListener('resize', schedule);
   window.removeEventListener('blur', hide);
-  window.removeEventListener('wfs:effects',hide);
   document.documentElement.removeEventListener('pointerleave', hide);
   document.removeEventListener('visibilitychange', visibility);
   enabled?.removeEventListener('change', hide);

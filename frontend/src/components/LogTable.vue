@@ -27,7 +27,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="(row, index) in rows" :key="`${row.id}-${row.datetime}-${index}`">
+        <tr v-for="row in rows" :key="`${row.logid || row.id}-${row.datetime}`">
           <template v-if="kind === 'task'">
             <td class="mono cell-strong">{{ row.id }}</td>
             <td>{{ row.name }}</td>

@@ -1,7 +1,7 @@
 <template>
   <section ref="pageElement" class="matrix-page">
     <div class="matrix-toolbar">
-      <div class="matrix-heading"><div><h2>任务执行矩阵</h2><p>{{ displayMode === '2d' ? '按任务与小时查看执行分布 · 同一时段异常优先显示' : '分类固定位置 · 高度表示完成时间 · 执行中位于当前平面' }}</p></div><button class="btn matrix-filter-toggle" :aria-expanded="filtersOpen" aria-controls="matrix-filters" @click="filtersOpen=!filtersOpen">{{ filtersOpen ? '收起筛选' : '筛选' }}</button></div>
+      <div class="matrix-heading"><div><h2>任务执行矩阵</h2><p>{{ displayMode === '2d' ? '按任务与小时查看执行分布 · 同一时段异常优先显示' : '横向时间轴 · 从左至右推进 · 分类分布在截面上' }}</p></div><button class="btn matrix-filter-toggle" :aria-expanded="filtersOpen" aria-controls="matrix-filters" @click="filtersOpen=!filtersOpen">{{ filtersOpen ? '收起筛选' : '筛选' }}</button></div>
       <div id="matrix-filters" class="matrix-filters" :class="{'is-open':filtersOpen}">
         <label class="matrix-filter-field">视图 <select class="select" v-model="displayMode" aria-label="矩阵视图" @change="savePreferences()"><option value="3d">三维矩阵</option><option value="2d">二维时间图</option></select></label>
         <label class="checkbox-row"><input type="checkbox" v-model="live" @change="changeMode">实时跟随今天</label>
@@ -13,7 +13,7 @@
         <button class="btn" :disabled="loading" @click="load(true)">{{ loading ? '刷新中…' : '刷新' }}</button>
       </div>
     </div>
-    <LoadingStatus :active="loading" label="正在更新执行矩阵…" />
+    <LoadingStatus :active="loading && !data" label="正在更新执行矩阵…" />
     <div v-if="error" class="matrix-notice" role="alert">{{ error }} <button class="btn" :disabled="loading" @click="load(true)">重试</button></div>
     <template v-if="data">
       <div class="matrix-summary">
@@ -32,7 +32,7 @@
         <div v-if="!data.tasks.length" class="matrix-empty">还没有可显示的任务</div>
         <div v-else-if="!data.records.length && !data.active.length" class="matrix-empty matrix-empty-small">当天暂无执行记录</div>
         <div v-if="selectedTask" v-glass class="matrix-selection glass-surface glass-floating"><strong>{{ selectedTask.name }}</strong><span>{{ selectedTask.group }}<template v-if="selectedRecord"> · {{ statusName(selectedRecord.status) }} · {{ selectedRecord.time.slice(11,19) }}</template></span></div>
-        <div v-glass class="matrix-surface-note glass-surface glass-floating">底层：当日 00:00 · 上方：未来 2 小时内的下一次计划</div>
+        <div v-glass class="matrix-surface-note glass-surface glass-floating">时间由左向右：当日 00:00 → 当前 → 未来 2 小时内的计划</div>
         <div v-glass class="matrix-camera-bar glass-surface glass-floating"><span>Alt + 左键旋转 · 右键缩放 · 中键平移</span><button class="btn" @click="scene?.restore()" @keydown="scene?.keyboard($event)" title="键盘：Alt + 方向键旋转，Alt + 加减号缩放">恢复全景</button></div>
       </div>
       <div class="matrix-details">
@@ -77,9 +77,9 @@ const displayMode=ref(matrixViewMode(null,window.innerWidth)),filtersOpen=ref(fa
 const pageElement=ref(null),live=ref(true),category=ref(''),timeWindow=ref('day'),onlyAbnormal=ref(false);
 const preferenceKey=()=>`wfs:matrix:${props.userKey || 'anonymous'}`;
 let savedCamera;
-function restorePreferences(){const value=readPreference(preferenceKey(),{});displayMode.value=matrixViewMode(value.displayMode,window.innerWidth);category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.camera;scene?.setCamera(savedCamera);}
-function savePreferences(camera=scene?.getCamera()){writePreference(preferenceKey(),{displayMode:displayMode.value,category:category.value,timeWindow:timeWindow.value,onlyAbnormal:onlyAbnormal.value,camera});}
-let scene=null,timer=null,serial=0,disposed=false;
+function restorePreferences(){const value=readPreference(preferenceKey(),{});displayMode.value=matrixViewMode(value.displayMode,window.innerWidth);category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.orientation==='horizontal-time-v1'?value.camera:undefined;scene?.setCamera(savedCamera);}
+function savePreferences(camera=scene?.getCamera()){writePreference(preferenceKey(),{orientation:'horizontal-time-v1',displayMode:displayMode.value,category:category.value,timeWindow:timeWindow.value,onlyAbnormal:onlyAbnormal.value,camera});}
+let scene=null,timer=null,serial=0,disposed=false,inFlight=false;
 const allGroups=computed(()=>[...new Set((data.value?.tasks || []).map(task=>task.group))]);
 const visibleData=computed(()=>{
   if(!data.value)return null;
@@ -100,8 +100,8 @@ const isRun=record=>record.inspectable && /^[a-f0-9]{32}$/.test(record.run_id||'
 function updateScene(){scene?.update(visibleData.value,selectedPid.value,focus.value,selectedKey.value);}
 function ensureScene(){if(displayMode.value==='3d'&&!scene&&canvas.value)scene=createMatrixScene(canvas.value,record=>{selectedPid.value=record.pid;selectedKey.value=record.key||'';},{camera:savedCamera,onCamera:savePreferences});}
 async function load(force=false){
-  if(disposed||loading.value&&!force)return;
-  const current=++serial;loading.value=true;
+  if(disposed||inFlight&&!force)return;
+  const current=++serial;inFlight=true;if(!data.value || force===true)loading.value=true;
   try{
     const result=await api.executionMatrix(matrixQuery(live.value,date.value,data.value?.cursor||''));
     if(disposed||current!==serial)return;
@@ -111,9 +111,9 @@ async function load(force=false){
     ensureScene();
     updateScene();
   }catch(exc){if(!disposed&&current===serial)error.value=exc.message||'暂时无法读取执行矩阵。';}
-  finally{if(current===serial)loading.value=false;}
+  finally{if(current===serial){loading.value=false;inFlight=false;}}
 }
-function refresh(){load(true);}
+function refresh(event){load(event?.detail?.silent!==true);}
 function changeDate(){live.value=false;load(true);}
 function changeMode(){load(true);}
 async function toggleFullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await pageElement.value?.requestFullscreen();}catch{error.value='此浏览器暂不支持全屏，请使用浏览器的全屏功能。';}}

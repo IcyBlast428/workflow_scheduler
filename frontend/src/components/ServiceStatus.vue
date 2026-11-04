@@ -5,10 +5,11 @@
       :key="item.key"
       class="service-indicator"
       :data-status="item.status"
-      :title="`${item.message}${status.checkedAt ? ' · ' + status.checkedAt : ''}`"
+      :title="`${item.label}：${labels[item.status]} · ${item.message}${status.checkedAt ? ' · ' + status.checkedAt : ''}`"
+      :aria-label="`${item.label}：${labels[item.status]}`"
     >
       <i aria-hidden="true" />{{ item.label
-      }}<span class="service-result">{{ labels[item.status] }}</span>
+      }}<span v-if="item.status !== 'ready'" class="service-result">{{ labels[item.status] }}</span>
     </span>
   </div>
 </template>
@@ -42,11 +43,10 @@ const items = computed(() =>
 </script>
 <style scoped>
 .service-status {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  font-size: 12px;
+  display: grid;
+  gap: 8px;
+  font-size: 11px;
+  padding: 0 2px 14px;
 }
 .service-indicator {
   display: inline-flex;
@@ -74,4 +74,10 @@ const items = computed(() =>
   font-size: 11px;
   color: var(--muted);
 }
+.service-indicator[data-status='unavailable'] { color:var(--danger); }
+.service-indicator[data-status='unknown'] { color:var(--warning); }
+.service-indicator { flex-wrap:wrap; white-space:normal; }
+:global(.nav-expanded .sidebar-account .service-status) { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px 5px; }
+:global(.nav-expanded .sidebar-account .service-indicator) { gap:4px; align-content:start; }
+@media(max-width:980px){.service-status{display:flex;gap:8px 12px;padding-bottom:8px}}
 </style>

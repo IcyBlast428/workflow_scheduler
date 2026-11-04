@@ -4,7 +4,7 @@
         <button class="btn icon-only" title="关闭" @click="$emit('close')">×</button></header>
       <div class="modal-body">
         <LoadingStatus :active="initialLoading" label="正在读取执行详情与日志…" />
-        <div v-if="error" class="inline-alert danger">{{ error }} <button class="btn" @click="refresh">重试</button></div>
+        <div v-if="error" class="inline-alert danger">{{ error }} <button class="btn" @click="refresh(true)">重试</button></div>
         <div class="execution-meta">
           <span class="tag" :class="statusClass(record.status)">{{ statusLabel(record.status) }}</span>
           <span>来源：{{ ({manual:'手动',trial:'试运行',retry:'自动重试',backfill:'业务日期补跑'})[record.source] || '自动调度' }} · {{ record.actor }}</span>
@@ -23,10 +23,12 @@
           <button class="btn" :class="contentView === 'outputs' ? 'primary' : ''" :aria-pressed="contentView === 'outputs'" @click="outputsVisited=true;contentView='outputs'">输出文件</button>
         </div>
         <div v-show="contentView === 'logs'" class="execution-log-panel">
-        <p v-if="displayTruncated" class="hint">页面显示最近 256 KiB；下载可获取容量上限内的保留日志。</p>
+        <p v-if="logUnavailable" class="hint">{{ record.log_cleaned_at ? '日志文件已清理，执行记录和历史摘要仍然保留。' : '日志尚未生成或已超过保留期限。' }}</p>
+        <p v-else class="hint">{{ historical ? '正在分段查看历史日志' : '默认展示日志末尾，页面最多保留最近 256 KiB' }} · 文件大小 {{ (logSize/1024).toFixed(1) }} KiB。搜索仅针对当前已加载内容，完整内容可下载查看。</p>
+        <div class="filter-actions" aria-label="日志分段导航"><button class="btn" :disabled="initialLoading || inFlight || !pageStart" @click="showPage(0)">日志开头</button><button class="btn" :disabled="initialLoading || inFlight || !pageStart" @click="showPage(Math.max(0,pageStart-65536))">较早一段</button><button class="btn" :disabled="initialLoading || inFlight || !historical || offset>=logSize" @click="showPage(offset)">较后一段</button><button class="btn" :disabled="initialLoading || inFlight || logUnavailable" @click="showPage('tail')">最新日志</button></div>
         <div class="filter-actions"><input v-model="search" class="input" placeholder="搜索日志内容" aria-label="搜索日志内容">
           <label><input v-model="follow" type="checkbox">自动滚动</label>
-          <a class="btn" :href="`/api/taskinfo/run-download?run_id=${runId}`" download>下载保留日志</a></div>
+          <a v-if="!logUnavailable" class="btn" :href="`/api/taskinfo/run-download?run_id=${runId}`" download>下载保留日志</a></div>
         <pre ref="logElement" class="log-pre execution-output">{{ filtered || emptyExecutionLog(record.status, search) }}</pre>
         </div>
         <TaskArtifacts v-if="outputsVisited" v-show="contentView === 'outputs'" :key="runId" :run-id="runId" :status="record.status" />
@@ -42,31 +44,36 @@ import LoadingStatus from './LoadingStatus.vue';
 import { statusLabel, statusClass, emptyExecutionLog } from '../executionLabels';
 const props = defineProps({ embedded: Boolean, runId: { type: String, default: '' }, canOperate:Boolean, retrying:Boolean });
 defineEmits(['close','retry']);
-const record = ref({}), content = ref(''), error = ref(''), search = ref(''), follow = ref(true), logElement = ref(null), displayTruncated = ref(false);
+const record = ref({}), content = ref(''), error = ref(''), search = ref(''), follow = ref(true), logElement = ref(null);
 const initialLoading = ref(false), contentView=ref('logs'),outputsVisited=ref(false);
-let timer, offset = 0, generation = 0, inFlight = false;
+const pageStart=ref(0), logSize=ref(0), logUnavailable=ref(false), historical=ref(false), offset=ref('tail'), inFlight=ref(false);
+let timer, generation = 0;
 const filtered = computed(() => search.value ? content.value.split('\n').filter(line => line.toLowerCase().includes(search.value.toLowerCase())).join('\n') : content.value);
-async function refresh() {
-  if (!props.runId || inFlight || document.visibilityState === 'hidden') return;
-  inFlight = true;
+async function refresh(manual=false) {
+  if (!props.runId || inFlight.value || historical.value && manual!==true || document.visibilityState === 'hidden') return;
+  inFlight.value = true;
   const seq = generation;
   try {
-    const result = await api.execution(props.runId, offset);
+    const result = await api.execution(props.runId, offset.value);
     if (seq !== generation) return;
     record.value = result.record;
+    if (!content.value) pageStart.value=result.start_offset;
+    logSize.value=result.log_size; logUnavailable.value=result.log_unavailable;
     content.value += result.content;
-    offset = result.next_offset;
-    if (content.value.length > 256 * 1024) { content.value = content.value.slice(-256 * 1024); displayTruncated.value = true; }
+    offset.value = result.next_offset;
+    const encoded=new TextEncoder().encode(content.value);
+    if (encoded.length > 256 * 1024) { let start=encoded.length-256*1024;while((encoded[start]&0xc0)===0x80)start++;content.value=new TextDecoder().decode(encoded.slice(start));pageStart.value=offset.value-(encoded.length-start); }
     error.value = '';
     await nextTick();
     if (follow.value && logElement.value) logElement.value.scrollTop = logElement.value.scrollHeight;
     if (!['queued','running'].includes(record.value.status) && !result.has_more) window.clearInterval(timer);
   } catch (err) { if (seq === generation) error.value = err.message; }
-  finally { inFlight = false; if (seq === generation) initialLoading.value = false; }
+  finally { inFlight.value = false; if (seq === generation) initialLoading.value = false; }
 }
+function showPage(position){historical.value=position!=='tail';offset.value=position;content.value='';initialLoading.value=true;refresh(true);}
 watch(() => props.runId, () => {
   contentView.value='logs';outputsVisited.value=false;
-  generation++; window.clearInterval(timer); offset = 0; content.value = ''; record.value = {}; error.value = ''; displayTruncated.value = false;
+  generation++; window.clearInterval(timer); offset.value = 'tail'; historical.value=false; pageStart.value=0;logSize.value=0;logUnavailable.value=false; content.value = ''; record.value = {}; error.value = '';
   initialLoading.value = Boolean(props.runId);
   if (props.runId) { timer = window.setInterval(refresh, 1500); refresh(); }
 }, { immediate: true });

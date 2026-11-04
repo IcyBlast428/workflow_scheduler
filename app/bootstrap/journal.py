@@ -99,7 +99,7 @@ def write(directory, record, terminal):
     _spool(directory, record)
     try:
         with connection(directory) as db:
-            db.replace('journal',('run_id','pid','status','created_at','pending','retry_at','payload','log_path'),(run_id,record['pid'],record['status'],record['created_at'],int(pending),0,json.dumps(record,ensure_ascii=False),path))
+            db.replace('journal',('run_id','pid','status','created_at','pending','retry_at','payload','log_path'),(run_id,record['pid'],record['status'],record['created_at'],int(pending),0,json.dumps(record,ensure_ascii=False),'' if record.get('log_cleaned_at') else path))
     except Exception:
         logger.warning('GaussDB journal write deferred; recovery file retained', exc_info=True)
         return
@@ -123,6 +123,9 @@ def expire(directory, cutoff, limit):
     with connection(directory) as db:
         rows = db.execute("SELECT run_id,log_path FROM journal WHERE created_at<? AND pending=0 AND status NOT IN ('running','queued') ORDER BY created_at LIMIT ?", (cutoff, limit)).fetchall()
         for run_id, relative in rows:
+            if not relative:
+                db.execute('DELETE FROM journal WHERE run_id=?', (run_id,))
+                continue
             path = (Path(directory) / relative).resolve()
             path.relative_to(Path(directory).resolve())
             path.unlink(missing_ok=True)

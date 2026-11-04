@@ -1,3 +1,4 @@
+import {navigate} from './navigation-helpers.js';
 import { test, expect } from '@playwright/test';
 
 async function login(page, hash = 'dashboard') {
@@ -27,7 +28,9 @@ test('readiness failures remain visible even when API requests succeed', async (
   await expect(status.locator('[data-status="unavailable"]')).toHaveCount(1);
   await page.unroute('**/api/user/ready');
   await page.clock.fastForward(31000);
-  await expect(status).toContainText('数据库正常');
+  await expect(status.locator('[data-status="unavailable"]')).toHaveCount(0);
+  await expect(status.getByLabel('数据库：正常',{exact:true})).toBeVisible();
+  await expect(status).not.toContainText('正常');
 });
 
 test('desktop text navigation can collapse and restores its saved choice', async ({ page }) => {
@@ -44,7 +47,7 @@ test('desktop text navigation can collapse and restores its saved choice', async
 
 test('mobile matrix starts in two dimensions and filters expand on demand', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await login(page, 'matrix');
+  await login(page, 'matrix?tab=timeline');
   await expect(page.locator('.heatmap-panel')).toBeVisible();
   await expect(page.getByLabel('分类', { exact: true })).not.toBeVisible();
   await page.getByRole('button', { name: '筛选', exact: true }).click();
@@ -68,7 +71,7 @@ test('extracted and lazy pages remain navigable without script errors', async ({
     ['系统管理', '.admin-panel'], ['执行矩阵', '.matrix-summary'],
     ['总览', '.cpu-panel'],
   ]) {
-    await page.getByRole('button', { name, exact: true }).click();
+    await navigate(page,name);
     await expect(page.locator(selector)).toBeVisible();
   }
   expect(errors).toEqual([]);

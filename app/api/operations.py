@@ -15,6 +15,17 @@ from app.bootstrap.timebase import business_time
 from app.settings import AUTH_ADMIN_USERNAME
 blueprint = Blueprint('operations', __name__)
 
+@blueprint.get('/api/taskinfo/matrix-recent')
+def recent_execution_matrix():
+    forwarded = _forward()
+    if forwarded is not None:
+        return forwarded
+    from app.bootstrap.recent_execution_matrix import cached_snapshot
+    try:
+        return success_msg(cached_snapshot())
+    except ValueError as exc:
+        return (error_msg(str(exc)),400)
+
 def _business_rows(rows, *fields):
     """Keep database wall times explicit; Flask would label naive values as GMT."""
     return [{**row, **{field: business_time(row[field]).isoformat(' ', timespec='seconds') for field in fields if row.get(field) is not None}} for row in rows]

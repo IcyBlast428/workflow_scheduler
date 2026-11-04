@@ -1,10 +1,14 @@
 <template>
   <section class="panel admin-panel">
-    <div class="panel-head"><div><h2>系统管理</h2><p>按用途管理平台，切换分栏会保留正在编辑的内容。</p></div><button class="btn" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></div>
+    <div class="panel-head"><div><h2>平台设置</h2><p>集中管理运行发布、连接依赖、账户权限与存储，切换分栏保留编辑内容。</p></div><button class="btn" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></div>
     <LoadingStatus :active="loading" label="正在更新维护状态与账户…" />
-    <nav class="settings-nav" aria-label="系统管理分栏"><button v-for="item in sections" :key="item.id" class="btn" :class="{primary:section===item.id}" :aria-pressed="section===item.id" @click="selectSection(item.id)">{{ item.label }}</button></nav>
+    <nav class="settings-nav" aria-label="平台设置分组"><button v-for="item in groups" :key="item.id" class="btn" :class="{primary:group.id===item.id}" :aria-pressed="group.id===item.id" @click="selectSection(item.sections[0].id)">{{ item.label }}</button></nav>
+    <nav v-if="group.sections.length>1" class="settings-nav" aria-label="平台设置分栏"><button v-for="item in group.sections" :key="item.id" class="btn" :class="{primary:section===item.id}" :aria-pressed="section===item.id" @click="selectSection(item.id)">{{ item.label }}</button></nav>
     <div class="panel-body">
     <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div><div v-if="message" class="inline-alert success" role="status">{{ message }}</div>
+    <DatabaseConnections v-if="visited.has('connections')" v-show="section==='connections'" :confirm="confirm" />
+    <section v-if="visited.has('repository')" v-show="section==='repository'" class="surface-card"><h3>依赖仓库</h3><PackageRepositorySettings open /></section>
+    <LogStorage v-if="visited.has('storage')" v-show="section==='storage'" />
     <DispatchSettings v-show="section==='runtime'" />
     <section v-show="section==='runtime'" class="surface-card runtime-status" aria-labelledby="runtime-heading">
       <div class="section-heading"><h3 id="runtime-heading">运行维护状态</h3><p>查看记录补写、历史汇总与通知发送情况。</p></div>
@@ -39,7 +43,7 @@
   </section>
 </template>
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 import { api } from '../api';
 import { actionLabel } from '../executionLabels';
 import LoadingStatus from './LoadingStatus.vue';
@@ -47,11 +51,17 @@ import DispatchSettings from './DispatchSettings.vue';
 import OperationalWorkbench from './OperationalWorkbench.vue';
 import TaskAccessEditor from './TaskAccessEditor.vue';
 import VersionStorage from './VersionStorage.vue';
+import DatabaseConnections from './DatabaseConnections.vue';
+import PackageRepositorySettings from './PackageRepositorySettings.vue';
+import LogStorage from './LogStorage.vue';
 defineProps({confirm:Function});
-const sections=[{id:'runtime',label:'运行策略'},{id:'release',label:'发布设置'},{id:'accounts',label:'账户权限'},{id:'audit',label:'审计记录'},{id:'storage',label:'存储备份'}];
+const groups=[{id:'operations',label:'运行与发布',sections:[{id:'runtime',label:'运行策略'},{id:'release',label:'发布设置'}]},{id:'connections',label:'连接与依赖',sections:[{id:'connections',label:'数据库连接'},{id:'repository',label:'依赖仓库'}]},{id:'accounts',label:'账户与权限',sections:[{id:'accounts',label:'账户权限'}]},{id:'storage',label:'审计与存储',sections:[{id:'audit',label:'审计记录'},{id:'storage',label:'存储清理与备份'}]}];
+const sections=groups.flatMap(item=>item.sections);
+const visited=reactive(new Set());
 const section=ref('runtime');
-function readSection(){const id=new URLSearchParams(location.hash.split('?')[1] || '').get('section');section.value=sections.some(s=>s.id===id)?id:'runtime';}
-function selectSection(id){section.value=id;history.replaceState(null,'',location.pathname+'#admin?section='+id);}
+const group=computed(()=>groups.find(item=>item.sections.some(s=>s.id===section.value)) || groups[0]);
+function readSection(){const legacy=location.hash.slice(1).split('?')[0];const id=['connections','repository'].includes(legacy)?legacy:new URLSearchParams(location.hash.split('?')[1] || '').get('section');section.value=sections.some(s=>s.id===id)?id:'runtime';visited.add(section.value);}
+function selectSection(id){section.value=id;visited.add(id);history.replaceState(null,'',location.pathname+'#admin?section='+id);}
 onMounted(()=>{readSection();window.addEventListener('hashchange',readSection);});onBeforeUnmount(()=>window.removeEventListener('hashchange',readSection));
 const accounts = ref([]), records = ref([]), error = ref(''), message = ref(''), saving = ref(false);
 const runtime = ref({});

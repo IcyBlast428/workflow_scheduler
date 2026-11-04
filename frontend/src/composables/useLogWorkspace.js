@@ -11,6 +11,7 @@ export function useLogWorkspace({
 }) {
   let taskLogRequestSerial = 0,
     systemLogRequestSerial = 0;
+  let appliedTaskQuery=null;
   const matrixLogRange = ref([]);
   onScopeDispose(() => {
     taskLogRequestSerial++;
@@ -22,10 +23,13 @@ export function useLogWorkspace({
     nextCursor: '',
     hasMore: false,
     loading: false,
+    loaded: false,
     error: '',
     rows: [],
     total: 0,
     ids: [],
+    newRecords:false,
+    refreshError:'',
     params: {
       scope: 'online',
       taskid: '',
@@ -75,25 +79,39 @@ export function useLogWorkspace({
   }
 
   async function loadTaskLogs(resetPage = false, options = {}) {
+    const buffering=options.buffer===true;
+    if(buffering && (!taskLogs.loaded || taskLogs.newRecords || taskLogs.loading)) return;
+    if(buffering && taskLogs.params.currentPage!==1){taskLogs.newRecords=true;return;}
     if (resetPage) {
       taskLogs.params.currentPage = 1;
       taskLogs.cursors = [''];
     }
     const serial = ++taskLogRequestSerial;
+    const query=buffering && appliedTaskQuery ? {...appliedTaskQuery} : taskLogQueryParams();
+    if(!buffering){appliedTaskQuery={...query};taskLogs.newRecords=false;}
     if (!options.silent) {
       taskLogs.loading = true;
     }
-    taskLogs.error = '';
+    if(!options.silent)taskLogs.error = '';
     try {
-      const data = await api.taskLogs(taskLogQueryParams());
+      const data = await api.taskLogs(query);
       if (serial !== taskLogRequestSerial) return;
       markBackendHealthy('后端连接正常');
+      taskLogs.refreshError='';
+      if(buffering && taskLogs.rows.length){
+        const identity=row=>`${row.logid || row.id}@${row.datetime}`;
+        const known=new Set(taskLogs.rows.map(identity));
+        if((data.data || []).some(row=>!known.has(identity(row)))) taskLogs.newRecords=true;
+        return;
+      }
       taskLogs.rows = data.data || [];
+      taskLogs.loaded=true;
       taskLogs.total = data.total || 0;
       taskLogs.hasMore = Boolean(data.has_more);
       taskLogs.nextCursor = data.next_cursor || '';
     } catch (error) {
       if (serial !== taskLogRequestSerial) return;
+      if(options.silent){taskLogs.refreshError='后台更新暂不可用，将自动重试。';return;}
       await handleRequestFailure(error, { state: taskLogs });
     } finally {
       if (!options.silent && serial === taskLogRequestSerial) {

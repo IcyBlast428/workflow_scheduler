@@ -104,13 +104,13 @@
       </div>
       <div class="filter-actions">
         <button class="btn primary" type="submit">
-          <span class="btn-icon">?</span>
           搜索
         </button>
         <button class="btn" type="button" @click="$emit('reset')">清空</button>
       </div>
     </form>
     <LoadingStatus :active="taskLogs.loading" label="正在更新执行记录…" />
+    <div class="log-update-lane" aria-live="polite"><button v-if="taskLogs.newRecords" class="btn" :disabled="taskLogs.loading" @click="$emit('updates')">有新执行记录 · 点击查看</button><span v-else class="hint">后台自动检查新结果；阅读、翻页时保留当前列表，避免新记录挤动内容。</span><span v-if="taskLogs.refreshError" class="hint">{{ taskLogs.refreshError }}</span></div>
     <LogTable
       kind="task"
       :rows="taskLogs.rows"
@@ -125,7 +125,7 @@
         )
       "
       @reset="$emit('reset')"
-      @tasks="switchView('tasks')"
+      @tasks="$emit('tasks')"
       @open="$emit('open', $event)"
     />
     <Pagination
@@ -148,5 +148,6 @@ defineProps({
   taskLogs: { type: Object, required: true },
   matrixLogRange: Array,
 });
-defineEmits(['range', 'search', 'reset', 'open', 'page', 'page-size']);
+defineEmits(['range', 'search', 'reset', 'open', 'page', 'page-size','updates','tasks']);
 </script>
+<style scoped>.log-update-lane{min-height:48px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 var(--panel-padding) 8px}.log-update-lane .hint{font-size:12px}</style>

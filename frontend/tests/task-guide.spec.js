@@ -1,3 +1,4 @@
+import {navigate} from './navigation-helpers.js';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -86,7 +87,7 @@ test('administrators maintain highlighted examples and Nexus settings across rel
     'EDITED_EXAMPLE',
   );
   const repository = page.locator('.repository-settings');
-  await page.getByRole('button', { name:'依赖仓库', exact:true }).click();
+  await navigate(page,'依赖仓库');
   await repository
     .getByLabel('依赖安装方式', { exact: true })
     .selectOption('nexus');
@@ -98,14 +99,14 @@ test('administrators maintain highlighted examples and Nexus settings across rel
     .click();
   await expect(repository.getByRole('status')).toContainText('仓库设置已保存');
   await page.reload();
-  await page.getByRole('button', { name:'任务示例', exact:true }).click();
+  await navigate(page,'任务示例');
   await guide
     .getByRole('button', { name: '浏览器新增示例', exact: true })
     .click();
   await expect(guide.getByLabel('示例代码', { exact: true })).toContainText(
     'EDITED_EXAMPLE',
   );
-  await page.getByRole('button', { name:'依赖仓库', exact:true }).click();
+  await navigate(page,'依赖仓库');
   await expect(
     repository.getByLabel('依赖安装方式', { exact: true }),
   ).toHaveValue('nexus');
