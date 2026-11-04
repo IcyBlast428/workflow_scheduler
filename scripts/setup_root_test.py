@@ -84,7 +84,7 @@ def main():
     if values.get('WFS_STATE_BACKEND') != 'gauss':
         parser.error('Set WFS_STATE_BACKEND=gauss for this fresh-install profile')
     if values.get('WFS_LOCAL_DB_PATH') or values.get('WFS_POSTGRES_TEST') or values.get('WFS_DB_DIALECT'):
-        parser.error('This profile requires GaussDB/DWS, not SQLite or a PostgreSQL test override')
+        parser.error('This profile requires GaussDB/DWS, without a local database test override')
     for key in ('WFS_DB_ID','WFS_NACOS_URL','WFS_NACOS_USERNAME','WFS_NACOS_PASSWORD'):
         if not values.get(key) or 'CHANGE_ME' in values[key]:
             parser.error('Complete GaussDB/Nacos configuration in runtime.env first: ' + key)

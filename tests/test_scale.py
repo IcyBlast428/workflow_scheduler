@@ -16,7 +16,7 @@ from app.bootstrap.execution_state import state_status, SKIPPED, MISSED
 from app.bootstrap.history import RUN_COLUMNS
 from app.bootstrap.task_loader import load_task_spec
 from app.api.task import views
-from scripts.assign_task_ids import freeze
+
 
 
 class ScaleTests(unittest.TestCase):
@@ -37,20 +37,6 @@ class ScaleTests(unittest.TestCase):
                 self.assertEqual(ops.read_run(run)['pid'],self.pid)
             self.assertEqual(len(ops._locks),256)
 
-    def test_legacy_import_preserves_logs_and_is_bounded(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory)
-            for i in range(10):
-                identifier=uuid.uuid4().hex
-                record={'run_id':identifier,'pid':self.pid,'status':'success','created_at':ops.now(),'state':0,'history_saved':True,'db_synced':True}
-                (root/(identifier+'.json')).write_text(json.dumps(record))
-                (root/(identifier+'.log')).write_text('legacy')
-            imported=journal.import_legacy(root,ops.TERMINAL,3)
-            self.assertLessEqual(len(imported),3)
-            for record in imported:
-                with patch.object(ops,'_directory',root):
-                    self.assertEqual(ops.run_path(record['run_id'],'log').read_text(),'legacy')
-            self.assertGreaterEqual(len(list(root.glob('*.json'))),7)
 
     def test_recovery_and_hourly_summary_exactly_once(self):
         identifier=ops.create_run(self.pid)
@@ -96,13 +82,6 @@ class ScaleTests(unittest.TestCase):
         with GaussDB() as db:
             self.assertEqual({row[0] for row in db.execute_query_sql('SELECT status FROM wfs_notifications WHERE pid=?',params=(self.pid,))},{'unknown'})
 
-    def test_task_id_survives_category_and_folder_rename(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);task=root/'old'/'task';task.mkdir(parents=True);(task/'main.py').write_text('pass')
-            self.assertEqual(freeze(root),1)
-            dest=root/'new'/'renamed';dest.parent.mkdir();task.rename(dest)
-            spec=load_task_spec('new','renamed',dest,{})
-            self.assertEqual(spec['pid'],'old__task');self.assertEqual(spec['group_name'],'new')
 
     def test_exact_planned_time_is_passed_to_job_runner(self):
         from app.bootstrap.scheduled_executor import run_with_times
@@ -170,17 +149,3 @@ class ScaleTests(unittest.TestCase):
             if scheduler.get_job(pid):
                 scheduler.remove_job(pid)
             ignores.remove(pid)
-
-    @unittest.skipIf(os.name=='nt','Linux backup lease')
-    def test_backup_restore_includes_index_and_nested_logs(self):
-        from scripts.backup_local import backup
-        from scripts.restore_local import restore
-        run=ops.create_run(self.pid);log=ops.run_path(run,'log');log.write_text('restore proof')
-        with tempfile.TemporaryDirectory() as directory:
-            output=Path(directory)/'backup.zip';destination=Path(directory)/'restored'
-            backup(os.environ['WFS_LOCAL_DB_PATH'],os.environ['WFS_DATA_DIR'],output)
-            restore(output,destination)
-            with patch.object(ops,'_directory',destination/'data/executions'):
-                self.assertEqual(ops.read_run(run)['pid'],self.pid)
-                self.assertEqual(ops.run_path(run,'log').read_text(),'restore proof')
-            with self.assertRaises(ValueError):restore(output,destination)

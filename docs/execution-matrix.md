@@ -26,5 +26,5 @@
 ## 测试
 
 - `node frontend/scripts/test-matrix.mjs`：透视近大远小、连续整圈旋转、倒置视角的方格选择、缩放/平移/恢复、分类间距及 100 个任务的固定布局。
-- `python -m unittest discover -s tests -p test_execution_matrix.py -v`：SQLite 隔离测试，覆盖授权、日期边界、完成时间、活动实例、聚合失败保留及精确日志跳转。
+- `python scripts/test_backend.py test_execution_matrix`：真实数据库隔离测试，覆盖授权、日期边界、完成时间、活动实例、聚合失败保留及精确日志跳转。
 - 在专用 `.env.postgres.local` 测试配置下运行 `scripts/accept_postgres_test.py`：真实 PostgreSQL 18.1 / ODBC 查询、聚合及日志查询。不能替代生产 GaussDB 驱动与执行计划验收。

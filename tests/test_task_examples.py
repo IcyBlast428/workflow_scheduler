@@ -29,11 +29,13 @@ class TaskExampleTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.addCleanup(NewDB.dispose_pool)
-        # Keep the guide's ID, but route it to a disposable real SQLite file.
-        settings.save(settings.validate({'id': 'mysql_orders', 'dialect': 'sqlite', 'database': 'guide.sqlite3'}))
+        # Keep the guide's identifier and use a real disposable database.
+        from scripts.test_database import business_profile
+        settings.save(settings.validate(business_profile('mysql_orders')))
 
     def run_example(self, name, *, success=True):
-        environment = dict(os.environ, WFS_TASK_DATABASE_KEY=settings.task_database_key())
+        import json
+        environment = dict(os.environ, WFS_TASK_CONNECTIONS_JSON=json.dumps({'mysql_orders':settings.business_profile('mysql_orders')}))
         run_id = uuid.uuid4().hex
         environment.update(WFS_RUN_ID=run_id, WFS_OUTPUT_DIR=str(self.root/'output'/run_id))
         for key in ('WFS_SECRET_KEY', 'WFS_CONNECTIONS_KEY'):
@@ -58,6 +60,8 @@ class TaskExampleTests(unittest.TestCase):
 
     def test_parameterized_query_and_repeatable_transaction(self):
         with NewDB('mysql_orders') as db:
+            db.execute('DROP TABLE IF EXISTS orders')
+            db.execute('DROP TABLE IF EXISTS task_demo_items')
             db.execute('CREATE TABLE orders(id INTEGER PRIMARY KEY, status TEXT)')
             db.execute('CREATE TABLE task_demo_items(id INTEGER PRIMARY KEY, status TEXT)')
             db.executemany('INSERT INTO orders VALUES(?,?)', [(1, 'pending'), (2, 'done')])
@@ -70,6 +74,7 @@ class TaskExampleTests(unittest.TestCase):
 
     def test_example_failure_rolls_back_and_exits_unsuccessfully(self):
         with NewDB('mysql_orders') as db:
+            db.execute("DROP TABLE IF EXISTS task_demo_items")
             db.execute("CREATE TABLE task_demo_items(id INTEGER PRIMARY KEY, status TEXT CHECK(id != 2 OR status = 'pending'))")
             db.executemany('INSERT INTO task_demo_items VALUES(?,?)', [(1, 'pending'), (2, 'pending')])
         self.run_example('database_transaction', success=False)

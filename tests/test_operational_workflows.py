@@ -174,7 +174,7 @@ class OperationalTests(unittest.TestCase):
 
     def test_connection_lifecycle_guards_declarations_revisions_and_platform(self):
         from app.bootstrap import connection_settings as settings,connection_lifecycle as lifecycle
-        profile=settings.save(settings.validate({'id':'reports','dialect':'sqlite','database':'report.sqlite3','name':'报表库','environment':'test'}))
+        profile=settings.save(settings.validate(dict(__import__('scripts.test_database',fromlist=['business_profile']).business_profile('reports'),name='报表库',environment='test')))
         data=self.ready(self.new());pid=data['pid']
         self.configure(pid,declared_connections=['reports'])
         self.assertEqual(lifecycle.usage('reports')[0]['pid'],pid)

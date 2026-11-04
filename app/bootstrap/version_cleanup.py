@@ -36,7 +36,7 @@ def execute(form,actor,full_references=None,scan_seconds=3):
     from app.bootstrap.global_vars import runnings, DATA_DIR
     from app.bootstrap import journal
     recovery=journal.health(Path(os.environ.get('WFS_DATA_DIR',DATA_DIR))/'executions')
-    if recovery['pending_writes'] or recovery['legacy_scan_in_progress']:
+    if recovery['pending_writes']:
         raise RuntimeError('仍有执行记录待恢复或补写，请先完成核对再清理。')
     if runnings.count(): raise RuntimeError('仍有活动或预留执行，不能清理。')
     with _configuration_lock, admission.lock:

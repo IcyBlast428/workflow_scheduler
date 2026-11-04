@@ -18,7 +18,6 @@ def snapshot(keep=20, full_references=None, scan_seconds=3, max_entries=100000):
     from app.bootstrap import admission, execution_requests
     requests_complete=True
     with admission.store() as local:
-        execution_requests.table(local)
         sql="SELECT pid,payload FROM work_requests WHERE status IN ('pending','dispatching','unknown')"
         if full_references is None: sql+=' LIMIT 10001'
         for index,(pid,raw) in enumerate(local.execute(sql)):
@@ -43,7 +42,6 @@ def snapshot(keep=20, full_references=None, scan_seconds=3, max_entries=100000):
         if data.get('status') == 'applied':
             applied_counts[pid] = applied_counts.get(pid,0)+1
         reasons = []
-        if str(data.get('note','')).startswith('一次性迁移旧任务'): reasons.append('旧任务迁移基线，保留原始文件')
         if version == task.get('active_version'): reasons.append('当前使用')
         pending_intent = task.get('pending') or {}
         if version in (pending_intent.get('version'), (pending_intent.get('previous') or {}).get('active_version')): reasons.append('发布中')

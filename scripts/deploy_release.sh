@@ -38,7 +38,8 @@ if [[ "$MODE" != activate ]]; then
   if [[ -n "${WFS_DEPLOY_WHEELHOUSE:-}" ]]; then pip_options=(--no-index --find-links "$WFS_DEPLOY_WHEELHOUSE"); fi
   .venv/bin/python -m pip install "${pip_options[@]}" -r requirements-linux-py312.lock
   .venv/bin/python -m pip check
-  env WFS_TEST_GAUSS=false WFS_TEST_MYSQL=false .venv/bin/python -m unittest discover -s tests -v
+  # Database regression must pass in CI against a disposable test database.
+  .venv/bin/python -m compileall -q app scripts
   npm --prefix frontend ci --no-audit --no-fund
   npm --prefix frontend test
   npm --prefix frontend run build
@@ -69,10 +70,8 @@ if [[ -L "$BASE/current" && -d "$BASE/current/data" && -n "$(find "$BASE/current
 fi
 cd "$RELEASE"
 maintenance=(.venv/bin/python scripts/service_config.py --environment-file "$CONFIG" --data "$BASE/shared/data" --logs "$BASE/shared/logs" --)
-# These steps occur only after both services have stopped. Migrations are never
-# rolled back automatically; release migrations must remain backward compatible.
-"${maintenance[@]}" "$RELEASE/.venv/bin/python" scripts/migrate.py
-"${maintenance[@]}" "$RELEASE/.venv/bin/python" scripts/migrate_legacy_tasks.py --verify-only
+# The target must already have the fresh GaussDB baseline installed.
+"${maintenance[@]}" "$RELEASE/.venv/bin/python" scripts/check_gauss_platform.py
 chown -R wfs:wfs "$BASE/shared/logs" "$BASE/shared/data"
 previous=''
 if [[ -L "$BASE/current" ]]; then previous="$(readlink -f "$BASE/current")"; fi

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 
 def benchmark(count=100):
-    if not os.environ.get('WFS_DB_ID','').startswith('wfstest_wfs_acceptance_') or os.environ.get('WFS_POSTGRES_TEST')!='true':
+    if not os.environ.get('WFS_DB_ID','').startswith('wfstest_test_') or os.environ.get('WFS_POSTGRES_TEST')!='true':
         raise RuntimeError('A fresh acceptance schema is required.')
     from app.bootstrap.database import GaussDB
     from app.bootstrap import operations

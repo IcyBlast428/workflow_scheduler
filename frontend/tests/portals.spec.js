@@ -43,64 +43,28 @@ test('the same login page detects an ordinary account even at an administrator U
   expect((await page.request.get('/api/admin/database-connections')).status()).toBe(403);
 });
 
-test('database settings switch scopes, report test failures and preserve masked passwords', async ({page}) => {
-  let saved = false;
-  const profile = {id:'mysql_orders',host:'db.example.com',port:3306,database:'orders',user:'wfs',tls:'disabled',ssl_ca:'',password_set:true,revision:1};
-  await page.route('**/api/admin/database-connections', route => route.fulfill({json:{code:20000,data:{active_dialect:'SQLite',profiles:saved?[profile]:[],active:null,restart_required:false}}}));
-  await page.route('**/api/admin/database-connections/test', route => route.fulfill({status:400,json:{code:100,message:'模拟连接失败，请核对连接信息。',data:{}}}));
-  await page.route('**/api/admin/database-connections/save', async route => {
-    const body = route.request().postDataJSON();
-    expect(body.id).toBe('mysql_orders');
-    expect(body.password).toBe(saved?'':'disposable-test-password');
-    saved = true;
-    await route.fulfill({json:{code:20000,data:{connected:true,ready:true,version:'8.4.test',database:'orders',missing:[],profile}}});
-  });
-  await login(page, 'admin', '/admin/#connections');
-  await expect(page.locator('.connection-panel')).toBeVisible();
-  await page.getByRole('button',{name:'展开 MySQL / PolarDB 切换配置',exact:true}).click();
-  await expect(page.getByLabel('连接标识',{exact:true})).toHaveValue('platform');
-  await expect(page.getByLabel('连接加密',{exact:true})).toHaveValue('disabled');
-  const boxes = await Promise.all(['连接标识','数据库地址','数据库用户名','数据库密码'].map(name => page.getByLabel(name,{exact:true}).boundingBox()));
-  expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThan(1);
-  expect(Math.abs(boxes[2].y - boxes[3].y)).toBeLessThan(1);
-  expect(boxes.every(box => Math.abs(box.height - 40) < 1)).toBe(true);
-  await page.getByRole('button',{name:'任务业务数据库',exact:true}).click();
-  await expect(page.getByLabel('连接标识',{exact:true})).toBeEditable();
-  await page.getByLabel('连接标识',{exact:true}).fill('mysql_orders');
-  await page.getByLabel('数据库地址',{exact:true}).fill(profile.host);
-  await page.getByLabel('数据库名称',{exact:true}).fill(profile.database);
-  await page.getByLabel('数据库用户名',{exact:true}).fill(profile.user);
-  await page.getByLabel('数据库密码',{exact:true}).fill('disposable-test-password');
-  await page.getByLabel('连接加密',{exact:true}).selectOption('disabled');
-  await page.getByRole('button',{name:'测试连接',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('模拟连接失败');
-  await page.getByRole('button',{name:'测试并保存',exact:true}).click();
-  await expect(page.getByText('业务连接已保存，任务下次建立连接时生效。')).toBeVisible();
-  await expect(page.getByLabel('数据库密码',{exact:true})).toHaveValue('');
-  await page.getByRole('button',{name:'测试并保存',exact:true}).click();
-  await expect(page.getByText('业务连接已保存，任务下次建立连接时生效。')).toBeVisible();
-  await page.setViewportSize({width:390,height:844});
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+test('business profile failures preserve masked passwords',async({page})=>{
+ let saved=false;
+ const profile={id:'mysql_orders',dialect:'mysql',host:'db.example.com',port:3306,database:'orders',user:'wfs',tls:'disabled',password_set:true,revision:1};
+ const types=[{dialect:'mysql',label:'MySQL / PolarDB / MariaDB',port:3306,available:true}];
+ await page.route('**/api/admin/database-connections',r=>r.fulfill({json:{code:20000,data:{active_dialect:'GaussDB / DWS',profiles:saved?[profile]:[],supported_databases:types}}}));
+ await page.route('**/api/admin/database-connections/test',r=>r.fulfill({status:400,json:{code:100,message:'模拟连接失败',data:{}}}));
+ await page.route('**/api/admin/database-connections/save',async r=>{expect(r.request().postDataJSON().password).toBe(saved?'':'disposable-test-password');saved=true;await r.fulfill({json:{code:20000,data:{profile}}});});
+ await login(page,'admin','/admin/#connections');await expect(page.locator('.connection-panel')).toBeVisible();
+ await page.getByLabel('连接标识',{exact:true}).fill(profile.id);await page.getByLabel('数据库类型',{exact:true}).selectOption('mysql');
+ await page.getByLabel('数据库地址',{exact:true}).fill(profile.host);await page.getByLabel('数据库名称',{exact:true}).fill(profile.database);
+ await page.getByLabel('数据库用户名',{exact:true}).fill(profile.user);await page.getByLabel('数据库密码',{exact:true}).fill('disposable-test-password');
+ await page.getByRole('button',{name:'测试连接',exact:true}).click();await expect(page.getByRole('alert')).toContainText('模拟连接失败');
+ await page.getByRole('button',{name:'测试并保存',exact:true}).click();await expect(page.locator('.connection-panel').getByRole('status')).toContainText('业务连接已保存');
+ await expect(page.getByLabel('数据库密码',{exact:true})).toHaveValue('');await expect(page.getByLabel('连接标识',{exact:true})).toHaveAttribute('readonly','');
+ await page.getByRole('button',{name:'测试并保存',exact:true}).click();await expect(page.locator('.connection-panel').getByRole('status')).toContainText('业务连接已保存');
+ await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
-
-test('supported types, SQLite profiles and pool settings work with the real backend', async ({page}) => {
-  await login(page,'admin','/#connections');
-  await page.getByRole('button',{name:'任务业务数据库',exact:true}).click();
-  await expect(page.getByRole('region',{name:'支持的数据库'})).toContainText('PostgreSQL / GaussDB');
-  await expect(page.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveText(['MySQL / PolarDB / MariaDB', 'PostgreSQL / GaussDB', 'ClickHouse', 'SQLite']);
-  await page.getByLabel('数据库类型',{exact:true}).selectOption('sqlite');
-  await expect(page.getByLabel('数据库地址',{exact:true})).toHaveCount(0);
-  await expect(page.getByLabel('连接加密',{exact:true})).toHaveCount(0);
-  await page.getByLabel('连接标识',{exact:true}).fill('sqlite_browser');
-  await page.getByLabel('SQLite 文件名',{exact:true}).fill('browser.sqlite3');
-  await page.getByText('连接池设置',{exact:true}).click();
-  await expect(page.getByLabel('启用连接池',{exact:true})).toBeChecked();
-  await page.getByLabel('常驻连接上限',{exact:true}).fill('2');
-  await page.getByRole('button',{name:'测试并保存',exact:true}).click();
-  await expect(page.getByText('业务连接已保存，任务下次建立连接时生效。')).toBeVisible();
-  await page.reload();
-  await page.getByRole('button',{name:'任务业务数据库',exact:true}).click();
-  await expect(page.getByLabel('数据库类型',{exact:true})).toHaveValue('sqlite');
-  await page.getByText('连接池设置',{exact:true}).click();
-  await expect(page.getByLabel('常驻连接上限',{exact:true})).toHaveValue('2');
+test('supported types and real PostgreSQL pool settings persist',async({page})=>{
+ await login(page,'admin','/admin/#connections');await page.getByRole('button',{name:/pg_browser/}).click();
+ await expect(page.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveText(['MySQL / PolarDB / MariaDB','PostgreSQL / GaussDB','ClickHouse']);
+ await expect(page.getByLabel('数据库类型',{exact:true})).toHaveValue('postgresql');await page.getByText('连接池设置',{exact:true}).click();
+ await expect(page.getByLabel('常驻连接上限',{exact:true})).toHaveValue('2');await page.getByRole('button',{name:'测试并保存',exact:true}).click();
+ await expect(page.locator('.connection-panel').getByRole('status')).toContainText('业务连接已保存');await page.reload();await page.getByRole('button',{name:/pg_browser/}).click();
+ await page.getByText('连接池设置',{exact:true}).click();await expect(page.getByLabel('常驻连接上限',{exact:true})).toHaveValue('2');
 });

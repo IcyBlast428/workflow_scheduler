@@ -16,7 +16,8 @@ from werkzeug.security import generate_password_hash
 _tmp = tempfile.TemporaryDirectory()
 os.environ['WFS_ENV'] = 'development'
 os.environ['WFS_ENABLE_SCHEDULER'] = 'false'
-os.environ['WFS_LOCAL_DB_PATH'] = str(Path(_tmp.name) / 'wfs.sqlite3')
+from scripts.test_database import configure
+configure(_tmp.name)
 os.environ['WFS_DATA_DIR'] = str(Path(_tmp.name) / 'data')
 os.environ['WFS_SECRET_KEY'] = 'local-integration-secret-key'
 os.environ['WFS_ADMIN_PASSWORD_HASH'] = generate_password_hash('test-password', method='scrypt')
@@ -28,7 +29,7 @@ from app.bootstrap.schedule_config import save_schedule  # noqa: E402
 from app.bootstrap.global_vars import runnings  # noqa: E402
 from app.bootstrap import core  # noqa: E402
 from app.api.task import views as task_views  # noqa: E402
-from scripts.migrate import main as migrate  # noqa: E402
+from scripts.init_database import initialize, table_names  # noqa: E402
 
 
 class LocalIntegrationTests(unittest.TestCase):
@@ -175,13 +176,11 @@ class LocalIntegrationTests(unittest.TestCase):
             rows = db.execute_query_sql('SELECT state FROM wfs_run_history WHERE pid=?', params=(pid,))
         self.assertEqual([row[0] for row in rows], [-15, -15])
 
-    def test_migrations_are_idempotent(self):
-        migrate()
-        migrate()
+    def test_fresh_initializer_validates_existing_baseline_without_import(self):
+        initialize()
         with GaussDB() as db:
-            names = db.execute_query_sql('SELECT name FROM wfs_schema_migrations')
-        from scripts.migrate import MIGRATIONS
-        self.assertEqual({row[0] for row in names}, {path.name for path in MIGRATIONS.glob('[0-9][0-9][0-9]_*.sql')})
+            self.assertEqual(db.execute_query_sql('SELECT version FROM wfs_schema_version')[0][0],1)
+            for table in table_names():db.execute_query_sql('SELECT 1 FROM '+table+' LIMIT 0')
 
     def test_retired_online_deployment_endpoints_do_not_load_tasks(self):
         client = self.app.test_client()
@@ -193,14 +192,16 @@ class LocalIntegrationTests(unittest.TestCase):
         start.assert_not_called()
 
 
-# The integration fixtures are published baselines, exactly like production tasks.
-# This is test setup only; runtime discovery must never scan app/jobs.
+# These two baseline fixtures are new publications used only by regression tests.
+# Tests invoke maintenance explicitly, without starting service threads.
+core.start_operations = lambda: None
 create_app()
-from scripts.migrate_legacy_tasks import legacy_specs, migrate_task
+from scripts.test_database import publish_fixture
 from app.bootstrap.global_vars import TASK_DIR
-for _spec in legacy_specs(TASK_DIR):
-    migrate_task(_spec)
+for index in (1,2):
+    directory=Path(_tmp.name)/'sources'/f'test_job{index}'
+    directory.mkdir(parents=True)
+    (directory/'main.py').write_text('print("test fixture")\n')
+    publish_fixture(dict(pid=f'testJob__test_job{index}',group_name='testJob',folder_name=f'test_job{index}',task_name=f'Test job {index}',task_dir=directory,main_file='main.py'))
 
-
-if __name__ == '__main__':
-    unittest.main()
+if __name__=='__main__':unittest.main()

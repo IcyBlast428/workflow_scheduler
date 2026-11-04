@@ -1,12 +1,8 @@
-"""Exercise production state SQL through a transactional DB-API emulator.
-
-These tests do not claim to validate a real GaussDB/DWS driver or deployment.
-"""
+"""Real database state tests; GaussDB driver acceptance is separate."""
 from contextlib import closing
 import json
 import os
 from pathlib import Path
-import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -17,47 +13,11 @@ from app.bootstrap import auxiliary_store as state, admission, task_publishing, 
 from app.bootstrap import database
 
 
-class Cursor:
-    def __init__(self, cursor): self.cursor=cursor
-    def execute(self, sql, params=()):
-        if sql.startswith('LOCK TABLE '): return self
-        self.cursor.execute(sql,params);return self
-    def __getattr__(self,name): return getattr(self.cursor,name)
-
-
-class Connection:
-    def __init__(self, connection): self.connection=connection
-    def cursor(self): return Cursor(self.connection.cursor())
-    def __getattr__(self,name): return getattr(self.connection,name)
-
-
 class GaussStateTests(unittest.TestCase):
     def setUp(self):
         self.temporary=tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root=Path(self.temporary.name)
-        self.sql_path=self.root/'db-api-emulator.db'
-        connect=sqlite3.connect
-        with closing(connect(self.sql_path)) as db:
-            db.executescript((Path(__file__).resolve().parents[1]/'migrations/008_gauss_state.sql').read_text())
-            db.commit()
-        self.original=database.GaussDB
-        owner=self
-        class Gauss:
-            dialect='GaussDB/DWS'
-            def __init__(self):
-                self.raw=connect(owner.sql_path, timeout=10)
-                self.conn=Connection(self.raw);self.cursor=self.conn.cursor()
-            def begin_transaction(self): self.raw.execute('BEGIN')
-            def __enter__(self): return self
-            def __exit__(self,*args): self.raw.close()
-        def factory(*args,**kwargs):
-            if kwargs.get('managed') is False: return Gauss()
-            return self.original(*args,**kwargs)
-        for patcher in [patch.dict(os.environ,{'WFS_STATE_BACKEND':'gauss','WFS_DATA_DIR':str(self.root/'data')}),
-                        patch.object(database,'GaussDB',side_effect=factory),
-                        patch.object(sqlite3,'connect',side_effect=AssertionError('Production code opened SQLite'))]:
-            patcher.start();self.addCleanup(patcher.stop)
 
     def test_configuration_ciphertext_and_namespaces(self):
         repository=task_publishing.repository()
@@ -70,22 +30,21 @@ class GaussStateTests(unittest.TestCase):
         self.assertTrue(admission.maintenance()['enabled'])
         self.assertEqual(task_publishing.repository()['revision'], saved['revision'])
         self.assertFalse(connection_settings.profiles())
-        self.assertIsNone(connection_settings.active_platform())
         self.assertFalse(gitlab_updates.configuration()['enabled'])
         from scripts.backup_receipt import record
         archive=self.root/'backup.zip';archive.write_bytes(b'backup-evidence')
         record(self.root/'data',archive)
         self.assertEqual(admission.policy('backup:last',{})['bytes'],15)
         with gitlab_updates.store() as db:
-            db.execute('BEGIN IMMEDIATE')
-            db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)',('one',))
-            db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)',('two',))
+            db.execute('BEGIN')
+            db.replace('snapshot',('id','payload'),(1,'one'))
+            db.replace('snapshot',('id','payload'),(1,'two'))
             self.assertEqual(db.execute('SELECT payload FROM snapshot WHERE id=1').fetchone()[0],'two')
         self.assertFalse(list(self.root.rglob('*.sqlite3')))
 
     def test_rollback_and_request_deduplication(self):
         with self.assertRaises(RuntimeError), admission.store() as db:
-            db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',('rolled-back','{}'))
+            db.replace('settings',('key','payload'),('rolled-back','{}'))
             raise RuntimeError('abort')
         self.assertIsNone(admission.policy('rolled-back',None))
         called=[]
@@ -95,10 +54,7 @@ class GaussStateTests(unittest.TestCase):
         second=admission.manual_request('admin','task',key,submit)
         self.assertEqual(first['run_id'],second['run_id'])
         self.assertEqual(len(called),1)
-        from app.bootstrap.execution_requests import table
-        with admission.store() as db:
-            table(db)
-            self.assertIn('expires_at',[row[1] for row in db.execute('PRAGMA table_info(work_requests)')])
+        with admission.store() as db:db.execute('SELECT expires_at FROM work_requests LIMIT 0')
 
     def test_tags_ddl_and_execution_queue_use_gauss_tables(self):
         from app.bootstrap import task_schema, execution_requests
@@ -124,7 +80,7 @@ class GaussStateTests(unittest.TestCase):
             self.assertEqual(len(journal.pending(directory,10)),1)
             self.assertGreaterEqual(journal.health(directory)['pending_writes'],1)
         self.assertTrue((directory/(record['run_id']+'.json')).exists())
-        journal.import_legacy(directory,{'success'},100)
+        journal.recover_pending(directory,{'success'},100)
         self.assertFalse((directory/(record['run_id']+'.json')).exists())
         self.assertEqual(journal.read(directory,record['run_id'])['status'],'success')
         self.assertEqual(len(journal.recent(directory,'task')),1)
@@ -147,3 +103,17 @@ class GaussStateTests(unittest.TestCase):
             release.join();reader.close()
         self.assertFalse((directory/(record['run_id']+'.json')).exists())
         self.assertEqual(journal.read(directory,record['run_id'])['status'],'success')
+
+    def test_health_tolerates_recovery_file_removed_after_listing(self):
+        directory=self.root/'health-race'
+        record=dict(run_id=uuid.uuid4().hex,pid='task',status='running',created_at='2030-01-01',db_synced=False)
+        journal._spool(directory,record)
+        target=directory/(record['run_id']+'.json')
+        original=Path.stat
+        def disappearing(path,*args,**kwargs):
+            if path==target:raise FileNotFoundError(str(path))
+            return original(path,*args,**kwargs)
+        with patch.object(Path,'stat',disappearing):
+            result=journal.health(directory)
+        self.assertEqual(result['journal_bytes'],0)
+        self.assertGreaterEqual(result['pending_writes'],1)

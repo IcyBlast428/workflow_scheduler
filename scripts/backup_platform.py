@@ -4,14 +4,12 @@ Passwords are never command arguments. Configure tool authentication beforehand.
 --container is only a convenience for the dedicated local PostgreSQL test image.
 """
 import argparse
-import contextlib
 import datetime as dt
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
-import sqlite3
 import subprocess
 import tempfile
 import zipfile
@@ -19,9 +17,9 @@ import zipfile
 
 def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=5432,tool='pg_dump',container=None,releases=None):
     if __package__:
-        from .backup_files import add_task_storage, add_connection_settings
+        from .backup_files import add_task_storage
     else:
-        from backup_files import add_task_storage, add_connection_settings
+        from backup_files import add_task_storage
     import fcntl
     data,tasks,output=map(lambda value:Path(value).resolve(),(data,tasks,output))
     if not data.is_dir() or not tasks.is_dir() or output.exists() or data in output.parents or tasks in output.parents:
@@ -42,36 +40,22 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
             with dump.open('rb') as source:
                 for block in iter(lambda:source.read(1024*1024),b''):
                     digest.update(block)
-            journal=data/'executions/journal.sqlite3'
-            snapshot=Path(temporary)/'journal.sqlite3'
-            if journal.is_file():
-                with contextlib.closing(sqlite3.connect(f'file:{journal}?mode=ro',uri=True)) as source:
-                    with contextlib.closing(sqlite3.connect(snapshot)) as target:
-                        source.backup(target)
-                        if target.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
-                            raise RuntimeError('本地执行记录校验失败')
             # Reserve with restrictive permissions and refuse all overwrites.
             descriptor=os.open(output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
             with os.fdopen(descriptor,'wb') as target,zipfile.ZipFile(target,'w',compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.write(dump,'database.dump')
-                if snapshot.exists():
-                    archive.write(snapshot,'data/executions/journal.sqlite3')
                 for name in ('executions','audit-spool'):
                     for path in (data/name).rglob('*'):
-                        if path.is_file() and not path.is_symlink() and not path.name.startswith('journal.sqlite3'):
+                        if path.is_file() and not path.is_symlink():
                             archive.write(path,'data/'+path.relative_to(data).as_posix())
                 for path in tasks.rglob('*'):
                     relative=path.relative_to(tasks)
                     if path.is_file() and not path.is_symlink() and not any(part in ('.venv','__pycache__','.git','.wfs-secrets') or part.startswith('.env') for part in relative.parts):
                         archive.write(path,'jobs/'+relative.as_posix())
                 add_task_storage(archive, data, releases, output)
-                encrypted_settings = add_connection_settings(archive, data, temporary)
-                add_connection_settings(archive, data, temporary, 'task-publishing.sqlite3')
-                add_connection_settings(archive, data, temporary, 'gitlab-updates.sqlite3')
-                add_connection_settings(archive, data, temporary, 'admission.sqlite3')
                 archive.writestr('manifest.json',json.dumps({'format':'wfs-platform-1','database':database,'schema':schema,
                     'dump_tool':tool,'created_at':dt.datetime.now().isoformat(' '),'dump_sha256':digest.hexdigest(),
-                    'connection_passwords_included':False,'encrypted_connections_included':encrypted_settings,'restore_target':'new database only'},indent=2))
+                    'database_contains_encrypted_business_credentials':True,'encryption_keys_included':False,'restore_target':'new database only'},indent=2))
     from scripts.backup_receipt import record
     record(data,output)
     return output

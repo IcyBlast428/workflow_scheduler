@@ -32,7 +32,7 @@
                 type="checkbox"
                 :aria-label="`选择任务 ${row.id}`"
                 :checked="selected.includes(row.id)"
-                :disabled="!permitted(row,'schedule')"
+                :disabled="busy || !permitted(row,'schedule')"
                 @change="$emit('select', row.id)"
               />
               <div class="task-name-copy">

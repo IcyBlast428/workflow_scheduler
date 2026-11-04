@@ -1,0 +1,4 @@
+SQLAlchemy==2.0.46
+psycopg[binary]==3.3.3
+configobj==5.0.8
+cryptography==50.0.2

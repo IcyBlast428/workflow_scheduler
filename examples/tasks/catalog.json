@@ -5,7 +5,7 @@
     "filename": "main.py",
     "language": "python",
     "source": "hello/main.py",
-    "description": "只用 Python 标准库，无需 requirements.txt。将此文件直接放在 ZIP 根目录即可开始。",
+    "description": "只用 Python 标准库，无需 requirements.txt。将此文件直接放在 任务根目录即可开始。",
     "note": "成功执行会输出合计 5050。任务按普通 Python 脚本运行，不需要定义平台装饰器。"
   },
   {
@@ -43,7 +43,7 @@
     "filename": "requirements.txt",
     "language": "plaintext",
     "source": "nexus-requirements.txt",
-    "description": "将此 requirements.txt 与 main.py 一起放在 ZIP 根目录。管理员启用 Nexus 后，无需上传 wheels。",
+    "description": "将此 requirements.txt 与 main.py 一起放在 任务根目录。管理员启用 Nexus 后，无需上传 wheels。",
     "note": "检查依赖环境时自动创建该版本的虚拟环境，从指定仓库解析并安装直接及间接依赖，安装失败不可发布。仓库需要提供所有依赖对应的兼容 wheel。"
   },
   {

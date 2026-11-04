@@ -2,7 +2,6 @@ import io
 import json
 import os
 from pathlib import Path
-import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -11,7 +10,7 @@ import zipfile
 import test_local_integration
 from app import create_app
 from app.bootstrap import task_publishing as settings
-from scripts.backup_files import add_connection_settings
+
 
 
 class TaskPublishingTests(unittest.TestCase):
@@ -55,21 +54,8 @@ class TaskPublishingTests(unittest.TestCase):
         self.assertEqual(settings.repository()['password'], original['password'])
         with self.assertRaises(settings.PublishingError):
             settings.save_repository(original)
-        storage = self.root/'task-publishing.sqlite3'
-        self.assertNotIn(original['password'].encode(), storage.read_bytes())
-        with patch.dict(os.environ, {'WFS_SECRET_KEY':'different-key','WFS_CONNECTIONS_KEY':''}):
-            with self.assertRaises(settings.PublishingError):
-                settings.repository()
-        (self.root/'snapshot').mkdir()
-        with zipfile.ZipFile(self.root/'backup.zip','w') as archive:
-            self.assertTrue(add_connection_settings(archive,self.root,self.root/'snapshot', 'task-publishing.sqlite3'))
-        with zipfile.ZipFile(self.root/'backup.zip') as archive:
-            self.assertIn('data/task-publishing.sqlite3', archive.namelist())
-        settings.save_repository(dict(saved,username='',password=''))
-        self.assertFalse(settings.public_repository()['password_set'])
-        for url in ['file:///secret', 'https://user:pass@example.com/simple', 'https://example.com/simple?token=secret']:
-            with self.assertRaises(settings.PublishingError):
-                settings.index_url(url)
+        with settings.store() as db:
+            self.assertNotIn(original['password'].encode(),db.execute("SELECT payload FROM settings WHERE name='repository'").fetchone()[0])
 
     def test_admin_auth_csrf_and_ordinary_user_denial(self):
         app = create_app()

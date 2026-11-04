@@ -17,7 +17,7 @@ from app.bootstrap.execution import execute_py, _resource_limit
 from app.bootstrap.global_vars import RunningState
 from app.bootstrap.schedule_config import load_schedule, save_schedule
 from app.settings import AUTH_ADMIN_PASSWORD_HASH
-from scripts import migrate
+from scripts.sql_schema import statements
 
 
 class OperationsTests(unittest.TestCase):
@@ -222,37 +222,3 @@ class OperationsTests(unittest.TestCase):
         with patch('app.bootstrap.database.GaussDB',side_effect=RuntimeError('database offline')):
             self.assertEqual(client.get('/api/user/ready').status_code,503)
             self.assertEqual(client.get('/api/user/health').status_code,200)
-
-    def test_migration_checksum_and_sql_literals(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / '010_acceptance.sql'
-            path.write_text("CREATE TABLE acceptance_literals(value text);\nINSERT INTO acceptance_literals VALUES('one;two'); -- comment\n")
-            self.assertEqual(len(migrate.statements(path)),2)
-            try:
-                with patch.object(migrate,'MIGRATIONS',Path(temporary)):
-                    migrate.main()
-                    path.write_text(path.read_text() + '\n-- tampered\n')
-                    with self.assertRaisesRegex(RuntimeError,'Applied migration changed'):
-                        migrate.main()
-                with GaussDB() as db:
-                    self.assertEqual(db.execute_query_sql('SELECT value FROM acceptance_literals')[0][0],'one;two')
-            finally:
-                with GaussDB() as db:
-                    db.execute_sql('DROP TABLE IF EXISTS acceptance_literals')
-                    db.execute_sql('DELETE FROM wfs_schema_migrations WHERE name=?',params=(path.name,))
-
-    @unittest.skipIf(os.name == 'nt', 'Linux backup lease')
-    def test_backup_integrity_and_refusal_when_scheduler_active(self):
-        import fcntl
-        import zipfile
-        from scripts.backup_local import backup
-        data = Path(os.environ['WFS_DATA_DIR'])
-        output = Path(shared._tmp.name) / 'backup.zip'
-        with (data / '.scheduler.lock').open('a') as lease:
-            fcntl.flock(lease,fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with self.assertRaises(BlockingIOError):
-                backup(os.environ['WFS_LOCAL_DB_PATH'],data,output)
-        backup(os.environ['WFS_LOCAL_DB_PATH'],data,output)
-        with zipfile.ZipFile(output) as archive:
-            self.assertIn('database.sqlite3',archive.namelist())
-            self.assertIsNone(archive.testzip())

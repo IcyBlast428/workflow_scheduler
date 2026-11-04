@@ -48,14 +48,14 @@
 
 ## 凭据与备份
 
-配置、扫描缓存和每个账户的已读状态保存在共享数据目录的 `gitlab-updates.sqlite3`，无需新增平台数据库迁移。连接配置使用独立用途派生的 Fernet 密钥加密；令牌不会回传浏览器，留空保留已有令牌，也可以明确清除。网络错误不回显服务端错误正文、令牌或认证头；不跟随 HTTP 重定向，以免将令牌转发到其他地址。
+配置、扫描缓存和每个账户的已读状态保存在共享数据目录的 GaussDB 平台状态表，无需新增平台数据库迁移。连接配置使用独立用途派生的 Fernet 密钥加密；令牌不会回传浏览器，留空保留已有令牌，也可以明确清除。网络错误不回显服务端错误正文、令牌或认证头；不跟随 HTTP 重定向，以免将令牌转发到其他地址。
 
-`backup_local.py`、`backup_platform.py` 已纳入该数据库的一致性备份，`restore_local.py` 会验证恢复文件。恢复时保留原 `WFS_CONNECTIONS_KEY`（若配置）或 `WFS_SECRET_KEY`。仓库差异属于内部代码，备份仍需按原有数据目录权限保护。
+`backup_platform.py`、`backup_platform.py` 已纳入该数据库的一致性备份，`restore_platform.py` 会验证恢复文件。恢复时保留原 `WFS_CONNECTIONS_KEY`（若配置）或 `WFS_SECRET_KEY`。仓库差异属于内部代码，备份仍需按原有数据目录权限保护。
 
 ## 验证与启动
 
 ```bash
-python -m unittest discover -s tests -p test_gitlab_updates.py -v
+python scripts/test_backend.py test_gitlab_updates
 cd frontend
 npm test
 npm run build
@@ -67,8 +67,6 @@ GitLab 浏览器验收配置会启动独立临时平台库及本地假 GitLab HT
 本机已有 PostgreSQL 服务时，完成构建后统一重启 Web/Scheduler：
 
 ```bash
-bash scripts/local_service.sh stop .env.postgres.local
-bash scripts/local_service.sh start .env.postgres.local
 ```
 
 代码与本地模拟服务验证通过后，仍需在自己的 GitLab 上填写真实连接并验收网络、证书、令牌权限与版本兼容性。

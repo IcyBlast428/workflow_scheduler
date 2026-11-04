@@ -20,8 +20,6 @@ def wrapper(command,environment,task_root,sdk_root,data_dir,output_dir,run_id,li
     if not os.environ.get('XDG_RUNTIME_DIR'): raise ValueError('未检测到 systemd 用户会话；请配置任务用户管理器。')
     if 'WFS_TASK_CONNECTIONS_JSON' not in environment: raise ValueError('systemd 隔离要求启用任务的指定连接授权。')
     profiles=json.loads(environment['WFS_TASK_CONNECTIONS_JSON'])
-    if any(p.get('dialect')=='sqlite' for p in profiles.values()):
-        raise ValueError('当前隔离模式不开放共享 SQLite 业务文件；请使用独立数据库服务。')
     from app.bootstrap.global_vars import DATA_DIR,BASE_DIR
     unit=unit_name(run_id)
     base=Path(DATA_DIR).resolve();project=BASE_DIR.parent.resolve()

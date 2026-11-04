@@ -74,27 +74,6 @@ def resolve_main_file(task_dir, main_file):
     return main_path
 
 
-def _venv_python_path(venv_dir):
-    venv_dir = Path(venv_dir)
-    candidates = [
-        venv_dir / 'Scripts' / 'python.exe',
-        venv_dir / 'bin' / 'python',
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
-    return ''
-
-
-def resolve_python_executable(group_dir, task_dir):
-    # 任务依赖隔离优先级：单任务 .venv > 任务组 .venv > 平台主环境。
-    task_python = _venv_python_path(Path(task_dir) / '.venv')
-    if task_python:
-        return task_python, 'task'
-    group_python = _venv_python_path(Path(group_dir) / '.venv')
-    if group_python:
-        return group_python, 'group'
-    return '', 'project'
 
 
 def infer_main_file(task_dir):
@@ -126,35 +105,11 @@ def iter_task_directories(task_root=TASK_DIR):
 
 
 def _load_task_config_records():
-    try:
-        from app.bootstrap.database import GaussDB
-        with GaussDB() as db:
-            try:
-                # 新版表结构包含 main_file、enabled、max_instances、timeout_seconds。
-                rows = db.execute_query_sql(
-                    """
-                    SELECT pid, group_name, folder_name, task_name, main_file, enabled,
-                           max_instances, timeout_seconds, trigger_type, schedule_type,
-                           schedule_json, trigger_json, updated_at, version, updated_by
-                    FROM wfs_task_config
-                    ORDER BY updated_at DESC
-                    """,
-                    return_json=True,
-                )
-            except Exception:
-                # 兼容尚未执行最新 DDL 的环境，避免任务扫描阶段直接失败。
-                rows = db.execute_query_sql(
-                    """
-                    SELECT pid, group_name, folder_name, task_name, trigger_type, schedule_type,
-                           schedule_json, trigger_json, updated_at
-                    FROM wfs_task_config
-                    ORDER BY updated_at DESC
-                    """,
-                    return_json=True,
-                )
-        return rows
-    except Exception as exc:
-        raise RuntimeError('failed to load task configuration from database') from exc
+    from app.bootstrap.database import GaussDB
+    with GaussDB() as db:
+        return db.execute_query_sql("""SELECT pid, group_name, folder_name, task_name, main_file, enabled,
+            max_instances, timeout_seconds, trigger_type, schedule_type, schedule_json,
+            trigger_json, updated_at, version, updated_by FROM wfs_task_config ORDER BY updated_at DESC""",return_json=True)
 
 
 def build_task_pid(group_name, folder_name):
@@ -201,7 +156,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_o
     task_dir = Path(task_dir)
     group_dir = task_dir.parent
     inferred_main_file = infer_main_file(task_dir)
-    python_executable, python_source = resolve_python_executable(group_dir, task_dir)
+    python_executable, python_source = '', 'unprepared'
     identity_error = ''
     manifest = task_dir / '.wfs-task.json'
     pid = pid_override or build_task_pid(group_name, folder_name)

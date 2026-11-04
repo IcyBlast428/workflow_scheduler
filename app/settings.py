@@ -3,33 +3,12 @@ import os
 from datetime import timedelta
 from app.bootstrap.timebase import business_now
 
-from configobj import ConfigObj
 
-from app import CONFIG_DIR
 from app.bootstrap import helpers
 from app.bootstrap.global_vars import BASE_DIR
-from app.common.pyDes import do_decrypt as _p
-from app.loggings import get_local_ip
 
 
-def build_database_uri(environment):
-    if os.environ.get('WFS_LOCAL_DB_PATH'):
-        return 'sqlite:///' + os.path.abspath(os.environ['WFS_LOCAL_DB_PATH']).replace('\\', '/')
-    cfg_file = os.path.join(CONFIG_DIR, 'database', 'system.ini')
-    cfg_base = ConfigObj(cfg_file, encoding='utf-8')
-    config = cfg_base.get(environment)
-    if not config:
-        raise Exception(f'{environment} not config')
-    dialect = config.get("dialect")
-    driver = config.get('driver')
-    user = config.get("user")
-    password = config.get("password")
-    host = config.get("host")
-    port = config.get("port")
-    database = config.get("database")
-    if password:
-        password = _p(password)
-    return '{}+{}://{}:{}@{}:{}/{}?charset=utf8'.format(dialect, driver, user, password, host, port, database)
+
 
 
 class Config:
@@ -81,13 +60,7 @@ env = {
     'production': ProductionConfig,
 }
 
-_runtime_env = helpers.get_runtime_env(default=None)
-if _runtime_env:
-    FLASK_ENV = _runtime_env
-elif os.name == 'nt' or get_local_ip().startswith('76.10') or get_local_ip().startswith('84.10'):
-    FLASK_ENV = 'development'
-else:
-    FLASK_ENV = 'production'
+FLASK_ENV = helpers.get_runtime_env(default='production')
 
 
 def _load_runtime_value(section, key, env_name=None, default=None):

@@ -25,7 +25,7 @@ def build(version,output):
         root=Path(temporary);digest=freeze(root)
         files={p.relative_to(root/'shared-sdk').as_posix():p.read_bytes() for p in (root/'shared-sdk/app').rglob('*.py')}
         metadata=f'{name}-{version}.dist-info'
-        files[metadata+'/METADATA']=('Metadata-Version: 2.1\nName: workflow-scheduler-task-sdk\nVersion: '+version+'\nRequires-Python: >=3.12\nRequires-Dist: configobj==5.0.8\nRequires-Dist: SQLAlchemy==2.0.46\nRequires-Dist: PyMySQL==1.1.0\nRequires-Dist: requests==2.32.5\nRequires-Dist: cryptography==50.0.2\nRequires-Dist: pyDes==2.0.1\n\nFrozen task SDK '+digest+'\n').encode()
+        files[metadata+'/METADATA']=('Metadata-Version: 2.1\nName: workflow-scheduler-task-sdk\nVersion: '+version+'\nRequires-Python: >=3.12\nRequires-Dist: configobj==5.0.8\nRequires-Dist: SQLAlchemy==2.0.46\nRequires-Dist: PyMySQL==1.1.0\nRequires-Dist: requests==2.32.5\nRequires-Dist: cryptography==50.0.2\n\nFrozen task SDK '+digest+'\n').encode()
         files[metadata+'/WHEEL']=b'Wheel-Version: 1.0\nGenerator: wfs-sdk-builder\nRoot-Is-Purelib: true\nTag: py3-none-any\n'
         files[metadata+'/wfs-sdk.json']=json.dumps({'shared_sdk_sha256':digest,'scope':'task environments only'}).encode()
         for key,data in sorted(files.items()):

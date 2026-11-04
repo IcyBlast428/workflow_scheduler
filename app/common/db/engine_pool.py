@@ -61,8 +61,6 @@ def engine_for(config, url, connect_args, options=None):
                           max_overflow=int(config.get('max_overflow', 2)),
                           pool_recycle=int(options.get('poolRecycle', config.get('pool_recycle', 600))),
                           pool_timeout=int(options.get('poolTimeout', config.get('pool_timeout', 10))))
-            if config.get('dialect') == 'sqlite' and url.database == ':memory:':
-                kwargs.update(pool_size=1, max_overflow=0, pool_recycle=-1)
         else:
             kwargs['poolclass'] = NullPool
         engine = create_engine(url, **kwargs)

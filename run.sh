@@ -31,11 +31,11 @@ case "$MODE" in
     export WFS_ENABLE_SCHEDULER=true
     "$PYTHON_BIN" -m flask run --host 127.0.0.1 --port "${WFS_CONTROL_PORT:-8009}"
     ;;
-  migrate)
-    "$PYTHON_BIN" scripts/migrate.py
+  init-db)
+    "$PYTHON_BIN" scripts/init_database.py
     ;;
   *)
-    echo "Usage: ./run.sh [single|web|scheduler|migrate]"
+    echo "Usage: ./run.sh [single|web|scheduler|init-db]"
     exit 2
     ;;
 esac

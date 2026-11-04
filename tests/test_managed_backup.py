@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -8,9 +7,8 @@ import unittest
 import venv
 from unittest.mock import patch
 import zipfile
-from scripts.backup_local import backup
 from scripts.backup_platform import bundle
-from scripts.restore_local import restore
+from scripts.restore_platform import restore
 
 
 @unittest.skipIf(os.name == 'nt', 'Linux backup lease and interpreter mode')
@@ -29,20 +27,14 @@ class ManagedBackupTests(unittest.TestCase):
             output = data / 'task-data/job/output.txt'
             output.parent.mkdir(parents=True)
             output.write_text('persistent output')
-            database = root / 'local.sqlite3'
-            with sqlite3.connect(database) as connection:
-                connection.execute('CREATE TABLE proof(value TEXT)')
             jobs = root / 'jobs'
             jobs.mkdir()
             def dump(command, **kwargs):
                 Path(command[command.index('-f') + 1]).write_bytes(b'database fixture')
-            for kind in ('local', 'platform'):
+            for kind in ('platform',):
                 archive = root / (kind + '.zip')
-                if kind == 'local':
-                    backup(database, data, archive, releases)
-                else:
-                    with patch('scripts.backup_platform.subprocess.run', side_effect=dump):
-                        bundle(data, jobs, archive, 'test', 'test', 'test', releases=releases)
+                with patch('scripts.backup_platform.subprocess.run', side_effect=dump):
+                    bundle(data, jobs, archive, 'test', 'test', 'test', releases=releases)
                 target = restore(archive, root / kind)
                 restored = target / 'data/task-packages/job/releases/v1'
                 self.assertEqual((target / 'data/task-data/job/output.txt').read_text(), 'persistent output')

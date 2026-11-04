@@ -1,5 +1,10 @@
 <template>
   <CursorLight />
+  <div v-if="assetFailure" class="asset-recovery" role="alert">
+    <strong>页面资源加载失败，可能已发布新版本</strong>
+    <p>请刷新以获取当前版本。若有未保存的修改，请先保存或复制；刷新前也会提醒确认。</p>
+    <button class="btn primary" type="button" @click="refreshPageAssets">刷新页面资源</button>
+  </div>
   <div v-if="!ready" class="boot-screen">
     <div class="boot-card">
       <BrandLogo class="boot-mark" />
@@ -413,11 +418,13 @@ import DashboardView from './views/DashboardView.vue';
 import TaskWorkspaceView from './views/TaskWorkspaceView.vue';
 import ExecutionLogsView from './views/ExecutionLogsView.vue';
 import SystemEventsView from './views/SystemEventsView.vue';
+import { assetFailure, isAssetFailure } from './assetRecovery';
 import { useBackendStatus } from './composables/useBackendStatus';
 import { useLiveUpdates } from './composables/useLiveUpdates';
 
 import {
   defineAsyncComponent,
+  onErrorCaptured,
   computed,
   onMounted,
   onUnmounted,
@@ -461,6 +468,14 @@ const ExecutionMatrix = defineAsyncComponent(
 import { canTrigger } from './executionLabels';
 import { confirmUnsaved } from './composables/useUnsavedChanges';
 import { useConfirm } from './composables/useConfirm';
+onErrorCaptured(error => { if (isAssetFailure(error)) { assetFailure.value = true; return false; } });
+async function refreshPageAssets() {
+  if (!await confirmUnsaved(requestConfirm)) return;
+  const target = new URL(window.location.href);
+  target.searchParams.set('_wfs_reload', String(Date.now()));
+  window.location.replace(target.href);
+}
+
 const loginVisual = shallowRef(null);
 const lowEffects = ref(Boolean(readPreference('wfs:low-effects', false)));
 watch(
@@ -1361,3 +1376,7 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>
+
+<style scoped>
+.asset-recovery{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:1200;width:min(560px,calc(100vw - 32px));box-sizing:border-box;padding:20px;border:1px solid var(--warning,#d4af65);border-radius:12px;background:var(--panel,#171717);color:var(--ink,#fff);box-shadow:0 12px 40px #0008;display:grid;gap:12px}.asset-recovery p{margin:0;line-height:1.6}.asset-recovery .btn{justify-self:start}
+</style>

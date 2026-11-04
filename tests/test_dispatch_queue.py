@@ -116,18 +116,11 @@ class QueueTests(unittest.TestCase):
         with patch.object(control,'reserve_launch') as launch:
             with self.assertRaises(control.LaunchExpired):control.wait_for_launch(reservation,'2000-01-01')
             launch.assert_not_called()
-    def test_legacy_queue_migration_preserves_existing_pending_requests(self):
-        with admission.store() as db:
-            db.execute("CREATE TABLE work_requests(id TEXT PRIMARY KEY,pid TEXT,kind TEXT,status TEXT,payload TEXT,created_at TEXT,due_at TEXT,run_id TEXT,message TEXT)")
-            db.execute("INSERT INTO work_requests VALUES('old-request','task','manual','pending','{}','2026-01-01','2026-01-01','','')")
-        row=queue.snapshot()[0]
-        self.assertEqual(row['id'],'old-request');self.assertEqual(row['status'],'pending');self.assertEqual(row['expires_at'],'')
 
     def test_queue_filters_before_pagination_and_reports_full_waiting_totals(self):
         from app.bootstrap import task_loader
         created=str(business_now()-dt.timedelta(seconds=125))
         with admission.store() as db:
-            queue.table(db)
             for n in range(130):
                 db.execute("INSERT INTO work_requests(id,pid,kind,status,payload,created_at,due_at) VALUES(?,?,?,?,?,?,?)",
                            (f'q{n:03}',f'task{n:03}','scheduled','pending' if n<60 else 'expired','{}',created,created))

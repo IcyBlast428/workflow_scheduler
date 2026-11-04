@@ -11,8 +11,8 @@ def create_app():
     :param env_name: 使用的环境名称
     :return: app实例
     '''
-    from app.bootstrap.connection_settings import activate_at_app_start
-    activate_at_app_start()
+    from app.bootstrap.auxiliary_store import validate_backend
+    validate_backend()
     from flask import Flask, send_from_directory
     from flask_compress import Compress
     from app.extensions import ext_init
@@ -23,6 +23,7 @@ def create_app():
     from app.bootstrap.global_vars import error_msg
     print(" * current platform: {}".format("Windows" if os.name == "nt" else "Linux"))
     current_env = os.environ.setdefault('WFS_ENV', FLASK_ENV)
+    validate_backend()
 
     if current_env == 'production':
         print('\033[32m * reminder: current env is production, please use wsgi server\033[0m')
@@ -53,6 +54,10 @@ def create_app():
             msg = error_msg('api not found')
             msg['code'] = 404
             return msg, 404
-        return send_from_directory(os.path.join(app.root_path, 'dist'), 'index.html')
+        # SPA entry points must always resolve the current build, including deep links.
+        response = send_from_directory(os.path.join(app.root_path, 'dist'), 'index.html', conditional=False, etag=False)
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
+        response.headers.pop('Last-Modified', None)
+        return response
 
     return app

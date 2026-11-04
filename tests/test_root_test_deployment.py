@@ -56,17 +56,17 @@ class RootTestDeploymentTests(unittest.TestCase):
 
     def test_gauss_check_is_read_only_and_rejects_other_platforms(self):
         class Database:
-            _mysql = False
-            _local_sqlite = False
             dialect = 'GaussDB/DWS'
             queries = []
             def __enter__(self): return self
             def __exit__(self, *args): pass
-            def execute_query_sql(self, sql): self.queries.append(sql)
+            def execute_query_sql(self, sql):
+                self.queries.append(sql)
+                return [(1,)] if sql=='SELECT version FROM wfs_schema_version' else []
         database = Database()
         with patch.dict('os.environ', {'WFS_STATE_BACKEND':'gauss'}), patch.dict('sys.modules', {'app.bootstrap.database': SimpleNamespace(GaussDB=lambda: database)}):
             gauss_check.main()
-            self.assertEqual(len(database.queries), 32)
-            self.assertTrue(all(query.startswith('SELECT 1 FROM wfs_') and query.endswith('LIMIT 0') for query in database.queries))
-            database._local_sqlite = True
+            self.assertEqual(len(database.queries), 33)
+            self.assertTrue(all(query.startswith('SELECT 1 FROM wfs_') and query.endswith('LIMIT 0') for query in database.queries[:-1]))
+            database.dialect='PostgreSQL'
             with self.assertRaises(RuntimeError): gauss_check.main()

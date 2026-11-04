@@ -41,8 +41,8 @@ def main():
         print('HTTP_EXECUTION_AND_OUTPUTS_OK',pid,flush=True)
     dashboard=call('GET','/api/taskinfo/dashboard')
     assert dashboard['summary']['total']==2
-    assert not list((ROOT/'data/postgres-native/state').rglob('*.sqlite3'))
-    (ROOT/'data/postgres-native/http-acceptance.json').write_text(json.dumps(outputs,ensure_ascii=False,indent=2),encoding='utf-8')
+    assert not list((ROOT/'data/gauss-dev/state').rglob('*.sqlite3'))
+    (ROOT/'data/gauss-dev/http-acceptance.json').write_text(json.dumps(outputs,ensure_ascii=False,indent=2),encoding='utf-8')
     print('HTTP_POSTGRES_ACCEPTANCE_OK; two tasks; no SQLite state',flush=True)
 
 

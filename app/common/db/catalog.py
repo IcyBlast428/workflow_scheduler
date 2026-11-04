@@ -5,7 +5,6 @@ DATABASES = {
     'mysql': {'label': 'MySQL / PolarDB / MariaDB', 'port': 3306, 'module': 'pymysql', 'package': 'PyMySQL', 'tls': True},
     'postgresql': {'label': 'PostgreSQL / GaussDB', 'port': 5432, 'module': 'psycopg', 'package': 'psycopg[binary]', 'tls': True},
     'clickhouse': {'label': 'ClickHouse', 'port': 8123, 'module': 'clickhouse_connect', 'package': 'clickhouse-connect[sqlalchemy]', 'tls': True},
-    'sqlite': {'label': 'SQLite', 'port': None, 'module': 'sqlite3', 'package': 'Python 内置', 'tls': False},
 }
 ALIASES = {'polardb': 'mysql', 'mariadb': 'mysql', 'postgres': 'postgresql'}
 

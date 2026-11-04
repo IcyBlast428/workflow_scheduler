@@ -2,8 +2,7 @@
 import argparse
 import json
 import os
-from pathlib import Path
-import pwd
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -42,10 +41,10 @@ def render(*, scope='system', project='/data/wfs/current', python=None, environm
         raise ValueError('Invalid scope or service ports')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*\$?', user) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', group):
         raise ValueError('Invalid service account')
-    for path in (project, python or str(Path(project)/'.venv/bin/python'), environment_file, helper, data, logs):
-        if not Path(path).is_absolute():
+    for path in (project, python or str(PurePosixPath(project)/'.venv/bin/python'), environment_file, helper, data, logs):
+        if not PurePosixPath(path).is_absolute():
             raise ValueError('Service paths must be absolute')
-    python = python or str(Path(project)/'.venv/bin/python')
+    python = python or str(PurePosixPath(project)/'.venv/bin/python')
     base = 'wfs' if scope == 'system' else 'wfs-local'
     units = {}
     for role in ('scheduler', 'web'):
@@ -165,6 +164,7 @@ def main():
             # only with a deliberate manual backup, described in the handbook.
             raise ValueError('Refusing to overwrite an unmanaged service file: ' + str(existing))
     if not local:
+        import pwd
         account = pwd.getpwnam(args.user)
         for directory in (data, logs):
             path = Path(directory)

@@ -30,12 +30,15 @@ def archive(files):
 
 class PackageTests(unittest.TestCase):
     def setUp(self):
+        from scripts.init_database import table_names
+        with GaussDB() as db:
+            db.execute_sql('TRUNCATE '+','.join(t for t in table_names() if t!='wfs_schema_version'))
+
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.jobs = self.root / 'jobs'
         self.jobs.mkdir()
-        self.patches = [patch.dict(os.environ, {'WFS_LOCAL_DB_PATH': str(self.root / 'db.sqlite3'),
-                                               'WFS_TASK_RELEASE_DIR': str(self.root / 'packages'),
+        self.patches = [patch.dict(os.environ, {'WFS_TASK_RELEASE_DIR': str(self.root / 'packages'),
                                                'WFS_SCHEDULER_CONTROL_URL': ''}),
                         patch.object(task_loader, 'TASK_DIR', self.jobs), patch.object(core, 'TASK_DIR', self.jobs)]
         for item in self.patches:
@@ -60,7 +63,10 @@ class PackageTests(unittest.TestCase):
             temporary_root = self.root.resolve()
             temporary_root.relative_to(Path(tempfile.gettempdir()).resolve())
             def cleanup_error(function, path, error):
-                if not isinstance(error, FileNotFoundError):
+                if isinstance(error,PermissionError):
+                    os.chmod(path,stat.S_IWRITE | stat.S_IREAD)
+                    function(path)
+                elif not isinstance(error, FileNotFoundError):
                     raise error
             shutil.rmtree('\\\\?\\' + str(temporary_root), onexc=cleanup_error)
         self.temp.cleanup()
@@ -190,33 +196,6 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(packages.task(pid)['active_version'],v2['version'])
         self.assertNotIn('pending',packages.task(pid))
 
-    def test_offline_migration_preserves_identity_and_ignores_source_changes(self):
-        source = self.jobs/'legacy'/'existing'; source.mkdir(parents=True)
-        (source/'main.py').write_text('print("legacy")')
-        (source/'.wfs-task.json').write_text(json.dumps({'task_id':'stable_existing'}))
-        task_loader.invalidate_task_cache()
-        from scripts.migrate_legacy_tasks import legacy_specs, stage_legacy_task
-        self.assertFalse(task_loader.discover_task_specs(), 'A source directory alone cannot create a task')
-        data = stage_legacy_task(legacy_specs(self.jobs)[0], 'admin')
-        self.assertFalse(task_loader.discover_task_specs(), 'A staged baseline is not published')
-        data = self.ready(data)
-        self.activate(data)
-        self.assertEqual(len(task_loader.discover_task_specs()),1)
-        (source/'main.py').write_text('print("changed outside publishing")')
-        task_loader.invalidate_task_cache()
-        published = task_loader.discover_task_specs()[0]
-        self.assertNotEqual(published['task_dir'], source)
-        self.assertEqual(published['main_file_path'].read_text(), 'print("legacy")')
-        self.assertIsNone(stage_legacy_task({'pid': 'stable_existing', 'main_file_error': 'source removed'}))
-        extra = self.jobs/'new'/'ignored'; extra.mkdir(parents=True)
-        (extra/'main.py').write_text('print("not published")')
-        task_loader.invalidate_task_cache()
-        self.assertEqual(len(task_loader.discover_task_specs()), 1)
-        deleted = packages.recycle(data['pid'],packages.task(data['pid'])['revision'],'admin')
-        self.assertTrue((source/'main.py').exists())
-        self.assertFalse(task_loader.discover_task_specs())
-        packages.recycle(data['pid'],deleted['revision'],'admin',True)
-        self.assertEqual(task_loader.discover_task_specs()[0]['pid'],'stable_existing')
 
     def test_directory_scan_and_online_import_are_disabled(self):
         with patch.object(task_loader, 'iter_task_directories', side_effect=AssertionError('Runtime directory scan')):
@@ -226,14 +205,6 @@ class PackageTests(unittest.TestCase):
                                     json={'action': 'import', 'pid': 'old_task'})
         self.assertEqual(response.status_code, 410)
 
-    def test_upgrade_requires_previously_known_tasks_to_be_migrated(self):
-        from scripts.migrate_legacy_tasks import verify_catalog
-        self.assertEqual(verify_catalog(), 0)
-        with GaussDB() as db:
-            db.execute_sql('INSERT INTO wfs_job_stats(pid,task_name,failed_times) VALUES(?,?,0)',
-                           params=('needs_migration', 'Old task'))
-        with self.assertRaisesRegex(ValueError, 'needs_migration'):
-            verify_catalog()
 
     def test_offline_dependency_failure_cannot_publish(self):
         data = self.new({'main.py':'print(1)','requirements.txt':'nonexistent_wfs_package==1.0.0'})

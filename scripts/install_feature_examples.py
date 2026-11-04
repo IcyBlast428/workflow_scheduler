@@ -1,4 +1,4 @@
-"""Install the five feature examples as managed, scheduling-disabled local tasks."""
+"""Install the four standalone feature examples as managed, scheduling-disabled local tasks."""
 import argparse
 import io
 import json

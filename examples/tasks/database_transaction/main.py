@@ -3,7 +3,7 @@ from app.common.database import NewDB
 
 
 def main():
-    # 适用于 MySQL、PostgreSQL 兼容库和 SQLite；ClickHouse 不支持此事务入口。
+    # 适用于 MySQL、PostgreSQL 兼容库；ClickHouse 不支持此事务入口。
     with NewDB('mysql_orders') as db:
         with db.transaction():
             count = db.executemany(

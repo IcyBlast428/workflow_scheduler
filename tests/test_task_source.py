@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import test_local_integration as shared  # sets an isolated SQLite environment
+import test_local_integration as shared  # sets an isolated real database environment
 from app import create_app
 from app.api import operations as views
 from app.bootstrap import task_source as source

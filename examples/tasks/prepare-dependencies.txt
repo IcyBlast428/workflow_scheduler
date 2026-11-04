@@ -8,7 +8,6 @@ python -m pip install SQLAlchemy==2.0.46 configobj==5.0.8 cryptography==50.0.2 P
 
 # PostgreSQL 兼容连接：把上行 PyMySQL 替换为 psycopg[binary]==3.3.6。
 # ClickHouse：替换为 clickhouse-connect[sqlalchemy]==1.11.0。
-# SQLite 不需要额外驱动，仍需要 NewDB 的前三项依赖。
 # GaussDB 需先确认型号与驱动兼容性，不要直接套用 PostgreSQL 驱动。
 
 python -m pip freeze > requirements.txt

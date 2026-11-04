@@ -36,7 +36,7 @@ class GitLabTaskTests(unittest.TestCase):
             previous = updates._snapshot(db)
         data = updates.scan(updates.configuration(), previous)
         with updates.store() as db:
-            db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)', (json.dumps(data),))
+            db.replace('snapshot',('id','payload'),(1,json.dumps(data)))
         return data
 
     def candidate(self, pid='git_new'):
@@ -97,7 +97,7 @@ class GitLabTaskTests(unittest.TestCase):
                 if failure == 'error': value['error'] = 'GitLab unavailable'
                 if failure == 'incomplete': value['task_catalog']['complete'] = False
                 if failure == 'expired': value['checked_at'] = time.time() - 5000
-                db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)', (json.dumps(value),))
+                db.replace('snapshot',('id','payload'),(1,json.dumps(value)))
             with self.subTest(failure=failure), self.assertRaises(packages.PackageError):
                 tasks.remove(identifier, 'admin')
             self.assertFalse(packages.task('git_new')['deleted_at'])
@@ -184,7 +184,7 @@ class GitLabTaskTests(unittest.TestCase):
         with updates.store() as db:
             data = updates._snapshot(db)
             next(i for i in data['items'] if i['kind'] == 'task')['incomplete'] = True
-            db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)', (json.dumps(data),))
+            db.replace('snapshot',('id','payload'),(1,json.dumps(data)))
         self.assertNotIn(pid, [i['pid'] for i in tasks.changes()['items']])
 
 

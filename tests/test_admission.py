@@ -56,7 +56,7 @@ class AdmissionTests(unittest.TestCase):
     def test_grants_limit_snapshot_and_deny_legacy_fallback(self):
         profiles={'orders':dict(id='orders',password='one'), 'billing':dict(id='billing',password='two')}
         with patch.object(connection_settings,'profiles',return_value=profiles),patch.object(connection_settings,'business_profile',side_effect=lambda i:profiles.get(i)):
-            self.assertIsNone(admission.connection_environment('old_task'))
+            self.assertEqual(json.loads(admission.connection_environment('old_task')),{})
             admission.save_grant('task',dict(mode='restricted',connections=['orders'],revision=0),'admin')
             snapshot=admission.connection_environment('task')
             self.assertEqual(list(json.loads(snapshot)),['orders'])
@@ -69,13 +69,6 @@ class AdmissionTests(unittest.TestCase):
             with self.assertRaises(PermissionError):load_database_config('legacy_ini')
             with self.assertRaises(PermissionError):connection_settings.business_profile('platform')
 
-    def test_backup_contains_admission_and_grants(self):
-        import zipfile
-        from scripts.backup_files import add_connection_settings
-        admission.set_maintenance(True,0,'upgrade','admin')
-        with tempfile.TemporaryDirectory() as temp,zipfile.ZipFile(Path(self.temp.name)/'backup.zip','w') as archive:
-            self.assertTrue(add_connection_settings(archive,self.temp.name,temp,'admission.sqlite3'))
-            self.assertIn('data/admission.sqlite3',archive.namelist())
 
     def test_routes_require_admin_and_csrf(self):
         from app import create_app

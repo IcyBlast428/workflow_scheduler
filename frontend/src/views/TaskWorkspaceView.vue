@@ -82,7 +82,7 @@
     <TaskTable
       v-else-if="tasks.items.length"
       :rows="tasks.items"
-      :busy="busy"
+      :busy="busy || batchBusy"
       :pending-actions="pendingActions"
       :can-operate="canOperate"
       :can-manage="canManage"

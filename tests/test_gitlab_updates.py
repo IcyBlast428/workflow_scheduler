@@ -56,7 +56,6 @@ class GitLabTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         environment = patch.dict(os.environ, {'WFS_DATA_DIR': str(self.root),
-                                              'WFS_LOCAL_DB_PATH': str(self.root / 'platform.sqlite3'),
                                               'WFS_SCHEDULER_CONTROL_URL': ''})
         environment.start(); self.addCleanup(environment.stop)
         self.app = create_app(); self.app.testing = True
@@ -78,7 +77,7 @@ class GitLabTests(unittest.TestCase):
         with self.network():
             result = updates.scan(updates.configuration())
         with updates.store() as db:
-            db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)', (json.dumps(result),))
+            db.replace('snapshot',('id','payload'),(1,json.dumps(result)))
         return result
 
     def test_classification_rename_baselines_and_pinned_links(self):
@@ -112,7 +111,8 @@ class GitLabTests(unittest.TestCase):
         public = self.config()
         self.assertTrue(public['token_set'])
         self.assertNotIn('token', public)
-        self.assertNotIn(SECRET.encode(), (self.root / 'gitlab-updates.sqlite3').read_bytes())
+        with updates.store() as db:
+            self.assertNotIn(SECRET.encode(),db.execute('SELECT payload FROM configuration').fetchone()[0])
         value = updates.save_configuration({**public, 'token': ''})
         self.assertEqual(updates.configuration()['token'], SECRET)
         with self.assertRaises(updates.GitLabError):
@@ -243,7 +243,7 @@ class GitLabTests(unittest.TestCase):
             self.assertEqual([item['kind'] for item in result['items']], ['branch', 'platform', 'task'])
             self.assertTrue(all(method == 'GET' for method, _, _ in calls))
             with updates.store() as db:
-                db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)', (json.dumps(result),))
+                db.replace('snapshot',('id','payload'),(1,json.dumps(result)))
             response = self.client.get('/api/admin/gitlab-updates/state')
             item = response.json['data']['items'][0]
             response = self.client.get('/api/admin/gitlab-updates/diff', query_string={'id': item['id'], 'index': 1})
@@ -251,20 +251,3 @@ class GitLabTests(unittest.TestCase):
             self.assertNotIn(TOKEN, json.dumps(updates.public_configuration()))
         finally:
             server.shutdown(); server.server_close()
-
-    def test_backup_restores_gitlab_configuration_and_acknowledgements(self):
-        from scripts.backup_files import add_connection_settings
-        from scripts.restore_local import restore
-        self.config(); self.run_scan()
-        updates.acknowledge('admin', updates.state('admin')['fingerprint'])
-        archive_path = self.root / 'backup.zip'
-        temporary = self.root / 'snapshot'
-        temporary.mkdir()
-        with zipfile.ZipFile(archive_path, 'w') as archive:
-            self.assertTrue(add_connection_settings(archive, self.root, temporary, 'gitlab-updates.sqlite3'))
-            archive.writestr('manifest.json', json.dumps({'format': 2}))
-        restored = restore(archive_path, self.root / 'restored')
-        with patch.dict(os.environ, {'WFS_DATA_DIR': str(restored / 'data')}):
-            self.assertEqual(updates.configuration()['token'], SECRET)
-            self.assertFalse(updates.state('admin')['unread'])
-            self.assertEqual(updates.state('admin')['count'], 3)

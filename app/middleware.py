@@ -90,6 +90,8 @@ def init_middleware(app):
                         publish()
                     except Exception:
                         app.logger.exception('runtime read model refresh deferred')
+        if request.path.startswith('/static/') and resp.status_code >= 400:
+            resp.headers['Cache-Control'] = 'no-store'
         resp.headers['X-Content-Type-Options'] = 'nosniff'
         resp.headers['Referrer-Policy'] = 'same-origin'
         return resp

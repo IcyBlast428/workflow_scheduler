@@ -13,6 +13,8 @@ from app.bootstrap import journal, operations
 
 
 def benchmark(rows,files):
+    from scripts.test_database import configure
+    configure()
     with tempfile.TemporaryDirectory(prefix='wfs-scale-') as temporary:
         root=Path(temporary)
         started=time.perf_counter()
@@ -35,7 +37,7 @@ def benchmark(rows,files):
                 began=time.perf_counter();assert len(journal.recent(root,'task-050',50))==50;timings.append((time.perf_counter()-began)*1000)
             began=time.perf_counter();assert journal.pending(root,500)==[];pending_ms=(time.perf_counter()-began)*1000
         with journal.connection(root) as db:
-            plan=[row[-1] for row in db.execute('EXPLAIN QUERY PLAN SELECT payload FROM journal WHERE pid=? ORDER BY created_at DESC LIMIT 50',('task-050',))]
+            plan=[row[-1] for row in db.execute('EXPLAIN SELECT payload FROM journal WHERE pid=? ORDER BY created_at DESC LIMIT 50',('task-050',))]
         assert any('journal_pid_time' in line for line in plan),plan
         return {'indexed_records':rows,'task_count':100,'actual_log_files':files,'build_seconds':round(build_seconds,2),
                 'recent_median_ms':round(statistics.median(timings),2),'recent_p95_ms':round(sorted(timings)[18],2),

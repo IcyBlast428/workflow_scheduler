@@ -8,19 +8,25 @@
 import { nextTick, onBeforeUnmount, ref } from 'vue';
 const anchor = ref(null), menu = ref(null), open = ref(false), position = ref({});
 function buttons() { return [...menu.value.querySelectorAll('button')].filter(el => !el.disabled); }
-function restoreAnchor(event) { if (!event.target.closest('button:disabled')) anchor.value?.focus(); }
-async function show() {
-  open.value = true; await nextTick();
+function restoreAnchor(event) { if (!event.target.closest('button:disabled')) anchor.value?.focus({preventScroll:true}); }
+function place() {
+  if (!open.value || !anchor.value || !menu.value) return;
   const rect = anchor.value.getBoundingClientRect();
   const height = menu.value.offsetHeight;
   position.value = { left: `${Math.max(8,Math.min(rect.right-180,innerWidth-188))}px`, top: `${Math.max(8, rect.bottom+height+12 > innerHeight ? rect.top-height-6 : rect.bottom+6)}px` };
-  buttons()[0]?.focus();
-  document.addEventListener('pointerdown', outside, true); window.addEventListener('scroll', close, true); window.addEventListener('resize', close);
+}
+async function show() {
+  open.value = true; await nextTick();
+  if (!open.value || !menu.value) return;
+  place(); await nextTick();
+  if (!open.value || !menu.value) return;
+  buttons()[0]?.focus({preventScroll:true});
+  document.addEventListener('pointerdown', outside, true); window.addEventListener('scroll', place, true); window.addEventListener('resize', close);
 }
 function close(event) {
   if (event?.target?.closest('button:disabled')) return;
-  open.value = false; document.removeEventListener('pointerdown', outside, true); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close);
-  if (!event || ['keydown','click'].includes(event.type)) anchor.value?.focus();
+  open.value = false; document.removeEventListener('pointerdown', outside, true); window.removeEventListener('scroll', place, true); window.removeEventListener('resize', close);
+  if (!event || ['keydown','click'].includes(event.type)) anchor.value?.focus({preventScroll:true});
 }
 function toggle() { if (open.value) close(); else show(); }
 function outside(event) { if (!menu.value?.contains(event.target) && !anchor.value?.contains(event.target)) close(event); }

@@ -25,11 +25,10 @@ test('real PostgreSQL login, retained execution, CSV download and persisted sett
   await execution.getByRole('link', { name: '下载文件 details.csv', exact: true }).click();
   const downloaded = await pending;
   expect(await readFile(await downloaded.path(), 'utf8')).toContain('项目甲');
-  await page.screenshot({ path: fileURLToPath(new URL('../../data/postgres-native/browser-acceptance.png', import.meta.url)), fullPage: true });
+  await page.screenshot({ path: fileURLToPath(new URL('../../data/gauss-dev/browser-acceptance.png', import.meta.url)), fullPage: true });
   await execution.getByTitle('关闭').click();
   await detail.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByRole('button', { name: '数据库连接', exact: true }).click();
-  await page.getByRole('button', { name: '任务业务数据库', exact: true }).click();
   await expect(page.locator('.content')).toContainText('pg_local');
   await page.getByRole('button', { name: '依赖仓库', exact: true }).click();
   await expect(page.getByLabel('依赖安装方式', { exact: true })).toHaveValue('offline');

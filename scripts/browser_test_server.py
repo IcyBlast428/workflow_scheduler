@@ -8,8 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 temporary = tempfile.TemporaryDirectory(prefix='wfs-browser-')
 root = Path(temporary.name)
+from scripts.test_database import configure, publish_fixture
+configure(root)
 os.environ.update(WFS_ENV='development', WFS_ENABLE_SCHEDULER='true', WFS_DEV_RUN_ALL='true',
-                  WFS_LOCAL_DB_PATH=str(root/'database.sqlite3'),WFS_DATA_DIR=str(root/'data'),
+                  WFS_DATA_DIR=str(root/'data'),
                   WFS_LOG_DIR=str(root/'logs'),WFS_SECRET_KEY='disposable-browser-test-key',
                   WFS_SCHEDULER_CONTROL_URL='',WFS_COOKIE_SECURE='false',
                   WFS_SESSION_COOKIE_NAME='wfs_browser_acceptance_session')
@@ -49,6 +51,12 @@ from app.bootstrap.core import aps_start
 from app.bootstrap.schedule_config import save_schedule
 from app.extensions import scheduler
 app = create_app()
+# Prepare disposable business connections inside the test server. Secrets never leave it.
+from scripts.test_database import business_profile
+from app.bootstrap import connection_settings as connections
+for identifier in ('pg_browser','lifecycle_browser'):
+    connections.save(connections.validate(dict(business_profile(identifier),pool_size=2)))
+
 from app.bootstrap.database import GaussDB
 with GaussDB() as db:
     for username,role in [('browser-viewer','viewer'), ('browser-operator','operator'), ('browser-maintainer','maintainer')]:
@@ -56,11 +64,12 @@ with GaussDB() as db:
                        params=(username,os.environ['WFS_ADMIN_PASSWORD_HASH'],role))
 if scheduler.get_job('MAIN_TASK_JOB'):
     scheduler.remove_job('MAIN_TASK_JOB')
-from scripts.migrate_legacy_tasks import legacy_specs, migrate_task
-for fixture_spec in legacy_specs(global_vars.TASK_DIR):
+from app.bootstrap.task_loader import iter_task_directories, load_task_spec
+for group,folder,path in iter_task_directories(global_vars.TASK_DIR):
+    fixture_spec=load_task_spec(group,folder,path,{})
     if fixture_spec['pid'] == 'acceptance__outputs':
         fixture_spec.update(task_name='目录与输出验收', main_file='src/report_job/main.py')
-    migrate_task(fixture_spec, actor='browser-fixture')
+    publish_fixture(fixture_spec, actor='browser-fixture')
 save_schedule('acceptance__slow',{'schedule_type':'every_hour','main_file':'main.py','enabled':False})
 from app.bootstrap.task_access import save as save_access
 save_access('browser-maintainer',{'revision':0,'tasks':['acceptance__slow'],'groups':[],'capabilities':['run','schedule','view_code']},'browser-fixture')
@@ -99,6 +108,6 @@ if os.environ.get('WFS_BROWSER_GITLAB_FIXTURE') == '1':
         import json
         snapshot = gitlab_updates.scan(gitlab_updates.configuration())
         with gitlab_updates.store() as db:
-            db.execute('INSERT OR REPLACE INTO snapshot VALUES(1,?)', (json.dumps(snapshot),))
+            db.replace('snapshot',('id','payload'),(1,json.dumps(snapshot)))
         return {'code':20000, 'data':{}}
 app.run(host='127.0.0.1',port=19008,debug=False,threaded=True)

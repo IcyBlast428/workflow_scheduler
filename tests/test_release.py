@@ -35,7 +35,7 @@ mkdir -p "$3/bin"
 cat > "$3/bin/python" <<'SCRIPT'
 #!/bin/bash
 echo "$*" >> "$TEST_PYTHON_ACTIONS"
-if [[ "$TEST_FAILURE" == migrate && "$*" == *scripts/migrate.py* ]]; then exit 1; fi
+if [[ "$TEST_FAILURE" == migrate && "$*" == *scripts/check_gauss_platform.py* ]]; then exit 1; fi
 exit 0
 SCRIPT
 /bin/chmod +x "$3/bin/python"''')
@@ -87,15 +87,15 @@ SCRIPT
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((base/'current').resolve(), old)
         self.assertFalse(self.actions())
-        self.assertNotIn('scripts/migrate.py', (self.root/'python-actions').read_text())
+        self.assertNotIn('scripts/check_gauss_platform.py', (self.root/'python-actions').read_text())
         for state in ('true', 'activating', 'deactivating'):
             result = self.invoke(base, '--activate', TEST_ACTIVE=state)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(self.actions())
-            self.assertNotIn('scripts/migrate.py', (self.root/'python-actions').read_text())
+            self.assertNotIn('scripts/check_gauss_platform.py', (self.root/'python-actions').read_text())
         result = self.invoke(base, '--activate')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('scripts/migrate.py', (self.root/'python-actions').read_text())
+        self.assertIn('scripts/check_gauss_platform.py', (self.root/'python-actions').read_text())
 
     def test_migration_failure_keeps_previous_release_without_starting_services(self):
         base, old = self.deployment('migration')

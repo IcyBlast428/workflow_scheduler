@@ -28,18 +28,18 @@ test('maintenance rejects new requests, preserves receipts and drains running ta
     await page.request.post('/api/admin/admission',{headers,data:{enabled:false,revision:state.revision,reason:''}});
   }
 });
-test('legacy platform source and embedded task authorization workspace',async({page})=>{
+test('GaussDB platform source and embedded task authorization workspace',async({page})=>{
   const faults=[];page.on('pageerror',e=>faults.push(e.message));
   await login(page,'connections');
-  await expect(page.getByText(/配置来源：本地 SQLite/)).toBeVisible();
+  await expect(page.getByText(/配置来源：独立协议测试配置/)).toBeVisible();
   await expect(page.getByRole('button',{name:'测试并保存（重启生效）'})).toHaveCount(0);
   await page.getByRole('button',{name:'任务列表',exact:true}).click();
   const row=page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
   await row.getByRole('button',{name:'详情',exact:true}).click();
   const dialog=page.getByRole('dialog');
   await dialog.getByRole('tab',{name:'连接授权',exact:true}).click();
-  await expect(dialog.getByLabel('访问模式')).toHaveValue('legacy');
-  await dialog.getByLabel('访问模式').selectOption('restricted');
+  await expect(dialog).toContainText('任务默认无业务数据库权限');
+  await expect(dialog.getByLabel('访问模式')).toHaveCount(0);
   await dialog.getByRole('button',{name:'保存授权',exact:true}).click();
   await page.locator('.confirm-modal').getByRole('button',{name:'保存授权',exact:true}).click();
   await expect(dialog).toContainText('授权已保存，下次执行生效');

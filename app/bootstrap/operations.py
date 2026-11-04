@@ -35,7 +35,7 @@ def run_path(run_id, suffix='json'):
     if not re.fullmatch(r'[a-f0-9]{32}', str(run_id)):
         raise ValueError('invalid execution identifier')
     if suffix == 'json':
-        return _directory / f'{run_id}.json'  # Legacy lookup only; new records use WAL.
+        return _directory / f'{run_id}.json'  # JSON outage-recovery location.
     record = journal.read(_directory, run_id)
     relative = record.get('log_path') if record else f'{run_id}.{suffix}'
     path = (_directory / relative).resolve()
@@ -50,11 +50,6 @@ def read_run(run_id):
     indexed = journal.read(_directory, run_id)
     if indexed is not None:
         return indexed
-    path = run_path(run_id)
-    if path.is_file():
-        record = json.loads(path.read_text(encoding='utf-8'))
-        record.setdefault('log_path',run_id+'.log')
-        return record
     with GaussDB() as db:
         rows = db.execute_query_sql('SELECT payload FROM wfs_executions WHERE run_id=?', params=(run_id,))
     if not rows:
@@ -247,14 +242,14 @@ def maintenance(recover=False):
     batch = max(1, min(5000, int(os.environ.get('WFS_MAINTENANCE_BATCH', '500'))))
     deadline = time.monotonic() + max(1, int(os.environ.get('WFS_MAINTENANCE_SECONDS', '10')))
     if recover:
-        # Known active IDs protect orphan recovery during a large legacy import.
+        # Recover known active execution IDs before accepting new work.
         with GaussDB() as db:
             rows = db.execute_query_sql("SELECT run_id FROM wfs_executions WHERE status IN ('running','queued')")
         for (run_id,) in rows:
             _recover_record(read_run(run_id))
         for record in journal.active(_directory):
             _recover_record(record)
-    for record in journal.import_legacy(_directory, TERMINAL, batch):
+    for record in journal.recover_pending(_directory, TERMINAL, batch):
         if record['status'] not in TERMINAL:
             _recover_record(record)
     processed = 0
@@ -298,8 +293,7 @@ def maintenance(recover=False):
         # History must be archived and verified before removal. Never purge it here.
         for table, column in (('wfs_executions','created_at'), ('wfs_audit','created_at')):
             key = 'run_id' if table == 'wfs_executions' else 'id'
-            sql = (f'DELETE FROM {table} WHERE {column} < ? ORDER BY {column} LIMIT ?' if db.dialect == 'MySQL' else
-                   f'DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM {table} WHERE {column} < ? ORDER BY {column} LIMIT ?)')
+            sql = f'DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM {table} WHERE {column} < ? ORDER BY {column} LIMIT ?)'
             db.execute_sql(sql, params=(cutoff,batch))
         db.execute_sql('DELETE FROM wfs_login_limits WHERE window_start < ?', params=(business_now() - dt.timedelta(minutes=15),))
         versions_to_keep = max(20,int(os.environ.get('WFS_CONFIG_VERSIONS_KEEP','100')))

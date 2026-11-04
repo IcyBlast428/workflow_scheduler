@@ -1,73 +1,9 @@
-"""Restore a local backup into a NEW directory only; never overwrite live data."""
-import argparse
-import json
-from pathlib import Path, PurePosixPath
-import sqlite3
-import contextlib
-import shutil
-import zipfile
-import hashlib
-
-
-def restore(backup, destination):
-    backup,destination=Path(backup).resolve(),Path(destination).resolve()
-    if destination.exists():
-        raise ValueError('恢复目录必须不存在，不能覆盖运行中的数据。')
-    with zipfile.ZipFile(backup) as archive:
-        manifest=json.loads(archive.read('manifest.json'))
-        if manifest.get('format') not in (1,2,'wfs-platform-1') or archive.testzip():
-            raise ValueError('备份格式或校验无效。')
-        if manifest.get('format')=='wfs-platform-1':
-            digest=hashlib.sha256()
-            with archive.open('database.dump') as source:
-                for block in iter(lambda:source.read(1024*1024),b''):
-                    digest.update(block)
-            if digest.hexdigest()!=manifest['dump_sha256']:
-                raise ValueError('数据库备份摘要校验失败。')
-        for item in archive.infolist():
-            name=PurePosixPath(item.filename)
-            if name.is_absolute() or '..' in name.parts or '\\' in item.filename or ':' in item.filename:
-                raise ValueError('备份内含无效路径。')
-        destination.mkdir(parents=True)
-        try:
-            directory_modes = []
-            for item in archive.infolist():
-                target=destination/item.filename
-                target.parent.mkdir(parents=True,exist_ok=True)
-                if item.is_dir():
-                    target.mkdir(exist_ok=True)
-                    directory_modes.append((target, (item.external_attr >> 16) & 0o777))
-                else:
-                    with archive.open(item) as source,target.open('xb') as output:
-                        shutil.copyfileobj(source,output)
-                    # Keep executable interpreters, without restoring setuid bits.
-                    mode = (item.external_attr >> 16) & 0o777
-                    if mode:
-                        target.chmod(mode)
-            for database in (destination/'database.sqlite3',destination/'data/executions/journal.sqlite3',destination/'data/database-connections.sqlite3',destination/'data/task-publishing.sqlite3',destination/'data/gitlab-updates.sqlite3',destination/'data/admission.sqlite3'):
-                if database.exists():
-                    with contextlib.closing(sqlite3.connect(f'file:{database}?mode=ro',uri=True)) as db:
-                        if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
-                            raise ValueError('恢复后的数据库完整性检查失败。')
-            for directory, mode in reversed(directory_modes):
-                if mode:
-                    directory.chmod(mode)
-        except Exception:
-            # Preserve failed material for inspection; never remove a computed tree.
-            raise
-    receipt={'at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
-             'scope':'archive and SQLite integrity checks','database_restore_verified':False}
-    receipt_path=destination/'data/admission.sqlite3'
-    receipt_path.parent.mkdir(parents=True,exist_ok=True)
-    with sqlite3.connect(receipt_path) as db:
-        db.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,payload TEXT NOT NULL)')
-        db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',('restore:last',json.dumps(receipt)))
-    return destination
-
-
+"""GaussDB archive extraction entry point; database restoration is performed by the DBA."""
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from scripts.restore_platform import restore
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--backup',required=True)
-    parser.add_argument('--destination',required=True)
-    args=parser.parse_args()
-    print(restore(args.backup,args.destination))
+    import runpy
+    from pathlib import Path
+    runpy.run_path(str(Path(__file__).with_name('restore_platform.py')),run_name='__main__')

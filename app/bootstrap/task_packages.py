@@ -5,7 +5,6 @@ Activation has a durable intent and a scheduler acknowledgement. An interrupted
 intent is conservatively rolled back during scheduler startup.
 """
 from app.bootstrap.timebase import business_now
-
 import ast
 import datetime as dt
 import difflib
@@ -25,43 +24,34 @@ import threading
 import unicodedata
 import uuid
 import zipfile
-
 from app.bootstrap.database import GaussDB
 from app.bootstrap.global_vars import DATA_DIR
-
 logger = logging.getLogger(__name__)
-IDENTIFIER = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$')
-VERSION = re.compile(r'^[a-f0-9]{32}$')
+IDENTIFIER = re.compile('^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$')
+VERSION = re.compile('^[a-f0-9]{32}$')
 EXCLUDED = {'.git', '.venv', '__pycache__', '.env', '.wfs-task.json'}
 _preparing = {}
 _prepare_lock = threading.Lock()
 _slots = threading.BoundedSemaphore(2)
 
-
 class PackageError(ValueError):
+
     def __init__(self, message, status=400):
         super().__init__(message)
         self.status = status
 
-
 def limits():
-    return {'upload_bytes': int(os.environ.get('WFS_PACKAGE_UPLOAD_MB', '64')) * 1024**2,
-            'expanded_bytes': int(os.environ.get('WFS_PACKAGE_EXPANDED_MB', '256')) * 1024**2,
-            'files': int(os.environ.get('WFS_PACKAGE_MAX_FILES', '2000'))}
-
+    return {'upload_bytes': int(os.environ.get('WFS_PACKAGE_UPLOAD_MB', '64')) * 1024 ** 2, 'expanded_bytes': int(os.environ.get('WFS_PACKAGE_EXPANDED_MB', '256')) * 1024 ** 2, 'files': int(os.environ.get('WFS_PACKAGE_MAX_FILES', '2000'))}
 
 def storage_root():
     root = Path(os.environ.get('WFS_TASK_RELEASE_DIR', str(Path(DATA_DIR) / 'task-packages'))).resolve()
-    # venv/ensurepip contains deeply nested filenames. Extended paths avoid the
-    # Windows MAX_PATH limit without changing machine-wide registry settings.
-    if os.name == 'nt' and not str(root).startswith('\\\\?\\'):
+    if os.name == 'nt' and (not str(root).startswith('\\\\?\\')):
         value = str(root)
         root = Path('\\\\?\\UNC\\' + value[2:] if value.startswith('\\\\') else '\\\\?\\' + value)
     return root
 
-
 def release_dir(pid, version):
-    if not isinstance(pid, str) or not isinstance(version, str) or not IDENTIFIER.fullmatch(pid) or not VERSION.fullmatch(version):
+    if not isinstance(pid, str) or not isinstance(version, str) or (not IDENTIFIER.fullmatch(pid)) or (not VERSION.fullmatch(version)):
         raise PackageError('任务或版本编号无效。')
     root = storage_root()
     path = root / pid / 'releases' / version
@@ -71,12 +61,9 @@ def release_dir(pid, version):
     path.resolve().relative_to(root)
     return path
 
-
 def registry():
     with GaussDB() as db:
-        return {row['pid']: {**json.loads(row['payload']), 'revision': int(row['revision'])}
-                for row in db.execute_query_sql('SELECT pid,revision,payload FROM wfs_package_tasks', return_json=True)}
-
+        return {row['pid']: {**json.loads(row['payload']), 'revision': int(row['revision'])} for row in db.execute_query_sql('SELECT pid,revision,payload FROM wfs_package_tasks', return_json=True)}
 
 def task(pid):
     with GaussDB() as db:
@@ -84,7 +71,6 @@ def task(pid):
     if not rows:
         raise PackageError('任务尚未纳入版本管理。', 404)
     return {**json.loads(rows[0]['payload']), 'revision': int(rows[0]['revision'])}
-
 
 def release(pid, version):
     release_dir(pid, version)
@@ -94,25 +80,21 @@ def release(pid, version):
         raise PackageError('版本不存在。', 404)
     return json.loads(rows[0][0])
 
-
 def _write_task(record, expected=None):
     """CAS protects registry writes across processes as well as API requests."""
     with GaussDB() as db:
         db.begin_transaction()
         try:
-            if not db._local_sqlite:
-                db.execute_sql('LOCK TABLE wfs_package_tasks IN EXCLUSIVE MODE')
+            db.execute_sql('LOCK TABLE wfs_package_tasks IN EXCLUSIVE MODE')
             rows = db.execute_query_sql('SELECT revision FROM wfs_package_tasks WHERE pid=?', params=(record['pid'],))
             revision = int(rows[0][0]) if rows else 0
             if expected is not None and revision != expected:
                 raise PackageError('任务版本已发生变化，请刷新后重新预览。', 409)
             data = {**record, 'revision': revision + 1}
             if rows:
-                db.execute_sql('UPDATE wfs_package_tasks SET revision=?,payload=? WHERE pid=?',
-                               params=(data['revision'], json.dumps(data, ensure_ascii=False), data['pid']))
+                db.execute_sql('UPDATE wfs_package_tasks SET revision=?,payload=? WHERE pid=?', params=(data['revision'], json.dumps(data, ensure_ascii=False), data['pid']))
             else:
-                db.execute_sql('INSERT INTO wfs_package_tasks(pid,revision,payload) VALUES(?,?,?)',
-                               params=(data['pid'], data['revision'], json.dumps(data, ensure_ascii=False)))
+                db.execute_sql('INSERT INTO wfs_package_tasks(pid,revision,payload) VALUES(?,?,?)', params=(data['pid'], data['revision'], json.dumps(data, ensure_ascii=False)))
             db.set_commit()
         except Exception:
             db.set_rollback()
@@ -121,40 +103,33 @@ def _write_task(record, expected=None):
     invalidate_task_cache()
     return data
 
-
 def _write_release(record, insert=False):
     with GaussDB() as db:
         if insert:
-            db.execute_sql('INSERT INTO wfs_task_releases(pid,version,created_at,payload) VALUES(?,?,?,?)',
-                           params=(record['pid'], record['version'], record['created_at'], json.dumps(record, ensure_ascii=False)))
+            db.execute_sql('INSERT INTO wfs_task_releases(pid,version,created_at,payload) VALUES(?,?,?,?)', params=(record['pid'], record['version'], record['created_at'], json.dumps(record, ensure_ascii=False)))
         else:
-            db.execute_sql('UPDATE wfs_task_releases SET payload=? WHERE pid=? AND version=?',
-                           params=(json.dumps(record, ensure_ascii=False), record['pid'], record['version']))
+            db.execute_sql('UPDATE wfs_task_releases SET payload=? WHERE pid=? AND version=?', params=(json.dumps(record, ensure_ascii=False), record['pid'], record['version']))
     return record
 
-
 def _name(value, label):
-    if not isinstance(value, str) or not re.fullmatch(r'[\w-]{1,80}', value, re.UNICODE) or value.startswith('_'):
+    if not isinstance(value, str) or not re.fullmatch('[\\w-]{1,80}', value, re.UNICODE) or value.startswith('_'):
         raise PackageError(label + '只能使用文字、数字、下划线或连字符，最多 80 个字符。')
     return value
 
-
 def _path(name):
-    if not isinstance(name, str) or len(name) > 512 or any(c in name for c in ('\\', ':', '\0')):
+    if not isinstance(name, str) or len(name) > 512 or any((c in name for c in ('\\', ':', '\x00'))):
         raise PackageError('压缩包包含无效文件路径。')
     parts = name.rstrip('/').split('/')
-    if PurePosixPath(name).is_absolute() or len(parts) > 32 or any(p in ('', '.', '..') for p in parts):
+    if PurePosixPath(name).is_absolute() or len(parts) > 32 or any((p in ('', '.', '..') for p in parts)):
         raise PackageError('压缩包不能包含绝对路径或上级目录。')
-    # Reject names which alias other paths on Windows or create device files.
     for part in parts:
-        if part.endswith((' ', '.')) or re.fullmatch(r'(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?', part):
+        if part.endswith((' ', '.')) or re.fullmatch('(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\..*)?', part):
             raise PackageError('压缩包包含系统保留文件名。')
-        if any(ord(char) < 32 or char in '<>"|?*' for char in part):
+        if any((ord(char) < 32 or char in '<>"|?*' for char in part)):
             raise PackageError('压缩包包含无效文件名。')
-    if any(p.casefold() in EXCLUDED or p.casefold().startswith('.env.') for p in parts):
+    if any((p.casefold() in EXCLUDED or p.casefold().startswith('.env.') for p in parts)):
         raise PackageError('请移除 .git、.venv、缓存、身份文件和本地 .env 配置后上传。')
-    return '/'.join(unicodedata.normalize('NFC', p) for p in parts)
-
+    return '/'.join((unicodedata.normalize('NFC', p) for p in parts))
 
 def _unpack(blob, code, entry='', archive_layout='auto'):
     bound = limits()
@@ -163,7 +138,7 @@ def _unpack(blob, code, entry='', archive_layout='auto'):
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as archive:
             entries = archive.infolist()
-            if len(entries) > bound['files'] * 2 or sum(e.file_size for e in entries) > bound['expanded_bytes']:
+            if len(entries) > bound['files'] * 2 or sum((e.file_size for e in entries)) > bound['expanded_bytes']:
                 raise PackageError('解压大小或文件数超过限制。', 413)
             files = []
             seen = set()
@@ -180,21 +155,19 @@ def _unpack(blob, code, entry='', archive_layout='auto'):
                     files.append((member, name))
             if not files or len(files) > bound['files']:
                 raise PackageError('任务包为空或文件数超过限制。')
-            # A single wrapper directory is conventional ZIP export structure.
             prefix = files[0][1].split('/')[0]
-            common_wrapper = all('/' in name and name.split('/')[0] == prefix for _, name in files)
-            if archive_layout == 'strip' and not common_wrapper:
+            common_wrapper = all(('/' in name and name.split('/')[0] == prefix for _, name in files))
+            if archive_layout == 'strip' and (not common_wrapper):
                 raise PackageError('移除外层目录需要全部文件位于同一个外层目录中。')
             names = {name for _, name in files}
-            strip = archive_layout == 'strip' or (archive_layout == 'auto' and common_wrapper and
-                     entry not in names and prefix + '/__init__.py' not in names)
+            strip = archive_layout == 'strip' or (archive_layout == 'auto' and common_wrapper and (entry not in names) and (prefix + '/__init__.py' not in names))
             total = 0
             for entry, name in files:
                 name = name.split('/', 1)[1] if strip else name
                 destination = code / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(entry) as source, destination.open('xb') as output:
-                    while chunk := source.read(65536):
+                    while (chunk := source.read(65536)):
                         total += len(chunk)
                         if total > bound['expanded_bytes']:
                             raise PackageError('解压大小超过限制。', 413)
@@ -203,7 +176,6 @@ def _unpack(blob, code, entry='', archive_layout='auto'):
         raise
     except (zipfile.BadZipFile, OSError, RuntimeError, EOFError) as exc:
         raise PackageError('无法读取 ZIP，可能损坏或存在文件与目录冲突。') from exc
-
 
 def _manifest(code):
     result = []
@@ -217,11 +189,11 @@ def _manifest(code):
         total += size
         if len(result) >= limits()['files'] or total > limits()['expanded_bytes']:
             raise PackageError('文件数或大小超过限制。')
-        if path.suffix == '.py' and size > 2 * 1024**2:
+        if path.suffix == '.py' and size > 2 * 1024 ** 2:
             raise PackageError('单个 Python 文件不能超过 2 MiB。')
         digest = hashlib.sha256()
         with path.open('rb') as stream:
-            while chunk := stream.read(1024 * 1024):
+            while (chunk := stream.read(1024 * 1024)):
                 digest.update(chunk)
         if path.suffix == '.py':
             try:
@@ -229,10 +201,9 @@ def _manifest(code):
             except (SyntaxError, ValueError) as exc:
                 raise PackageError('Python 语法检查失败：' + str(exc)) from exc
         result.append({'path': path.relative_to(code).as_posix(), 'size': size, 'sha256': digest.hexdigest()})
-    if not result or len(result) > limits()['files'] or sum(item['size'] for item in result) > limits()['expanded_bytes']:
+    if not result or len(result) > limits()['files'] or sum((item['size'] for item in result)) > limits()['expanded_bytes']:
         raise PackageError('文件数或大小超过限制。')
     return result
-
 
 def _requirements(code):
     from packaging.requirements import Requirement, InvalidRequirement
@@ -263,10 +234,8 @@ def _requirements(code):
             raise PackageError('最多声明 500 项直接依赖。')
     return requirements
 
-
 def _checksum(manifest):
     return hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
-
 
 def _entry(manifest, selected=''):
     candidates = [f['path'] for f in manifest if f['path'].endswith('.py')]
@@ -276,7 +245,6 @@ def _entry(manifest, selected=''):
     if entry and entry not in candidates:
         raise PackageError('所选 Python 入口不在任务包中。')
     return entry
-
 
 def _create(record, blob=None, source=None, entry='', actor='admin', note='', archive_layout='auto'):
     if archive_layout not in ('auto', 'preserve', 'strip'):
@@ -290,17 +258,18 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note='', ar
         code.mkdir()
         if source is not None:
             count = total = 0
+
             def files():
                 for directory, children, names in os.walk(source, followlinks=False):
-                    children[:] = [name for name in children if name.casefold() not in EXCLUDED and not name.casefold().startswith('.env.')]
+                    children[:] = [name for name in children if name.casefold() not in EXCLUDED and (not name.casefold().startswith('.env.'))]
                     for name in children:
                         if (Path(directory) / name).is_symlink():
                             raise PackageError('现有任务包含符号链接目录，请先清理后导入。')
                     for name in names:
-                        yield Path(directory) / name
+                        yield (Path(directory) / name)
             for path in files():
                 relative = path.relative_to(source)
-                if any(p.casefold() in EXCLUDED or p.casefold().startswith('.env.') for p in relative.parts):
+                if any((p.casefold() in EXCLUDED or p.casefold().startswith('.env.') for p in relative.parts)):
                     continue
                 _path(relative.as_posix())
                 if path.is_symlink():
@@ -320,22 +289,16 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note='', ar
         manifest = _manifest(code)
         requirements = _requirements(code)
         selected = _entry(manifest, entry)
-        data = {'pid': record['pid'], 'version': version, 'created_at': str(business_now()),
-                'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '',
-                'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest),
-                'requirements': requirements, 'base_version': record.get('active_version'),
-                'base_revision': record['revision'], 'archive_layout': archive_layout}
+        data = {'pid': record['pid'], 'version': version, 'created_at': str(business_now()), 'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '', 'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest), 'requirements': requirements, 'base_version': record.get('active_version'), 'base_revision': record['revision'], 'archive_layout': archive_layout}
         temporary.rename(destination)
         _write_release(data, insert=True)
         return data
     except Exception:
-        # These are newly generated staging paths, never an existing version.
         for path in (temporary, destination):
             if path.exists():
                 path.resolve().relative_to(storage_root())
                 shutil.rmtree(path)
         raise
-
 
 def stage(blob, fields, actor):
     from app.bootstrap.core import _configuration_lock
@@ -353,16 +316,11 @@ def stage(blob, fields, actor):
             name = str(fields.get('task_name', '')).strip()
             if not name or len(name) > 200:
                 raise PackageError('请填写任务名称，最多 200 个字符。')
-            if any(s['group_name'] == group and s['folder_name'] == folder for s in discover_task_specs()) or any(
-                    s['group_name'] == group and s['folder_name'] == folder for s in registry().values()):
+            if any((s['group_name'] == group and s['folder_name'] == folder for s in discover_task_specs())) or any((s['group_name'] == group and s['folder_name'] == folder for s in registry().values())):
                 raise PackageError('该分类下已存在同名目录，请换一个目录名称。', 409)
-            record = {'pid': 'task_' + uuid.uuid4().hex, 'group_name': group, 'folder_name': folder,
-                      'task_name': name, 'active_version': None, 'deleted_at': None, 'origin': 'upload',
-                      'created_at': str(business_now()), 'created_by': actor, 'revision': 0}
+            record = {'pid': 'task_' + uuid.uuid4().hex, 'group_name': group, 'folder_name': folder, 'task_name': name, 'active_version': None, 'deleted_at': None, 'origin': 'upload', 'created_at': str(business_now()), 'created_by': actor, 'revision': 0}
             selected = fields.get('main_file', '')
-        # Validate before creating the registry row: a rejected upload adds no task.
-        data = _create(record, blob=blob, entry=selected, actor=actor, note=fields.get('note', ''),
-                       archive_layout=fields.get('archive_layout', 'auto'))
+        data = _create(record, blob=blob, entry=selected, actor=actor, note=fields.get('note', ''), archive_layout=fields.get('archive_layout', 'auto'))
         if not pid:
             try:
                 record = _write_task(record, expected=0)
@@ -374,11 +332,10 @@ def stage(blob, fields, actor):
                 raise
         return data
 
-
 def prepare(pid, version, entry=''):
     from app.bootstrap.core import _configuration_lock
     with _configuration_lock, _prepare_lock:
-        record, data = task(pid), release(pid, version)
+        record, data = (task(pid), release(pid, version))
         if record.get('deleted_at') or record.get('pending'):
             raise PackageError('任务当前不能准备版本。', 409)
         if data['status'] == 'preparing':
@@ -393,7 +350,7 @@ def prepare(pid, version, entry=''):
                 raise PackageError('请先选择 Python 入口。')
             data.update(status='preparing', message='正在创建独立环境并检查任务依赖。', prepare_token=uuid.uuid4().hex)
             _write_release(data)
-            _preparing[(pid, version)] = data['prepare_token']
+            _preparing[pid, version] = data['prepare_token']
             thread = threading.Thread(target=_prepare_worker, args=(pid, version, data['prepare_token']), daemon=True, name='task-package-prepare')
             thread.start()
         except Exception:
@@ -402,22 +359,16 @@ def prepare(pid, version, entry=''):
             raise
         return data
 
-
 def _command(command, root, timeout, *, environment=None, secrets=()):
     env = os.environ.copy()
     for key in list(env):
         if key.startswith(('WFS_', 'PIP_', 'PYTHON')):
             env.pop(key, None)
-    # Disable inherited pip configuration (including public extra indexes) and
-    # credentials. Nexus credentials use an ephemeral netrc, never argv or venv.
     env.update(PIP_CONFIG_FILE=os.devnull, NETRC=os.devnull)
     env.update(environment or {})
     with tempfile.TemporaryFile() as capture:
         try:
-            result = subprocess.run(command, stdout=capture, stderr=subprocess.STDOUT, env=env,
-                                    executable=command[0] if os.name == 'nt' else None,
-                                    cwd=Path(__file__).resolve().parents[2] if os.name == 'nt' else root,
-                                    timeout=timeout, stdin=subprocess.DEVNULL, check=False)
+            result = subprocess.run(command, stdout=capture, stderr=subprocess.STDOUT, env=env, executable=command[0] if os.name == 'nt' else None, cwd=Path(__file__).resolve().parents[2] if os.name == 'nt' else root, timeout=timeout, stdin=subprocess.DEVNULL, check=False)
         finally:
             capture.seek(0)
             output = capture.read(512 * 1024).decode('utf-8', errors='replace')
@@ -430,70 +381,73 @@ def _command(command, root, timeout, *, environment=None, secrets=()):
         raise PackageError('依赖准备失败，请检查仓库连通性、依赖版本及 wheel 与 Python/系统的兼容性。管理员可查看版本目录中的 prepare.log。')
     return output
 
-
 def _install_requirements(python, code, root, requirements, repository, timeout):
     from urllib.parse import urlsplit, quote
     from packaging.utils import parse_wheel_filename
     import base64
-    common=[str(python),'-I','-m','pip','--isolated','--disable-pip-version-check','--no-input']
-    bundle=root/('dependency-wheels-'+Path(python).parent.parent.name)
+    common = [str(python), '-I', '-m', 'pip', '--isolated', '--disable-pip-version-check', '--no-input']
+    bundle = root / ('dependency-wheels-' + Path(python).parent.parent.name)
     bundle.mkdir(exist_ok=False)
     with tempfile.TemporaryDirectory(prefix='wfs-pip-auth-') as temporary:
-        netrc=Path(temporary)/'credentials'
-        username,password=repository.get('username',''),repository.get('password','')
-        credentials=('machine '+urlsplit(repository['index_url']).hostname+' login '+json.dumps(username)+' password '+json.dumps(password)+'\n') if username else ''
-        netrc.write_text(credentials,encoding='utf-8')
-        if os.name!='nt': netrc.chmod(0o600)
-        redactions=tuple(v for v in (password,quote(password,safe=''),base64.b64encode(f'{username}:{password}'.encode()).decode() if username else '') if v)
-        if repository['mode']=='offline':
+        netrc = Path(temporary) / 'credentials'
+        username, password = (repository.get('username', ''), repository.get('password', ''))
+        credentials = 'machine ' + urlsplit(repository['index_url']).hostname + ' login ' + json.dumps(username) + ' password ' + json.dumps(password) + '\n' if username else ''
+        netrc.write_text(credentials, encoding='utf-8')
+        if os.name != 'nt':
+            netrc.chmod(384)
+        redactions = tuple((v for v in (password, quote(password, safe=''), base64.b64encode(f'{username}:{password}'.encode()).decode() if username else '') if v))
+        if repository['mode'] == 'offline':
             for line in requirements:
-                if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[[A-Za-z0-9_,.-]+\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*',line):
+                if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]*(?:\\[[A-Za-z0-9_,.-]+\\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*', line):
                     raise PackageError('离线模式要求全部直接及间接依赖使用 package==version。')
-            arguments=['--no-index','--no-deps']
-            for wheelhouse in (code/'wheels',Path(os.environ.get('WFS_TASK_WHEELHOUSE',''))):
-                if wheelhouse.is_dir() and str(wheelhouse)!='.': arguments+=['--find-links',str(wheelhouse)]
+            arguments = ['--no-index', '--no-deps']
+            for wheelhouse in (code / 'wheels', Path(os.environ.get('WFS_TASK_WHEELHOUSE', ''))):
+                if wheelhouse.is_dir() and str(wheelhouse) != '.':
+                    arguments += ['--find-links', str(wheelhouse)]
         else:
-            arguments=['--index-url',repository['index_url'],'--retries','1','--timeout','15']
-            if urlsplit(repository['index_url']).scheme=='http': arguments+=['--trusted-host',urlsplit(repository['index_url']).netloc]
-            if repository.get('ca_bundle'): arguments+=['--cert',repository['ca_bundle']]
-        _command(common+['download','--only-binary=:all:','--no-cache-dir','--dest',str(bundle),*arguments,'-r',str(code/'requirements.txt')],
-                 root,timeout,environment={'NETRC':str(netrc)},secrets=redactions)
-    if sum(p.stat().st_size for p in bundle.iterdir())>limits()['expanded_bytes']:
+            arguments = ['--index-url', repository['index_url'], '--retries', '1', '--timeout', '15']
+            if urlsplit(repository['index_url']).scheme == 'http':
+                arguments += ['--trusted-host', urlsplit(repository['index_url']).netloc]
+            if repository.get('ca_bundle'):
+                arguments += ['--cert', repository['ca_bundle']]
+        _command(common + ['download', '--only-binary=:all:', '--no-cache-dir', '--dest', str(bundle), *arguments, '-r', str(code / 'requirements.txt')], root, timeout, environment={'NETRC': str(netrc)}, secrets=redactions)
+    if sum((p.stat().st_size for p in bundle.iterdir())) > limits()['expanded_bytes']:
         raise PackageError('依赖下载超过版本大小限制。')
-    records=[];hashed=[]
+    records = []
+    hashed = []
     for wheel in sorted(bundle.iterdir()):
-        if wheel.is_symlink() or wheel.suffix!='.whl': raise PackageError('依赖归档仅接受 wheel。')
-        name,version,_,_=parse_wheel_filename(wheel.name)
-        digest=hashlib.sha256(wheel.read_bytes()).hexdigest()
-        records.append({'file':wheel.name,'sha256':digest,'name':str(name),'version':str(version)})
-        hashed.append(str(name)+'=='+str(version)+' --hash=sha256:'+digest)
-    lock=root/'dependencies.reproducible.txt'
-    lock.write_text('\n'.join(hashed)+'\n',encoding='utf-8')
-    _command(common+['install','--no-index','--no-deps','--require-hashes','--only-binary=:all:','--find-links',str(bundle),'-r',str(lock)],root,timeout)
-    _command(common+['check'],root,timeout)
-    (root/'dependencies.lock.txt').write_text(_command(common+['freeze','--all'],root,timeout),encoding='utf-8')
-    runtime=_command([str(python),'-I','-c','import json,sys,platform; print(json.dumps([list(sys.version_info[:3]),platform.system(),platform.machine()]))'],root,timeout)
-    metadata={'directory':bundle.name,'wheels':records,'runtime':json.loads(runtime.strip())}
-    (root/'dependency-bundle.json').write_text(json.dumps(metadata,indent=2),encoding='utf-8')
-    return hashlib.sha256(json.dumps(metadata,sort_keys=True).encode()).hexdigest()
-
+        if wheel.is_symlink() or wheel.suffix != '.whl':
+            raise PackageError('依赖归档仅接受 wheel。')
+        name, version, _, _ = parse_wheel_filename(wheel.name)
+        digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+        records.append({'file': wheel.name, 'sha256': digest, 'name': str(name), 'version': str(version)})
+        hashed.append(str(name) + '==' + str(version) + ' --hash=sha256:' + digest)
+    lock = root / 'dependencies.reproducible.txt'
+    lock.write_text('\n'.join(hashed) + '\n', encoding='utf-8')
+    _command(common + ['install', '--no-index', '--no-deps', '--require-hashes', '--only-binary=:all:', '--find-links', str(bundle), '-r', str(lock)], root, timeout)
+    _command(common + ['check'], root, timeout)
+    (root / 'dependencies.lock.txt').write_text(_command(common + ['freeze', '--all'], root, timeout), encoding='utf-8')
+    runtime = _command([str(python), '-I', '-c', 'import json,sys,platform; print(json.dumps([list(sys.version_info[:3]),platform.system(),platform.machine()]))'], root, timeout)
+    metadata = {'directory': bundle.name, 'wheels': records, 'runtime': json.loads(runtime.strip())}
+    (root / 'dependency-bundle.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
+    return hashlib.sha256(json.dumps(metadata, sort_keys=True).encode()).hexdigest()
 
 def _prepare_worker(pid, version, token):
     try:
         data = release(pid, version)
         if data.get('prepare_token') != token:
             return
+
         def stage(name):
-            if release(pid,version).get('prepare_token') != token:
-                raise PackageError('准备请求已过期，请刷新版本。',409)
-            data.update(prepare_stage=name,prepare_started_at=data.get('prepare_started_at') or business_now().isoformat(' '),stage_updated_at=business_now().isoformat(' '))
+            if release(pid, version).get('prepare_token') != token:
+                raise PackageError('准备请求已过期，请刷新版本。', 409)
+            data.update(prepare_stage=name, prepare_started_at=data.get('prepare_started_at') or business_now().isoformat(' '), stage_updated_at=business_now().isoformat(' '))
             _write_release(data)
         stage('校验文件')
         root = release_dir(pid, version)
         code = root / 'code'
         if _checksum(_manifest(code)) != data['checksum']:
             raise PackageError('暂存代码校验不一致，请重新上传。')
-        # A process interrupted by restart cannot overwrite a newer attempt.
         env = root / ('environment-' + token)
         timeout = max(30, min(int(os.environ.get('WFS_PACKAGE_PREPARE_SECONDS', '300')), 1800))
         stage('创建独立环境')
@@ -505,25 +459,22 @@ def _prepare_worker(pid, version, token):
             data['dependency_source'] = {key: source[key] for key in ('mode', 'index_url', 'revision')}
             _command([str(python), '-I', '-m', 'ensurepip', '--default-pip'], root, timeout)
             stage('从 Nexus 安装依赖' if source['mode'] == 'nexus' else '安装离线依赖')
-            data['dependency_bundle_sha256']=_install_requirements(python,code,root,data['requirements'],source,timeout)
-        # Marker is outside user code; it follows nested entry files as well.
+            data['dependency_bundle_sha256'] = _install_requirements(python, code, root, data['requirements'], source, timeout)
         from packaging.requirements import Requirement
         from packaging.utils import canonicalize_name
-        external_sdk=any(canonicalize_name(Requirement(line).name)=='workflow-scheduler-task-sdk' for line in data['requirements'])
+        external_sdk = any((canonicalize_name(Requirement(line).name) == 'workflow-scheduler-task-sdk' for line in data['requirements']))
         if external_sdk:
-            data['shared_sdk_package']=_command([str(python),'-I','-c',"import importlib.metadata as m; print(m.version('workflow-scheduler-task-sdk'))"],root,timeout).strip()
-            data['shared_sdk_sha256']=data.get('dependency_bundle_sha256','')
+            data['shared_sdk_package'] = _command([str(python), '-I', '-c', "import importlib.metadata as m; print(m.version('workflow-scheduler-task-sdk'))"], root, timeout).strip()
+            data['shared_sdk_sha256'] = data.get('dependency_bundle_sha256', '')
         else:
             from app.bootstrap.shared_sdk import freeze
-            data['shared_sdk_sha256']=freeze(root)
-        marker = {'task_release': version, 'package_sha256': data['checksum'], 'pid': pid,
-                  'shared_sdk_sha256':data['shared_sdk_sha256'],'shared_sdk_package':data.get('shared_sdk_package',''),
-                  'dependency_bundle_sha256':data.get('dependency_bundle_sha256','stdlib')}
+            data['shared_sdk_sha256'] = freeze(root)
+        marker = {'task_release': version, 'package_sha256': data['checksum'], 'pid': pid, 'shared_sdk_sha256': data['shared_sdk_sha256'], 'shared_sdk_package': data.get('shared_sdk_package', ''), 'dependency_bundle_sha256': data.get('dependency_bundle_sha256', 'stdlib')}
         (root / '.release.json').write_text(json.dumps(marker), encoding='utf-8')
         if os.name != 'nt':
             for path in code.rglob('*'):
-                path.chmod(0o555 if path.is_dir() else 0o444)
-            code.chmod(0o555)
+                path.chmod(365 if path.is_dir() else 292)
+            code.chmod(365)
         data.update(status='ready', prepare_stage='环境检查通过', message='语法与依赖环境检查通过；尚未执行业务代码。', python=env.name + '/' + ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))
         if release(pid, version).get('prepare_token') == token:
             _write_release(data)
@@ -542,9 +493,9 @@ def _prepare_worker(pid, version, token):
                 _preparing.pop((pid, version), None)
         _slots.release()
 
-
 def publish(pid, version, revision, actor, rollback=False, reason=''):
-    if not isinstance(reason,str) or len(reason)>500: raise PackageError('发布说明最多 500 字。')
+    if not isinstance(reason, str) or len(reason) > 500:
+        raise PackageError('发布说明最多 500 字。')
     from app.bootstrap.core import _configuration_lock, aps_start
     from app.bootstrap.schedule_config import load_schedule
     if not rollback:
@@ -552,43 +503,39 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
         validate_release(release(pid, version))
     from app.bootstrap.release_controls import enforce, recheck
     from app.bootstrap import admission
-    receipt = enforce(release(pid,version))
+    receipt = enforce(release(pid, version))
     with _configuration_lock, admission.lock:
         recheck(receipt)
-        record, data = task(pid), release(pid, version)
+        record, data = (task(pid), release(pid, version))
         if record['revision'] != revision or record.get('deleted_at') or record.get('pending'):
             raise PackageError('任务状态已变化，请刷新后重新发布。', 409)
         if data['status'] not in ('ready', 'applied'):
             raise PackageError('此版本还未通过环境检查。', 409)
-        if rollback and not data.get('published_at'):
+        if rollback and (not data.get('published_at')):
             raise PackageError('只能回滚到曾成功发布过的版本。', 409)
         if not rollback and data.get('base_version') != record.get('active_version'):
             raise PackageError('预览后当前版本发生变化，请重新上传以核对差异，或选择已发布版本回滚。', 409)
         if record.get('active_version') == version:
             return record
-        # Preserve scheduling. A missing configured entry must be addressed in
-        # configuration first, rather than silently changing it on publication.
         from app.bootstrap.task_loader import _record_maps
         config = _record_maps().get(pid)
         selected = (config or {}).get('main_file') or data['main_file']
         if selected not in {f['path'] for f in data['manifest'] if f['path'].endswith('.py')}:
             raise PackageError('任务包缺少当前调度配置使用的入口文件，请保留入口后重新上传。', 409)
         root = release_dir(pid, version)
-        if data.get('shared_sdk_sha256') and not data.get('shared_sdk_package'):
+        if data.get('shared_sdk_sha256') and (not data.get('shared_sdk_package')):
             from app.bootstrap.shared_sdk import verify
-            if not verify(root,data['shared_sdk_sha256']): raise PackageError('公共 SDK 快照校验失败。',409)
+            if not verify(root, data['shared_sdk_sha256']):
+                raise PackageError('公共 SDK 快照校验失败。', 409)
         if _checksum(_manifest(root / 'code')) != data['checksum'] or not (root / data['python']).is_file():
             raise PackageError('版本文件或环境校验失败，请重新准备或上传。', 409)
         previous = {**record}
         record['pending'] = {'previous': previous, 'version': version, 'actor': actor}
         record['active_version'] = version
-        record['legacy'] = False
         if data.get('git_source'):
             record['git_source'] = data['git_source']
             record.update(group_name=data['git_source']['group_name'], folder_name=data['git_source']['folder_name'])
         elif record.get('git_source'):
-            # A historical pre-GitLab rollback keeps the repository association,
-            # but cannot claim the newer commit's content is still deployed.
             record['git_source'] = {**record['git_source'], 'sha': '', 'fingerprint': ''}
         record = _write_task(record, expected=revision)
         try:
@@ -596,18 +543,17 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
             record.pop('pending', None)
             record['last_published_at'] = str(business_now())
             record['last_published_by'] = actor
-            data.update(status='applied', message='调度器已确认此版本。', published_at=record['last_published_at'],published_by=actor,publish_reason=reason.strip())
+            data.update(status='applied', message='调度器已确认此版本。', published_at=record['last_published_at'], published_by=actor, publish_reason=reason.strip())
             try:
                 data['schedule_snapshot'] = load_schedule(pid)
             except ValueError:
                 data['schedule_snapshot'] = None
-            # Keep the durable intent until both result records have been saved.
             _write_release(data)
             record = _write_task(record, expected=record['revision'])
         except Exception as exc:
             _write_task(previous, expected=record['revision'])
             try:
-                if previous.get('active_version') or previous.get('legacy'):
+                if previous.get('active_version'):
                     aps_start(task_pid=pid, action='refresh')
                 else:
                     from app.extensions import scheduler
@@ -619,7 +565,6 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
             _write_release(data)
             raise PackageError('发布失败，上一版本仍保留：' + str(exc), 409) from exc
         return record
-
 
 def recycle(pid, revision, actor, restore=False):
     from app.bootstrap.core import _configuration_lock, aps_start
@@ -642,11 +587,9 @@ def recycle(pid, revision, actor, restore=False):
         else:
             record.update(deleted_at=None, restored_by=actor)
         record = _write_task(record, expected=revision)
-        if restore and (record.get('active_version') or record.get('legacy')):
-            # Disabling before tombstoning means restoring cannot resume a job.
+        if restore and (record.get('active_version')):
             aps_start(task_pid=pid, action='refresh')
         return record
-
 
 def recover():
     """Run only on scheduler bootstrap, never from API reads."""
@@ -663,26 +606,22 @@ def recover():
             data = json.loads(row[0])
             with _prepare_lock:
                 active = (pid, data['version']) in _preparing
-            if data['status'] == 'preparing' and not active:
-                # Re-read after checking the worker: it may just have completed.
+            if data['status'] == 'preparing' and (not active):
                 data = release(pid, data['version'])
                 if data['status'] == 'preparing':
                     data.update(status='failed', message='服务重启中断了依赖准备，可重新检查。')
                     _write_release(data)
 
-
 def discovery(records_by_pid):
     from app.bootstrap.task_loader import load_task_spec
     managed = registry()
-    active = [(pid, r['active_version']) for pid, r in managed.items() if r.get('active_version') and not r.get('deleted_at')]
+    active = [(pid, r['active_version']) for pid, r in managed.items() if r.get('active_version') and (not r.get('deleted_at'))]
     releases = {}
-    # Batch the registry lookup; discovery must not open a connection per task.
     for offset in range(0, len(active), 100):
-        batch = active[offset:offset+100]
-        where = ' OR '.join('(pid=? AND version=?)' for _ in batch)
+        batch = active[offset:offset + 100]
+        where = ' OR '.join(('(pid=? AND version=?)' for _ in batch))
         with GaussDB() as db:
-            rows = db.execute_query_sql('SELECT pid,payload FROM wfs_task_releases WHERE ' + where,
-                                        params=tuple(value for pair in batch for value in pair))
+            rows = db.execute_query_sql('SELECT pid,payload FROM wfs_task_releases WHERE ' + where, params=tuple((value for pair in batch for value in pair)))
         releases.update({row[0]: json.loads(row[1]) for row in rows})
     result = []
     for pid, record in managed.items():
@@ -694,9 +633,7 @@ def discovery(records_by_pid):
         root = release_dir(pid, data['version'])
         code = root / 'code'
         spec = load_task_spec(record['group_name'], record['folder_name'], code, None, pid_override=pid)
-        spec.update(pid=pid, main_file=data['main_file'], task_name=record['task_name'], managed=True,
-                    task_release=data['version'], package_sha256=data['checksum'],
-                    main_file_options=[f['path'] for f in data['manifest'] if f['path'].endswith('.py')])
+        spec.update(pid=pid, main_file=data['main_file'], task_name=record['task_name'], managed=True, task_release=data['version'], package_sha256=data['checksum'], main_file_options=[f['path'] for f in data['manifest'] if f['path'].endswith('.py')])
         from app.bootstrap.task_loader import _apply_record, resolve_main_file
         try:
             _apply_record(spec, records_by_pid.get(pid))
@@ -708,12 +645,12 @@ def discovery(records_by_pid):
         result.append(spec)
     return result
 
-
 def overview(pid=None):
     from app.bootstrap.task_loader import discover_task_specs
     from app.bootstrap.task_loader import _record_maps
     managed = registry()
     configurations = _record_maps()
+
     def display(record):
         name = (configurations.get(record['pid']) or {}).get('task_name')
         return {**record, 'task_name': name or record['task_name']}
@@ -722,13 +659,11 @@ def overview(pid=None):
         with GaussDB() as db:
             rows = db.execute_query_sql('SELECT payload FROM wfs_task_releases WHERE pid=? ORDER BY created_at DESC LIMIT 50', params=(pid,))
         versions = [json.loads(row[0]) for row in rows]
-        # File manifests are loaded only for the selected release.
         for data in versions:
             data['file_count'] = len(data.pop('manifest', []))
         return {'task': record, 'versions': versions, 'limits': limits()}
     summaries = [display(record) for record in managed.values()]
     return {'tasks': summaries, 'limits': limits()}
-
 
 def preview(pid, version, filename=None):
     data = release(pid, version)
@@ -736,29 +671,20 @@ def preview(pid, version, filename=None):
     base = release(pid, record['active_version']) if record.get('active_version') else None
     old = {f['path']: f for f in base['manifest']} if base else {}
     new = {f['path']: f for f in data['manifest']}
-    changes = [{'path': name, 'kind': 'added' if name not in old else 'deleted' if name not in new else 'modified'}
-               for name in sorted(old.keys() | new.keys()) if old.get(name) != new.get(name)]
-    result = {'release': data, 'changes': changes, 'current_revision': record['revision'],
-              'against_version': record.get('active_version')}
+    changes = [{'path': name, 'kind': 'added' if name not in old else 'deleted' if name not in new else 'modified'} for name in sorted(old.keys() | new.keys()) if old.get(name) != new.get(name)]
+    result = {'release': data, 'changes': changes, 'current_revision': record['revision'], 'against_version': record.get('active_version')}
     from app.bootstrap.global_vars import runnings
     from app.bootstrap.task_loader import _record_maps
     config = _record_maps().get(pid) or {}
     selected = config.get('main_file') or data['main_file']
-    result['preflight'] = dict(active_instances=runnings.count(pid), entry=selected,
-        entry_present=selected in new, entry_changed=bool(base and base['main_file'] != data['main_file']),
-        shared_sdk_changed=bool(base and base.get('shared_sdk_sha256')!=data.get('shared_sdk_sha256')),
-        shared_sdk_current=(base or {}).get('shared_sdk_sha256',''),shared_sdk_candidate=data.get('shared_sdk_sha256',''),
-        dependencies_changed=any(c['path'] in ('requirements.txt','requirements.lock','pyproject.toml') or c['path'].startswith('wheels/') for c in changes),
-        environment_ready=data['status'] in ('ready','applied'),
-        schedule_enabled=str(config.get('enabled','')).lower() in ('1','true','yes','on'),
-        current_version=record.get('active_version'), candidate_version=version,
-        business_verified=False)
+    result['preflight'] = dict(active_instances=runnings.count(pid), entry=selected, entry_present=selected in new, entry_changed=bool(base and base['main_file'] != data['main_file']), shared_sdk_changed=bool(base and base.get('shared_sdk_sha256') != data.get('shared_sdk_sha256')), shared_sdk_current=(base or {}).get('shared_sdk_sha256', ''), shared_sdk_candidate=data.get('shared_sdk_sha256', ''), dependencies_changed=any((c['path'] in ('requirements.txt', 'requirements.lock', 'pyproject.toml') or c['path'].startswith('wheels/') for c in changes)), environment_ready=data['status'] in ('ready', 'applied'), schedule_enabled=str(config.get('enabled', '')).lower() in ('1', 'true', 'yes', 'on'), current_version=record.get('active_version'), candidate_version=version, business_verified=False)
     if filename is None:
         from app.bootstrap.release_controls import preview as gates
-        result['gates']=gates(data)
+        result['gates'] = gates(data)
     if filename is not None:
         if filename not in old and filename not in new:
             raise PackageError('文件不在版本清单中。', 404)
+
         def contents(item, files):
             if filename not in files or item is None:
                 return ''
@@ -767,20 +693,19 @@ def preview(pid, version, filename=None):
             path = release_dir(pid, item['version']) / 'code' / filename
             try:
                 data = path.read_bytes()
-                if b'\0' in data:
+                if b'\x00' in data:
                     raise UnicodeError()
                 return data.decode('utf-8-sig')
             except UnicodeError:
                 raise PackageError('非 UTF-8 文本，仅提供大小和校验值。')
         try:
-            before, after = contents(base, old), contents(data, new)
+            before, after = (contents(base, old), contents(data, new))
             result['diff'] = ''.join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile='当前/' + filename, tofile='预览/' + filename))[:128000]
             result['content'] = after[:128000]
         except PackageError as exc:
             result['diff'] = str(exc)
             result['content'] = ''
     return result
-
 
 def download(pid, version):
     data = release(pid, version)

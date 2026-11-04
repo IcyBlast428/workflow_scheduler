@@ -24,16 +24,16 @@ def main():
     with admission.store() as db: db.execute('INSERT INTO settings VALUES(?,?)',(key,'0'))
     def increment(_):
         with admission.store() as db:
-            db.execute('BEGIN IMMEDIATE')
+            db.execute('BEGIN')
             value=int(db.execute('SELECT payload FROM settings WHERE key=?',(key,)).fetchone()[0])
             time.sleep(.1)
-            db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,str(value+1)))
+            db.replace('settings',('key','payload'),(key,str(value+1)))
     try:
         with ThreadPoolExecutor(max_workers=2) as executor: list(executor.map(increment,range(2)))
         assert admission.policy(key,None)==2
         try:
             with admission.store() as db:
-                db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,'99'))
+                db.replace('settings',('key','payload'),(key,'99'))
                 raise RuntimeError('rollback probe')
         except RuntimeError: pass
         assert admission.policy(key,None)==2
@@ -42,7 +42,7 @@ def main():
     print('REAL_POSTGRES_LOCK_AND_ROLLBACK_OK',flush=True)
     import os
     previous=connection_settings.profiles().get('pg_local',{})
-    profile=connection_settings.validate(dict(id='pg_local',dialect='postgresql',host='127.0.0.1',port=15432,
+    profile=connection_settings.validate(dict(id='pg_local',dialect='postgresql',host='127.0.0.1',port=15433,
         database='wfstest',user='wfstest',password=os.environ['WFS_DB_PASSWORD'],tls='disabled',revision=previous.get('revision',0)))
     connection_settings.save(profile)
     assert connection_settings.business_profile('pg_local')['password']==os.environ['WFS_DB_PASSWORD']
@@ -62,19 +62,19 @@ def main():
     with patch.object(auxiliary_store,'gauss_store',side_effect=RuntimeError('Simulated connection outage')):
         journal.write(directory,record,{'success'})
         assert journal.read(directory,run)['status']=='success'
-    journal.import_legacy(directory,{'success'},100)
+    journal.recover_pending(directory,{'success'},100)
     assert not (directory/(run+'.json')).exists()
     assert journal.read(directory,run)['status']=='success'
     with journal.connection(directory) as db: db.execute('DELETE FROM journal WHERE run_id=?',(run,))
     print('RECOVERY_SPOOL_TO_REAL_POSTGRES_OK',flush=True)
-    from scripts.migrate_legacy_tasks import migrate_task
+    from scripts.test_database import publish_fixture
     from app.bootstrap import task_packages as packages
     from app.bootstrap.schedule_config import save_schedule
     examples=[('pg_output_demo','文件输出示例','file_output','main.py'),
               ('pg_nested_demo','多层目录示例','nested_report','report_job/main.py')]
     for pid,name,folder,entry in examples:
         if packages.registry().get(pid,{}).get('active_version'): continue
-        migrate_task(dict(pid=pid,group_name='PostgreSQL验收',folder_name=folder,task_name=name,
+        publish_fixture(dict(pid=pid,group_name='PostgreSQL验收',folder_name=folder,task_name=name,
                           task_dir=ROOT/'examples/tasks'/folder,main_file=entry),'local-postgres-acceptance')
         save_schedule(pid,dict(schedule_type='every_hour',main_file=entry,enabled=False,task_name=name,max_instances=1,timeout_seconds=30))
         print('DEMO_PUBLISHED',pid,flush=True)

@@ -1,7 +1,4 @@
-"""One business time basis, including legacy timestamp-without-zone columns.
-
-Existing timestamps retain their meaning; no historical data is rewritten.
-"""
+"""Asia/Shanghai business time for the platform timestamp-without-zone columns."""
 import datetime as dt
 import os
 import time
@@ -20,7 +17,7 @@ def business_now():
 
 
 def business_time(value):
-    """Aware instants become business wall time; legacy naive values stay intact."""
+    """Aware instants become business wall time; business wall times stay intact."""
     if isinstance(value, str):
         value = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
     return value.astimezone(BUSINESS_TZ).replace(tzinfo=None) if value.tzinfo else value

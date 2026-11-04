@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import uuid
 from unittest.mock import patch
-import test_local_integration  # Isolated SQLite fixture, never the local service.
+import test_local_integration  # Isolated real database fixture, never the local service.
 from app.bootstrap.timebase import business_now, business_time, instant_iso
 from app.api.task.views import _build_task_log_filters
 from app.api.operations import _business_rows

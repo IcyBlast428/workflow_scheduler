@@ -1,141 +1,111 @@
 # -*- coding: utf-8 -*-
 """项目本体数据库连接工具。
 
-平台支持 MySQL/PolarDB、GaussDB/PostgreSQL 及本地 SQLite。
+平台仅使用 GaussDB/DWS；本机协议验收显式使用 PostgreSQL。
 当前采用“短生命周期连接 + ODBC 驱动层复用”的模式：每次业务操作打开连接，
 操作结束关闭连接，避免在 Flask/Gunicorn 多线程环境里共享全局 connection。
 """
 
 import os
 import base64
-import sqlite3
-import datetime
-import threading
 import re
 import time
 from functools import wraps
-from pathlib import Path
+
 try:
     import pyodbc
 except ImportError:
     pyodbc = None
 from configobj import ConfigObj
-from app.common.pyDes import do_decrypt as _p
 from app.common.nacos import Nacos
 from app.bootstrap.helpers import get_runtime_env
 from app.bootstrap.global_vars import CONFIG_DIR
 
 
-DEFAULT_DB_ID = os.environ.get('WFS_DB_ID', 'sysimemedb_wfs')
-GAUSS_DRIVER = os.environ.get('WFS_DB_DRIVER', 'DWS')
-sqlite3.register_adapter(datetime.datetime, lambda value: value.isoformat(' '))
-_initialized_paths = set()
-_initialize_lock = threading.Lock()
+DEFAULT_DB_ID = os.environ.get("WFS_DB_ID", "wfsscheduler_wfs")
+GAUSS_DRIVER = os.environ.get("WFS_DB_DRIVER", "DWS")
 
 
 def measured(name):
     def decorate(function):
         @wraps(function)
-        def wrapper(*args,**kwargs):
-            started=time.perf_counter()
+        def wrapper(*args, **kwargs):
+            started = time.perf_counter()
             try:
-                return function(*args,**kwargs)
+                return function(*args, **kwargs)
             finally:
                 from app.bootstrap.runtime_metrics import record
-                record(name,1000*(time.perf_counter()-started))
+
+                record(name, 1000 * (time.perf_counter() - started))
+
         return wrapper
+
     return decorate
 
 
 def qmark_parameters(sql):
-    # PyMySQL and psycopg use %-style parameters. Escape literal percents and replace
+    # The native PostgreSQL test driver uses %-style parameters. Escape percents and replace
     # question-mark parameters only outside literals/comments/identifiers.
-    result, quote, index = [], '', 0
+    result, quote, index = [], "", 0
     while index < len(sql):
         char = sql[index]
         if quote:
-            result.append('%%' if char == '%' else char)
-            if char == '\\' and index + 1 < len(sql):
+            result.append("%%" if char == "%" else char)
+            if char == "\\" and index + 1 < len(sql):
                 index += 1
-                result.append('%%' if sql[index] == '%' else sql[index])
+                result.append("%%" if sql[index] == "%" else sql[index])
             elif char == quote:
                 if index + 1 < len(sql) and sql[index + 1] == quote:
                     result.append(quote)
                     index += 1
                 else:
-                    quote = ''
+                    quote = ""
         elif char in "'\"`":
             quote = char
             result.append(char)
-        elif sql.startswith('--', index) or char == '#' or sql.startswith('/*', index):
-            end = sql.find('*/', index + 2) + 2 if char == '/' else sql.find('\n', index)
+        elif sql.startswith("--", index) or char == "#" or sql.startswith("/*", index):
+            end = (
+                sql.find("*/", index + 2) + 2 if char == "/" else sql.find("\n", index)
+            )
             if end < index + 1:
                 end = len(sql)
-            result.append(sql[index:end].replace('%', '%%'))
+            result.append(sql[index:end].replace("%", "%%"))
             index = end - 1
         else:
-            result.append('%s' if char == '?' else '%%' if char == '%' else char)
+            result.append("%s" if char == "?" else "%%" if char == "%" else char)
         index += 1
-    return ''.join(result)
+    return "".join(result)
 
 
 def _split_db_id(db_id):
     """db_id 约定为 <database>_<schema>，例如 sysimemedb_wfs。"""
-    parts = str(db_id or DEFAULT_DB_ID).split('_', 1)
+    parts = str(db_id or DEFAULT_DB_ID).split("_", 1)
     if len(parts) != 2 or not parts[0] or not parts[1]:
-        raise ValueError('GaussDB db_id must use <database>_<schema>, for example sysimemedb_wfs')
-    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', parts[1]):
-        raise ValueError('invalid database schema identifier')
+        raise ValueError(
+            "GaussDB db_id must use <database>_<schema>, for example sysimemedb_wfs"
+        )
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", parts[1]):
+        raise ValueError("invalid database schema identifier")
     return parts[0], parts[1]
 
 
 class GaussDB:
-    """WFS 平台本体使用的高斯数据库封装。"""
+    """Single platform database; each handle owns its connection and transaction."""
 
     @property
     def dialect(self):
-        if getattr(self, '_mysql', False):
-            return 'MySQL'
-        if self._local_sqlite:
-            return 'SQLite'
-        if os.environ.get('WFS_DB_DIALECT') == 'postgresql' or (os.environ.get('WFS_POSTGRES_TEST') == 'true' and GAUSS_DRIVER.startswith('PostgreSQL')):
-            return 'PostgreSQL'
-        return 'GaussDB/DWS'
+        return (
+            "PostgreSQL"
+            if os.environ.get("WFS_POSTGRES_TEST") == "true"
+            else "GaussDB/DWS"
+        )
 
-    def __init__(self, db_id=DEFAULT_DB_ID, *, managed=True):
-        from app.bootstrap.connection_settings import active_platform, connect_mysql
-        profile = active_platform() if managed else None
-        self._mysql = bool(profile)
+    def __init__(self, db_id=None):
         self._in_transaction = False
-        if profile:
-            self._local_sqlite = False
-            self.conn = connect_mysql(profile)
-            self.cursor = self.conn.cursor()
-            try:
-                self.cursor.execute("SET time_zone = '+08:00'")
-                self.cursor.execute('SET SESSION innodb_lock_wait_timeout = 10')
-            except Exception:
-                self.close()
-                raise
-            return
-        self._local_sqlite = bool(os.environ.get('WFS_LOCAL_DB_PATH'))
-        if self._local_sqlite:
-            db_path = Path(os.environ['WFS_LOCAL_DB_PATH']).expanduser().resolve()
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(str(db_path), timeout=30, isolation_level=None)
-            self.conn.execute('PRAGMA busy_timeout=30000')
-            with _initialize_lock:
-                if str(db_path) not in _initialized_paths:
-                    self.conn.execute('PRAGMA journal_mode=WAL')
-                    self.conn.executescript(Path(__file__).with_name('sqlite_schema.sql').read_text(encoding='utf-8'))
-                    if 'summary_version' not in [row[1] for row in self.conn.execute('PRAGMA table_info(wfs_run_history)')]:
-                        self.conn.execute('ALTER TABLE wfs_run_history ADD COLUMN summary_version INTEGER NOT NULL DEFAULT 0')
-                    self.conn.execute('CREATE INDEX IF NOT EXISTS idx_wfs_summary_pending ON wfs_run_history(summary_version,end_time,id)')
-                    _initialized_paths.add(str(db_path))
-            self.cursor = self.conn.cursor()
-            return
         self.current_env = get_runtime_env()
-        db_name, schema = _split_db_id(db_id)
+        db_name, schema = _split_db_id(
+            db_id or os.environ.get("WFS_DB_ID", DEFAULT_DB_ID)
+        )
         self.__conf_dic = self.__get_db_config(db_name, schema)
         self.__host = self.__conf_dic["host"]
         self.__port = self.__conf_dic["port"]
@@ -143,45 +113,70 @@ class GaussDB:
         self.__schema = self.__conf_dic["schema"]
         self.__user = self.__conf_dic["user"]
         self.__password = self.__conf_dic["password"]
-        self.__driver = GAUSS_DRIVER
+        self.__driver = os.environ.get("WFS_DB_DRIVER", GAUSS_DRIVER)
 
-        if self.__password and self.current_env == 'production':
+        if self.__password and self.current_env == "production":
             self.__password = base64.b64decode(self.__password).decode("utf-8")
 
-        if self.__driver == 'psycopg' and os.environ.get('WFS_POSTGRES_TEST') == 'true':
-            if self.__db != 'wfstest' or self.__host not in ('127.0.0.1','localhost'):
-                raise RuntimeError('Native PostgreSQL acceptance is restricted to localhost/wfstest')
+        if self.__driver == "psycopg" and os.environ.get("WFS_POSTGRES_TEST") == "true":
+            if self.__db != "wfstest" or self.__host not in ("127.0.0.1", "localhost"):
+                raise RuntimeError(
+                    "Native PostgreSQL acceptance is restricted to localhost/wfstest"
+                )
             from app.bootstrap.postgres_native import Connection
-            self.conn = Connection(host=self.__host, port=int(self.__port), dbname=self.__db,
-                                   user=self.__user, password=self.__password)
+
+            self.conn = Connection(
+                host=self.__host,
+                port=int(self.__port),
+                dbname=self.__db,
+                user=self.__user,
+                password=self.__password,
+            )
             self.cursor = self.conn.cursor()
             try:
-                self.cursor.execute('SET statement_timeout = 10000')
+                self.cursor.execute("SET statement_timeout = 10000")
                 self.cursor.execute(f"SET search_path TO {schema}")
             except Exception:
                 self.close()
                 raise
             return
         if pyodbc is None:
-            raise RuntimeError("pyodbc is not installed; please run pip install -r requirements.txt and configure the DWS ODBC driver")
+            raise RuntimeError(
+                "pyodbc is not installed; please run pip install -r requirements.txt and configure the DWS ODBC driver"
+            )
 
         def odbc_value(value):
             text = str(value)
-            return '{' + text.replace('}', '}}') + '}' if any(char in text for char in ';{}') else text
-        server_key = 'SERVERNAME' if self.__driver.startswith('PostgreSQL') else 'SERVER'
-        conn_str = ';'.join(f'{key}={odbc_value(value)}' for key,value in (
-            ('DRIVER', self.__driver), (server_key, self.__host), ('DATABASE', self.__db),
-            ('UID', self.__user), ('PWD', self.__password), ('PORT', self.__port)))
-        timeout_seconds = int(os.environ.get('WFS_DB_QUERY_TIMEOUT_SECONDS', '10'))
+            return (
+                "{" + text.replace("}", "}}") + "}"
+                if any(char in text for char in ";{}")
+                else text
+            )
+
+        server_key = (
+            "SERVERNAME" if self.__driver.startswith("PostgreSQL") else "SERVER"
+        )
+        conn_str = ";".join(
+            f"{key}={odbc_value(value)}"
+            for key, value in (
+                ("DRIVER", self.__driver),
+                (server_key, self.__host),
+                ("DATABASE", self.__db),
+                ("UID", self.__user),
+                ("PWD", self.__password),
+                ("PORT", self.__port),
+            )
+        )
+        timeout_seconds = int(os.environ.get("WFS_DB_QUERY_TIMEOUT_SECONDS", "10"))
         if not 1 <= timeout_seconds <= 3600:
-            raise ValueError('WFS_DB_QUERY_TIMEOUT_SECONDS must be between 1 and 3600')
+            raise ValueError("WFS_DB_QUERY_TIMEOUT_SECONDS must be between 1 and 3600")
         # 高斯 DWS ODBC 驱动自带连接复用能力，Python 层不维护跨线程长连接。
         self.conn = pyodbc.connect(conn_str, autocommit=True, timeout=10)
         self.conn.autocommit = True
         self.cursor = self.conn.cursor()
         # Server timeout also works when the ODBC driver rejects timeout attributes.
         try:
-            self.cursor.execute(f'SET statement_timeout = {timeout_seconds * 1000}')
+            self.cursor.execute(f"SET statement_timeout = {timeout_seconds * 1000}")
             self.cursor.execute(f"set schema '{self.__schema}';")
         except Exception:
             self.close()
@@ -190,139 +185,91 @@ class GaussDB:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, traceback):
+    def __exit__(self, *args):
         self.close()
-    
-    # 当前默认 autocommit=True；预留给需要显式事务的场景。
+
     def set_commit(self):
         self.conn.commit()
         self._in_transaction = False
-        if self._mysql:
-            return
-        if not self._local_sqlite:
-            self.conn.autocommit = True
-    
-    # 当前默认 autocommit=True；预留给需要显式事务的场景。
+        self.conn.autocommit = True
+
     def set_rollback(self):
         self.conn.rollback()
         self._in_transaction = False
-        if self._mysql:
-            return
-        if not self._local_sqlite:
-            self.conn.autocommit = True
+        self.conn.autocommit = True
 
     def begin_transaction(self):
-        if self._mysql:
-            if self._in_transaction:
-                raise RuntimeError('nested platform transactions are not supported')
-            self.conn.begin()
-            self._in_transaction = True
-            # A transaction-owned InnoDB row replaces PostgreSQL table locks.
-            # Acquire it before any other locks, including history row locks.
-            self.cursor.execute('SELECT id FROM wfs_platform_lock WHERE id=1 FOR UPDATE')
-            if not self.cursor.fetchone():
-                raise RuntimeError('missing platform transaction lock; initialize the MySQL schema')
-            return
-        if self._local_sqlite:
-            self.conn.execute('BEGIN IMMEDIATE')
-        else:
-            self.conn.autocommit = False
-
-    def _sql(self, sql):
-        if self._mysql:
-            if sql.strip().upper().startswith('LOCK TABLE '):
-                if not self._in_transaction:
-                    raise RuntimeError('platform lock requires an explicit transaction')
-                return 'DO 0'
-            sql = sql.replace('extract(epoch from (end_time - start_time))::bigint',
-                              'TIMESTAMPDIFF(SECOND,start_time,end_time)')
-            sql = sql.replace("date_trunc('hour',end_time)", "DATE_FORMAT(end_time,'%Y-%m-%d %H:00:00')")
-            sql = sql.replace('CAST(EXTRACT(HOUR FROM end_time) AS INTEGER)', 'HOUR(end_time)').replace(
-                'CAST(EXTRACT(MINUTE FROM end_time) AS INTEGER)', 'MINUTE(end_time)')
-            return sql
-        if not self._local_sqlite:
-            return sql
-        return sql.replace('NOW()', 'CURRENT_TIMESTAMP').replace(
-            'extract(epoch from (end_time - start_time))::bigint',
-            'CAST((julianday(end_time) - julianday(start_time)) * 86400 AS INTEGER)',
-        )
+        if self._in_transaction:
+            raise RuntimeError("Nested platform transactions are not supported")
+        self.conn.autocommit = False
+        self._in_transaction = True
 
     def get_connection(self):
         return self.conn
-    
+
     def get_cursor(self):
         return self.cursor
-    
-    def close(self):
-        if self._mysql:
-            try:
-                if self._in_transaction:
-                    self.conn.rollback()
-            finally:
-                self.cursor.close()
-                self.conn.close()
-            return
-        if not self._local_sqlite:
-            try:
-                if not self.conn.autocommit:
-                    self.conn.rollback()
-                    self.conn.autocommit = True
-            except Exception:
-                pass
-        try:
-            self.cursor.close()
-        except Exception:
-            pass
-        try:
-            self.conn.close()
-        except Exception:
-            pass
 
-    @measured('database:query')
-    def execute_query_sql(self, sql, return_json = False, params=None):
+    def close(self):
+        try:
+            if not self.conn.autocommit:
+                self.conn.rollback()
+        finally:
+            try:
+                self.cursor.close()
+            finally:
+                self.conn.close()
+
+    @measured("database:query")
+    def execute_query_sql(self, sql, return_json=False, params=None):
         """执行查询；return_json=True 时转换为前端/API 更容易消费的字典列表。"""
         if params is None:
-            self.cursor.execute(self._sql(sql))
+            self.cursor.execute(sql)
         else:
-            self.cursor.execute(self._parameters(self._sql(sql)), params)
+            self.cursor.execute(sql, params)
         result = self.cursor.fetchall()
         if return_json:
             columns = [i[0] for i in self.cursor.description]
             return [dict(zip(columns, row)) for row in result]
         return result
-    
-    @measured('database:write')
-    def execute_sql(self, sql, params = None):
+
+    @measured("database:write")
+    def execute_sql(self, sql, params=None):
         try:
             if params is None:
-                self.cursor.execute(self._sql(sql))
+                self.cursor.execute(sql)
             else:
-                self.cursor.execute(self._parameters(self._sql(sql)), params)
+                self.cursor.execute(sql, params)
         except Exception as e:
             raise Exception(e)
 
-    def _parameters(self, sql):
-        if not self._mysql:
-            return sql
-        return qmark_parameters(sql)
-
     def __get_db_config(self, db_name, schema):
         conf_dic = dict()
-        if self.current_env == 'production':
+        if self.current_env == "production":
             # 生产环境从 Nacos 读取，命名保持 gauss.<database>.<schema>.json。
-            conf_dic = Nacos().get_nacos_configs(data_id=f"gauss.{db_name}.{schema}.json", group="gauss")
+            conf_dic = Nacos().get_nacos_configs(
+                data_id=f"gauss.{db_name}.{schema}.json", group="gauss"
+            )
             if not conf_dic:
-                raise RuntimeError("missing GaussDB nacos config: gauss.{}.{}.json".format(db_name, schema))
+                raise RuntimeError(
+                    "missing GaussDB nacos config: gauss.{}.{}.json".format(
+                        db_name, schema
+                    )
+                )
         else:
-            # 本地环境优先使用历史配置 [gauss_immpdb]，也支持更明确的 [gauss_<database>_<schema>]。
-            ini = os.environ.get('WFS_DB_CONFIG_FILE') or os.path.join(CONFIG_DIR, 'database', 'development.ini')
-            config_base = ConfigObj(ini, encoding='utf-8')
-            config = config_base.get("gauss_immpdb") or config_base.get("gauss_{}_{}".format(db_name, schema))
+            # 本机验收配置使用明确的数据库与 schema 名称。
+            ini = os.environ.get("WFS_DB_CONFIG_FILE") or os.path.join(
+                CONFIG_DIR, "database", "development.ini"
+            )
+            config_base = ConfigObj(ini, encoding="utf-8")
+            config = config_base.get("gauss_{}_{}".format(db_name, schema))
             if not config:
-                raise RuntimeError("missing database config section [gauss_immpdb] in {}".format(ini))
+                raise RuntimeError(
+                    "missing configured GaussDB section in {}".format(ini)
+                )
             conf_dic["user"] = config.get("user") or ""
-            password = config.get('password')
-            conf_dic["password"] = os.environ.get('WFS_DB_PASSWORD') or (_p(password) if password else '')
+            password = config.get("password")
+            conf_dic["password"] = os.environ.get("WFS_DB_PASSWORD") or (password or "")
             conf_dic["host"] = config.get("host") or ""
             conf_dic["port"] = config.get("port") or ""
             conf_dic["db"] = db_name
@@ -331,5 +278,4 @@ class GaussDB:
         return conf_dic
 
 
-# 语义化别名：平台本体库建议在新代码里写 WfsDB，旧代码继续使用 GaussDB。
 WfsDB = GaussDB

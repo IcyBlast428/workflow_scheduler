@@ -1,5 +1,5 @@
 # -*- coding=utf-8 -*-
-# 全局变量 公共方法 公共工具类 如果需要负载均衡此处代码需要的变量可以存放到redis中
+# Shared process state; the Scheduler runs as a single instance.
 import os
 import threading
 import uuid
@@ -14,26 +14,6 @@ CONFIG_DIR = pathlib.Path(os.environ.get('WFS_TASK_CONFIG_DIR',str(BASE_DIR/"con
 ROOT_LOG_DIR = os.environ.get('WFS_LOG_DIR', str(BASE_DIR.parent / 'logs'))
 
 DATA_DIR = os.environ.get('WFS_DATA_DIR', str(BASE_DIR.parent / 'data'))
-
-
-# 加密
-def encrypt(obj):
-    '''
-    :param obj: ex:{name:wang,age:18,...} 加密对象
-    :return: 返回加密字符串token
-    '''
-    token = ''
-    return token
-
-
-# 解密
-def decrypt(token):
-    '''
-    :param token: 解密字符串token
-    :return: 返回解密对象
-    '''
-    userobj = {}
-    return userobj
 
 
 # 用于数据库id或唯一编码
