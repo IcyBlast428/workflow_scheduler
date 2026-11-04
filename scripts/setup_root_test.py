@@ -27,6 +27,7 @@ def initialize(project, password):
         'WFS_ADMIN_PASSWORD_HASH': generate_password_hash(password),
         'WFS_DB_ID': 'wfsscheduler_wfs',
         'WFS_DB_DRIVER': 'DWS',
+        'WFS_STATE_BACKEND': 'gauss',
         'WFS_NACOS_URL': 'CHANGE_ME',
         'WFS_NACOS_USERNAME': 'CHANGE_ME',
         'WFS_NACOS_PASSWORD': 'CHANGE_ME',
@@ -80,6 +81,8 @@ def main():
         return
     from service_config import read_environment
     values, _ = read_environment(config)
+    if values.get('WFS_STATE_BACKEND') != 'gauss':
+        parser.error('Set WFS_STATE_BACKEND=gauss for this fresh-install profile')
     if values.get('WFS_LOCAL_DB_PATH') or values.get('WFS_POSTGRES_TEST') or values.get('WFS_DB_DIALECT'):
         parser.error('This profile requires GaussDB/DWS, not SQLite or a PostgreSQL test override')
     for key in ('WFS_DB_ID','WFS_NACOS_URL','WFS_NACOS_USERNAME','WFS_NACOS_PASSWORD'):

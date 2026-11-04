@@ -70,9 +70,9 @@ class GaussDB:
             return 'PostgreSQL'
         return 'GaussDB/DWS'
 
-    def __init__(self, db_id=DEFAULT_DB_ID):
+    def __init__(self, db_id=DEFAULT_DB_ID, *, managed=True):
         from app.bootstrap.connection_settings import active_platform, connect_mysql
-        profile = active_platform()
+        profile = active_platform() if managed else None
         self._mysql = bool(profile)
         self._in_transaction = False
         if profile:

@@ -10,12 +10,12 @@
 
 1. **全新平台库**：DBA 先建立数据库与账号，再连接该数据库核对并执行根目录 `ddl.sql`。该文件针对 GaussDB Kernel 503.1.0.SPC2000c，包含 `CREATE SCHEMA wfs`、设置 search_path 和基线表，不是 MySQL DDL，也不是跨型号通用 SQL。schema 已存在时先核对，不盲目重跑 CREATE SCHEMA/CREATE TABLE。
 2. 在正确的库/schema 下执行 `scripts/migrate.py`，按编号顺序应用 `migrations/001_*.sql` 起的所有迁移；迁移生成/记录校验和，不修改已应用的迁移文件。完整命令见本目录 README 第 3 步。
-3. `setup_root_test.py --install` 只检查连接与下面 20 张表，不替 DBA 自动建库或执行初始 DDL。检查成功后才启动。
+3. `setup_root_test.py --install` 只检查连接与下面 32 张表，不替 DBA 自动建库或执行初始 DDL。检查成功后才启动。
 4. **已有平台库升级**：停服、配套备份，核对基线后仅执行未应用迁移。不要重新执行 ddl.sql，不要清空历史表。
 
 运行期账号需要平台表 SELECT/INSERT/UPDATE/DELETE，迁移期另需建表、建索引、修改表等权限；DDL 权限是否拆分由 DBA 管理。schema 搜索路径须正确指向 wfs。表完整检查不等于全部列、索引、SQL 方言和性能已在目标产品验收。
 
-## GaussDB 平台表清单（最终 20 张）
+## GaussDB 核心平台表（20 张，另加状态表 12 张）
 
 | 表名（均在平台库 wfs schema） | 用途 |
 | --- | --- |
@@ -42,19 +42,34 @@
 
 不要执行 app/bootstrap/mysql_schema.sql；其中 wfs_platform_lock 为 MySQL 平台方案专用，不属于本 GaussDB 清单。app/bootstrap/sqlite_schema.sql 是本机/测试兼容基线，不在 GaussDB 上执行。
 
-## 仍存在的本地配置/索引存储
+## 新增状态表（12 张，同一平台库的 wfs schema）
 
-平台主库使用 GaussDB，并不代表程序完全不使用 SQLite。当前架构自动创建以下文件，无需 DBA 手工建表，不能删除或忽略备份：
+全新安装设置 WFS_STATE_BACKEND=gauss，并执行 migrations/008_gauss_state.sql（由 migrate.py 按编号执行）。不需要建立或复制任何 SQLite 数据文件，也不提供旧 SQLite 数据导入。
 
-| 相对项目路径 | 自动维护内容 |
+| 表名 | 用途 |
 | --- | --- |
-| data/database-connections.sqlite3 | profiles：加密平台/业务连接配置 |
-| data/task-publishing.sqlite3 | settings：依赖仓库与任务示例设置 |
-| data/gitlab-updates.sqlite3 | configuration、snapshot、scan_lease、acknowledgements：GitLab 配置、检查快照和已读状态 |
-| data/admission.sqlite3 | settings、receipts、work_requests、ddl_history、hook_events：准入/执行请求、授权策略、DDL 草稿、标签与 webhook 去重等 |
-| data/executions/journal.sqlite3 | journal：执行索引和恢复日志 |
+| wfs_state_connections_profiles | 加密业务连接配置 |
+| wfs_state_publishing_settings | 示例与加密依赖仓库设置 |
+| wfs_state_gitlab_configuration | 加密 GitLab 配置 |
+| wfs_state_gitlab_snapshot | GitLab 检查结果 |
+| wfs_state_gitlab_scan_lease | 跨进程扫描租约 |
+| wfs_state_gitlab_acknowledgements | 用户已读状态 |
+| wfs_state_admission_settings | 运行策略、权限、标签、DDL 草稿 |
+| wfs_state_admission_receipts | 执行请求去重 |
+| wfs_state_admission_work_requests | 试运行、手动、重试与补跑队列 |
+| wfs_state_admission_ddl_history | DDL 草稿历史 |
+| wfs_state_admission_hook_events | webhook 去重 |
+| wfs_state_journal_journal | 执行恢复索引 |
 
-这些文件在首次用到对应功能时自动创建，可能有 SQLite 的 -wal/-shm 伴随文件。应在停服后整体备份 data 与固定密钥。现阶段没有把这些表迁到 GaussDB 的开关，本包不隐含该架构重构。不会创建 data/platform.sqlite3 作为平台主库。
+状态变更使用数据库事务；竞争写通过数据库锁串行化，密文保留原用途隔离密钥。密钥仍在 runtime.env，不保存进数据库表。此版本是从零部署方案，不直接复用旧 SQLite 文件或旧 runtime.env。真实 DWS 驱动和并发负载必须在目标 GaussDB 上验收。
+
+## 本地文件与故障行为
+
+生产不使用 SQLite 不代表可以删除 data。任务环境、执行日志、输出和共享快照仍是普通文件。GaussDB 故障时，新管理、发布或执行请求应失败或暂停，不能当作配置不存在继续操作。
+
+已启动任务的最终执行记录通过 fsync 和原子替换保存在 data/executions/*.json，数据库恢复后补写索引；这不是第二个数据库。长时间断库仍须核对执行和业务结果，不自动重放不确定的业务动作。未补写的文件会阻止安全版本清理。
+
+应配套备份 GaussDB 平台库、data、runtime.env 和固定密钥。开发及原有本机测试的 SQLite 后端保留用于测试，但本部署的两个 service 强制 GaussDB 状态后端，不访问该后端。
 
 ## 业务任务自己的表
 

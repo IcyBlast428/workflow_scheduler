@@ -105,7 +105,12 @@ class HistoryTests(unittest.TestCase):
             archive_batch(dt.datetime.now()-dt.timedelta(days=30))
 
     def test_live_marker_counts_only_latest_timestamp_and_detects_ties(self):
-        stamp = dt.datetime.now()+dt.timedelta(minutes=1)
+        # This marker is global: other tests can retain records in business time,
+        # ahead of the host clock. Put this fixture after the actual latest row.
+        from app.bootstrap.timebase import business_now
+        with GaussDB() as db:
+            latest = db.execute_query_sql('SELECT MAX(end_time) FROM wfs_run_history')[0][0]
+        stamp = max(business_now(), dt.datetime.fromisoformat(str(latest)) if latest else business_now())+dt.timedelta(minutes=1)
         self.insert(self.pid+'z',stamp)
         self.insert(self.pid+'y',stamp)
         self.insert(self.pid+'old',stamp-dt.timedelta(days=1))

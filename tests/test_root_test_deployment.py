@@ -64,9 +64,9 @@ class RootTestDeploymentTests(unittest.TestCase):
             def __exit__(self, *args): pass
             def execute_query_sql(self, sql): self.queries.append(sql)
         database = Database()
-        with patch.dict('sys.modules', {'app.bootstrap.database': SimpleNamespace(GaussDB=lambda: database)}):
+        with patch.dict('os.environ', {'WFS_STATE_BACKEND':'gauss'}), patch.dict('sys.modules', {'app.bootstrap.database': SimpleNamespace(GaussDB=lambda: database)}):
             gauss_check.main()
-            self.assertEqual(len(database.queries), 20)
+            self.assertEqual(len(database.queries), 32)
             self.assertTrue(all(query.startswith('SELECT 1 FROM wfs_') and query.endswith('LIMIT 0') for query in database.queries))
             database._local_sqlite = True
             with self.assertRaises(RuntimeError): gauss_check.main()

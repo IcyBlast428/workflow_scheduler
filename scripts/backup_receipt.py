@@ -9,6 +9,16 @@ def record(data,output):
     value={'path':str(target.resolve()),'bytes':target.stat().st_size,'at':dt.datetime.now(dt.timezone.utc).isoformat(),
            'scope':'platform archive','database_restore_verified':False}
     path=Path(data)/'admission.sqlite3'
+    from app.bootstrap.auxiliary_store import enabled
+    if enabled():
+        from app.bootstrap.admission import store
+        with store() as db:
+            db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',('backup:last',json.dumps(value)))
+        return
+    # A fresh GaussDB installation must never acquire a SQLite sidecar merely
+    # because a standalone backup command omitted its environment wrapper.
+    if not path.exists():
+        return
     with sqlite3.connect(path,timeout=10) as db:
         db.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,payload TEXT NOT NULL)')
         db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',('backup:last',json.dumps(value)))

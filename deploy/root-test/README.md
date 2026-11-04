@@ -2,7 +2,7 @@
 
 工作目录 `/data/workflow_scheduler`；root 用户；虚拟环境 `.venv`；访问 `http://服务器IP:8008/`。Web 监听 0.0.0.0:8008；单实例 Scheduler 只监听 127.0.0.1:8009。防火墙仅向需要的内网客户端开放 8008。root 启动的业务任务也有 root 权限，只发布可信脚本。
 
-平台主库使用 GaussDB/DWS，不创建 SQLite 平台主库。程序仍用本地 SQLite 文件保存配置和执行索引，必须随 data 目录备份，详见 [数据库及表清单](DATABASE.md)。
+平台主库使用 GaussDB/DWS。WFS_STATE_BACKEND=gauss 将连接配置、发布设置、队列和索引全部保存至 GaussDB，生产不再创建或读取 SQLite 配置/索引文件。普通日志、输出和恢复暂存仍在 data 目录，详见[数据库及表清单](DATABASE.md)。
 
 ## 1. 解压和安装依赖
 
@@ -55,7 +55,7 @@ python3.12 -m venv .venv
 .venv/bin/python scripts/setup_root_test.py --install
 ```
 
-程序先检查 GaussDB 连接和 20 张平台表可读，检查不通过不安装/启动服务；不自动执行初始 DDL，不回退到 SQLite。成功后安装并开机启用 wfs-scheduler.service、wfs.service。若已有不同的同名服务则拒绝覆盖，先核对旧部署。两项服务每次启动都执行 GaussDB 表检查和 ready 检查。
+程序先检查 GaussDB 连接和 32 张平台表可读，检查不通过不安装/启动服务；不自动执行初始 DDL，不回退到 SQLite。成功后安装并开机启用 wfs-scheduler.service、wfs.service。若已有不同的同名服务则拒绝覆盖，先核对旧部署。两项服务每次启动都执行 GaussDB 表检查和 ready 检查。
 
 ```bash
 systemctl status wfs.service wfs-scheduler.service

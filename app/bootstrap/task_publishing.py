@@ -23,6 +23,11 @@ class PublishingError(ValueError):
 
 @contextmanager
 def store():
+    from app.bootstrap.auxiliary_store import enabled, gauss_store
+    if enabled():
+        with gauss_store('publishing') as db:
+            yield db
+        return
     path = Path(os.environ.get('WFS_DATA_DIR', DATA_DIR)) / 'task-publishing.sqlite3'
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path, timeout=10)

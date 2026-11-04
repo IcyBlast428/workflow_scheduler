@@ -16,6 +16,7 @@ import threading
 from contextlib import contextmanager
 
 from app.bootstrap.global_vars import DATA_DIR
+from app.bootstrap.auxiliary_store import enabled
 
 _active = {}
 _lock = threading.Lock()
@@ -42,11 +43,16 @@ def _cipher(scope):
 
 
 def task_database_key():
-    return _key('business').decode() if _path().exists() else ''
+    return _key('business').decode() if enabled() or _path().exists() else ''
 
 
 @contextmanager
 def _store():
+    if enabled():
+        from app.bootstrap.auxiliary_store import gauss_store
+        with gauss_store('connections') as db:
+            yield db
+        return
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path, timeout=10)
@@ -85,7 +91,7 @@ def business_profile(identifier):
             raise PermissionError('此任务未获授权使用业务连接：' + str(identifier))
         if not profile.get('enabled',True): raise PermissionError('业务连接已停用：'+identifier)
         return profile
-    if identifier == 'platform' or not isinstance(identifier, str) or not PROFILE_ID.fullmatch(identifier) or not _path().exists():
+    if identifier == 'platform' or not isinstance(identifier, str) or not PROFILE_ID.fullmatch(identifier) or not (enabled() or _path().exists()):
         return None
     with _store() as db:
         row = db.execute('SELECT payload FROM profiles WHERE id=?', (identifier,)).fetchone()
@@ -95,6 +101,9 @@ def business_profile(identifier):
 
 
 def active_platform():
+    if enabled():
+        # The fresh GaussDB profile bootstraps from Nacos, not its own metadata.
+        return None
     if os.environ.get('WFS_IGNORE_MANAGED_DATABASE', '').lower() == 'true':
         return None
     key = str(_path().resolve())
@@ -116,7 +125,7 @@ def activate_at_app_start():
     A new task subprocess must keep reading the old active profile after an
     administrator saves a pending edit. Stop ALL services before restarting.
     """
-    if os.environ.get('WFS_IGNORE_MANAGED_DATABASE', '').lower() == 'true' or not _path().exists():
+    if enabled() or os.environ.get('WFS_IGNORE_MANAGED_DATABASE', '').lower() == 'true' or not _path().exists():
         return
     with _store() as db:
         db.execute('BEGIN IMMEDIATE')

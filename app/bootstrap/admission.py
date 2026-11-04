@@ -17,6 +17,11 @@ lock = threading.RLock()
 
 @contextmanager
 def store():
+    from app.bootstrap.auxiliary_store import enabled, gauss_store
+    if enabled():
+        with gauss_store('admission') as db:
+            yield db
+        return
     from app.bootstrap.global_vars import DATA_DIR
     path = Path(os.environ.get('WFS_DATA_DIR', DATA_DIR)) / 'admission.sqlite3'
     path.parent.mkdir(parents=True, exist_ok=True)
