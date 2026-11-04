@@ -1,0 +1,32 @@
+# Root fixed-directory intranet test profile
+[Unit]
+Description=Workflow Scheduler scheduler (root test)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=exec
+User=root
+Group=root
+WorkingDirectory=/data/workflow_scheduler
+EnvironmentFile=/data/workflow_scheduler/deploy/root-test/runtime.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+UnsetEnvironment=GUNICORN_CMD_ARGS GUNICORN_FD WFS_LOCAL_DB_PATH WFS_POSTGRES_TEST WFS_DB_DIALECT
+ExecStartPre=/data/workflow_scheduler/.venv/bin/python /data/workflow_scheduler/scripts/check_gauss_platform.py
+ExecStart=/data/workflow_scheduler/.venv/bin/python -m gunicorn -c /data/workflow_scheduler/gunicorn.conf.py --workers 1 --worker-class gthread --threads 8 --timeout 120 --graceful-timeout 60 --bind 127.0.0.1:8009 --access-logfile - --error-logfile - --env WFS_ENABLE_SCHEDULER=true --env WFS_SCHEDULER_CONTROL_URL= --env WFS_DATA_DIR=/data/workflow_scheduler/data --env WFS_LOG_DIR=/data/workflow_scheduler/logs --env PYTHONPATH=/data/workflow_scheduler run:app
+ExecStartPost=/data/workflow_scheduler/.venv/bin/python /data/workflow_scheduler/scripts/wait_ready.py --url http://127.0.0.1:8009/api/user/ready --timeout 90
+UMask=0077
+NoNewPrivileges=true
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStartSec=100
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,7 @@
 # Workflow Scheduler
 
+内网 root 部署和固定目录 `/data/workflow_scheduler` 见[root 简化部署](deploy/root-test/README.md)：创建 `.venv`、安装依赖，配置 GaussDB/Nacos 并完成建表检查后，初始化脚本安装两个 systemd 服务并直接开放 8008。不创建 SQLite 平台主库。
+
 使用与运维手册见[文档导航](docs/README.md)。旧阶段检查记录与未实施提案已集中到[历史归档](docs/archive/README.md)，不作为当前投产步骤。
 
 正式部署统一采用 **systemd 管理 Web 和独立 Scheduler**，完整步骤见 [systemd 部署手册](docs/systemd-deployment.md)。生产沿用现有 GaussDB/DWS；本机 PostgreSQL 测试库仍可保留 Docker。
