@@ -33,7 +33,7 @@ test('recent results group columns horizontally, preserve selection and buffer h
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'test-results/recent-result-matrix-mobile.png',fullPage:true});
 });
 
-test('recent result depth supports 10, 25 and 50 and ignores an older response',async({page})=>{
+test('recent result depth supports only 10 and 25 and ignores an older response',async({page})=>{
  await page.setViewportSize({width:390,height:844});
  let release25;
  await page.route(/\/api\/taskinfo\/matrix-recent(?:\?|$)/,async route=>{
@@ -43,18 +43,18 @@ test('recent result depth supports 10, 25 and 50 and ignores an older response',
  });
  await login(page);
  const chart=page.locator('.recent-executions'),depth=chart.getByLabel('执行次数'),scroll=chart.locator('.recent-scroll');
- await expect(depth.locator('option')).toHaveText(['10 次','25 次','50 次']);
+ await expect(depth.locator('option')).toHaveText(['10 次','25 次']);
  await expect(chart.locator('.recent-cell')).toHaveCount(240);
  await depth.selectOption('25');await expect.poll(()=>Boolean(release25)).toBe(true);
- await depth.selectOption('50');
- await expect(chart.getByRole('heading',{name:'最近 50 次执行结果'})).toBeVisible();
- await expect(chart.locator('.recent-cell')).toHaveCount(1200);
+ await depth.selectOption('10');
+ await expect(chart.getByRole('heading',{name:'最近 10 次执行结果'})).toBeVisible();
+ await expect(chart.locator('.recent-cell')).toHaveCount(240);
  const olderResponse=page.waitForResponse(response=>new URL(response.url()).searchParams.get('limit')==='25');
  release25();await olderResponse;
- expect(await scroll.evaluate(el=>el.scrollHeight>el.clientHeight && el.scrollWidth>el.clientWidth)).toBe(true);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await expect(chart.getByRole('heading',{name:'最近 50 次执行结果'})).toBeVisible();
+ await expect(chart.getByRole('heading',{name:'最近 10 次执行结果'})).toBeVisible();
  await depth.selectOption('25');await expect(chart.locator('.recent-cell')).toHaveCount(600);
+ expect(await scroll.evaluate(el=>el.scrollHeight>el.clientHeight && el.scrollWidth>el.clientWidth)).toBe(true);
  await page.getByRole('button',{name:'执行记录',exact:true}).click();await page.getByRole('button',{name:'最近结果',exact:true}).click();
  await expect(depth).toHaveValue('25');await expect(chart.locator('.recent-cell')).toHaveCount(600);
 });
@@ -87,8 +87,8 @@ test('completed results are buffered on log pages and explicit update returns to
 
 test('viewer can read recent results and cannot access matrix queue controls',async({page})=>{
  await login(page,'matrix?tab=queue','browser-viewer');await expect(page.locator('.recent-executions')).toBeVisible();const tabs=page.getByRole('navigation',{name:'任务执行分栏'});await expect(tabs.getByRole('button',{name:'执行队列',exact:true})).toHaveCount(0);await tabs.getByRole('button',{name:'执行记录',exact:true}).click();await expect(page.getByLabel('查询范围',{exact:true})).toBeVisible();expect((await page.request.get('/api/taskinfo/matrix-recent')).status()).toBe(200);expect((await page.request.get('/api/admin/operational/dispatch')).status()).toBe(403);
- expect((await page.request.get('/api/taskinfo/matrix-recent?limit=51')).status()).toBe(400);
- for(const limit of [10,25,50]){const response=await page.request.get(`/api/taskinfo/matrix-recent?limit=${limit}`);expect(response.status()).toBe(200);expect((await response.json()).data.limit).toBe(limit);}
+ expect((await page.request.get('/api/taskinfo/matrix-recent?limit=50')).status()).toBe(400);
+ for(const limit of [10,25]){const response=await page.request.get(`/api/taskinfo/matrix-recent?limit=${limit}`);expect(response.status()).toBe(200);expect((await response.json()).data.limit).toBe(limit);}
 });
 
 test('horizontal three-dimensional timeline remains available in the unified workspace',async({page})=>{
@@ -97,6 +97,9 @@ test('horizontal three-dimensional timeline remains available in the unified wor
  const records=tasks.flatMap((task,i)=>[3,6,9,11].map(hour=>({key:task.pid+'-'+hour,pid:task.pid,run_id:'',status:(i+hour)%4===0?'failed':'success',time:`2026-11-04 ${String(hour).padStart(2,'0')}:00:00`,start_time:`2026-11-04 ${String(hour).padStart(2,'0')}:00:00`,end_time:`2026-11-04 ${String(hour).padStart(2,'0')}:00:00`,count:1})));
  await page.route(/\/api\/taskinfo\/matrix(?:\?|$)/,route=>route.fulfill({json:ok({tasks,records,active:[],pending:[],date:'2026-11-04',server_time:'2026-11-04 12:00:00',total_executions:records.length,aggregated:false,warnings:[],cursor:'horizontal-sample'})}));
  await login(page,'matrix?tab=timeline');await expect(page.locator('.matrix-surface')).toBeVisible();await expect(page.locator('.matrix-surface-note')).toContainText('时间由左向右');
+ await expect(page.getByRole('button',{name:/全屏/})).toHaveCount(0);
+ const toolbar=await page.locator('.matrix-toolbar').boundingBox(),summary=await page.locator('.matrix-summary').boundingBox();
+ expect(summary.y-toolbar.y-toolbar.height).toBeLessThanOrEqual(20);
  const canvas=page.locator('.matrix-surface canvas'),box=await canvas.boundingBox();expect(box.width).toBeGreaterThan(box.height);
  await page.screenshot({path:'test-results/horizontal-execution-matrix.png',fullPage:true});
  await canvas.scrollIntoViewIfNeeded();

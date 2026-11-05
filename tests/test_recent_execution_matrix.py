@@ -27,7 +27,7 @@ class RecentMatrixTests(unittest.TestCase):
                 db.execute_sql('INSERT INTO wfs_run_history(id,pid,state,start_time,end_time) VALUES(?,?,?,?,?)',params=(uuid.uuid4().hex,pids[1],state,when,when))
         with patch.object(recent,'discover_task_specs',return_value=specs):
             data=recent.cached_snapshot()
-            for limit in (25, 50):
+            for limit in (25,):
                 with self.subTest(limit=limit):
                     expanded=recent.cached_snapshot(str(limit))
                     records=expanded['tasks'][0]['records']
@@ -48,7 +48,7 @@ class RecentMatrixTests(unittest.TestCase):
 
     def test_invalid_depth_is_rejected_before_querying(self):
         with patch.object(recent,'snapshot') as query:
-            for value in ('','0','11','51','1000','1e1'):
+            for value in ('','0','11','50','51','1000','1e1'):
                 with self.subTest(value=value), self.assertRaises(ValueError):
                     recent.cached_snapshot(value)
             query.assert_not_called()

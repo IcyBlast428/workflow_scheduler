@@ -1871,7 +1871,6 @@ tbody tr:hover {
 .task-table .task-refresh { min-width: 86px; }
 @media (max-width:760px) { .dashboard-summary, .issue-columns { grid-template-columns:1fr 1fr; } .issue-columns { grid-template-columns:1fr; } }
 
-.matrix-page:fullscreen { background:var(--bg,#101a24); overflow:auto; padding:20px; }
 .matrix-legend i.timed_out,.matrix-record-list i.timed_out {background:#e45364;}
 .matrix-legend i.interrupted,.matrix-record-list i.interrupted {background:#ae8ad8;}
 .matrix-legend i.skipped,.matrix-record-list i.skipped {background:#8897aa;}

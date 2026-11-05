@@ -40,7 +40,7 @@ function rememberScroll(){if(props.active && scroll.value){scrollLeft=scroll.val
 watch(()=>props.active,async active=>{if(active){await nextTick();scroll.value?.scrollTo(scrollLeft,scrollTop);}else{hovering.value=false;focused.value=false;}});
 function openRecord(task,index){if(!task.records[index])return;selected.value={...task.records[index],name:task.name};emit('record',selected.value);}
 const data=ref(null),loading=ref(false),error=ref(''),category=ref(''),selected=ref(null),pending=ref(null),hovering=ref(false),focused=ref(false);
-const limits=[10,25,50];
+const limits=[10,25];
 const limit=ref(limits[0]);
 const displayedLimit=computed(()=>data.value?.limit ?? limit.value);
 let timer,alive=true,inFlight=false,requestId=0;

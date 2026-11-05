@@ -1,5 +1,5 @@
 <template>
-  <section ref="pageElement" class="matrix-page">
+  <section class="matrix-page">
     <div class="matrix-toolbar">
       <div class="matrix-heading"><div><h2>任务执行矩阵</h2><p>{{ displayMode === '2d' ? '按任务与小时查看执行分布 · 同一时段异常优先显示' : '横向时间轴 · 从左至右推进 · 分类分布在截面上' }}</p></div><button class="btn matrix-filter-toggle" :aria-expanded="filtersOpen" aria-controls="matrix-filters" @click="filtersOpen=!filtersOpen">{{ filtersOpen ? '收起筛选' : '筛选' }}</button></div>
       <div id="matrix-filters" class="matrix-filters" :class="{'is-open':filtersOpen}">
@@ -9,11 +9,10 @@
         <label class="matrix-filter-field">分类 <select class="select" aria-label="分类" v-model="category"><option value="">全部分类</option><option v-for="group in allGroups" :key="group" :value="group">{{ group }}</option></select></label>
         <label class="matrix-filter-field">时间 <select class="select" aria-label="时间" v-model="timeWindow"><option value="day">全天</option><option value="360">最近 6 小时</option><option value="60">最近 1 小时</option></select></label>
         <label class="checkbox-row"><input type="checkbox" v-model="onlyAbnormal">仅看异常</label>
-        <button class="btn" @click="toggleFullscreen">全屏 / 退出全屏</button>
         <button class="btn" :disabled="loading" @click="load(true)">{{ loading ? '刷新中…' : '刷新' }}</button>
       </div>
+      <LoadingStatus class="matrix-loading" :active="loading && !data" label="正在读取执行矩阵…" />
     </div>
-    <LoadingStatus :active="loading && !data" label="正在更新执行矩阵…" />
     <div v-if="error" class="matrix-notice" role="alert">{{ error }} <button class="btn" :disabled="loading" @click="load(true)">重试</button></div>
     <template v-if="data">
       <div class="matrix-summary">
@@ -74,7 +73,7 @@ defineEmits(['task', 'execution', 'logs']);
 const canvas=ref(null),data=ref(null),date=ref(''),loading=ref(false),error=ref(''),selectedPid=ref(''),selectedKey=ref(''),focus=ref(false);
 const recordLimit=ref(200);
 const displayMode=ref(matrixViewMode(null,window.innerWidth)),filtersOpen=ref(false);
-const pageElement=ref(null),live=ref(true),category=ref(''),timeWindow=ref('day'),onlyAbnormal=ref(false);
+const live=ref(true),category=ref(''),timeWindow=ref('day'),onlyAbnormal=ref(false);
 const preferenceKey=()=>`wfs:matrix:${props.userKey || 'anonymous'}`;
 let savedCamera;
 function restorePreferences(){const value=readPreference(preferenceKey(),{});displayMode.value=matrixViewMode(value.displayMode,window.innerWidth);category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.orientation==='horizontal-time-v1'?value.camera:undefined;scene?.setCamera(savedCamera);}
@@ -116,7 +115,6 @@ async function load(force=false){
 function refresh(event){if(props.active)load(event?.detail?.silent!==true);}
 function changeDate(){live.value=false;load(true);}
 function changeMode(){load(true);}
-async function toggleFullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await pageElement.value?.requestFullscreen();}catch{error.value='此浏览器暂不支持全屏，请使用浏览器的全屏功能。';}}
 watch([selectedPid,selectedKey,focus],updateScene);
 watch(displayMode,async()=>{await nextTick();ensureScene();updateScene();});
 watch([category,timeWindow,onlyAbnormal],()=>{updateScene();savePreferences();});
@@ -130,6 +128,7 @@ onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEv
 .matrix-page{display:grid;gap:16px}.matrix-toolbar,.matrix-filters,.matrix-summary,.matrix-camera-bar,.matrix-legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.matrix-toolbar,.matrix-camera-bar{justify-content:space-between}.matrix-toolbar h2{margin:0;font-size:22px}.matrix-toolbar p,.matrix-card p{color:var(--muted);font-size:13px;line-height:1.65;overflow-wrap:anywhere}.matrix-toolbar p{margin:7px 0 0}.matrix-filters label{display:flex;gap:8px;align-items:center}.matrix-summary{font-size:13px;color:var(--muted)}.matrix-summary strong{color:var(--ink);font-size:19px}.matrix-summary span:last-child{margin-left:auto}.matrix-notice{padding:12px 16px;border:1px solid var(--line);background:var(--panel);border-radius:10px;font-size:13px;color:var(--muted)}.matrix-surface{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel);background-image:radial-gradient(var(--line) .7px,transparent .7px);background-size:22px 22px}.matrix-surface canvas{display:block;width:100%;height:clamp(450px,62vh,780px);touch-action:none}.matrix-legend{position:absolute;z-index:1;left:20px;top:16px;font-size:12px;pointer-events:none}.matrix-legend span{display:flex;gap:7px;align-items:center}.matrix-legend i,.matrix-record-list i{display:inline-block;width:10px;height:10px;border-radius:2px;flex-shrink:0}.success{background:#25b778}.running{background:#eabf32}.failed{background:#e45364}.pending{border:1px solid #8393a9;background:transparent}.queued{background:#8a99ac}.cancelled,.unknown{background:#9da9b7}.matrix-surface-note{position:absolute;bottom:13px;left:20px;font-size:11px;color:var(--muted);pointer-events:none}.matrix-camera-bar{font-size:12px;color:var(--muted)}.matrix-details{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.matrix-card{padding:20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;min-width:0}.matrix-card h3{font-size:15px;margin:0 0 14px}.matrix-card small{color:var(--muted);font-weight:normal}.matrix-select-label{display:grid;gap:7px;font-size:12px;color:var(--muted)}.matrix-select-label select{width:100%;min-width:0}.matrix-focus{display:flex;align-items:center;gap:7px;margin-top:14px;font-size:12px}.matrix-record-list{max-height:225px;overflow:auto}.matrix-record-list button{display:flex;gap:9px;align-items:center;justify-content:flex-start;width:100%;padding:10px 7px;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--ink);text-align:left;cursor:pointer;font-size:12px}.matrix-record-list button.chosen{background:var(--bg);outline:1px solid var(--brand);outline-offset:-1px}.matrix-record-list button span:last-child{margin-left:auto}.matrix-status{padding:3px 8px;border-radius:4px;color:#172a28;font-size:12px}.matrix-empty{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:12px;background:var(--panel);color:var(--muted);pointer-events:none}.matrix-empty-small{top:auto;bottom:40px;transform:translateX(-50%);font-size:12px;white-space:nowrap}@media(max-width:900px){.matrix-details{grid-template-columns:1fr}.matrix-summary span:last-child{margin-left:0}.matrix-surface canvas{height:460px}.matrix-legend{gap:10px;left:12px;top:12px;right:12px}.matrix-surface-note{left:12px;font-size:10px}.matrix-camera-bar{gap:8px}.matrix-camera-bar span{line-height:1.8}}
 .unknown{background:#a397c1}
 .matrix-toolbar {
+  position: relative;
   padding: var(--panel-padding);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -137,6 +136,8 @@ onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEv
   gap: 20px;
 }
 .matrix-toolbar h2 { font-size: 16px; }
+.matrix-toolbar .matrix-loading { position:absolute; bottom:0; left:0; right:0; height:3px; padding:0; pointer-events:none; }
+.matrix-loading :deep(.loading-status-content > span) { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
 .matrix-toolbar > div:first-child { min-width: 0; }
 .matrix-filters { gap: 12px 16px; }
 .matrix-filters label { white-space: nowrap; }

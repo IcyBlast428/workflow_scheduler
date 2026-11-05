@@ -34,7 +34,7 @@ def snapshot(limit=10):
 
 def cached_snapshot(limit='10'):
     from app.bootstrap.snapshot_cache import cached
-    if limit not in ('10', '25', '50'):
-        raise ValueError('最近执行次数可选 10、25 或 50。')
+    if limit not in ('10', '25'):
+        raise ValueError('最近执行次数可选 10 或 25。')
     count = int(limit)
     return cached(('recent-execution-matrix', count), 5, lambda: snapshot(count))

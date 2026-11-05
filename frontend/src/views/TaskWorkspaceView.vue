@@ -39,7 +39,7 @@
         <label>负责人<input v-model.trim="tasks.params.owner" class="input" placeholder="负责人关键字"></label>
       </div>
     </form>
-    <div v-if="canOperate && selectedTasks.length" class="batch-toolbar">
+    <div v-if="canOperate" class="batch-toolbar">
       <span class="selection-count"
         >已选择 <strong>{{ selectedTasks.length }}</strong> 个任务</span
       >

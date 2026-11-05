@@ -126,6 +126,17 @@ test('favorites persist and batch controls preview effects before applying', asy
   await row.getByRole('button',{name:'更多',exact:true}).click();
   await expect(page.locator('.action-menu').getByRole('button',{name:'取消收藏任务 acceptance__slow',exact:true})).toBeVisible();
   await page.keyboard.press('Escape');
+  for (const width of [1400,390]) {
+    await page.setViewportSize({width,height:900});
+    const position = () => row.evaluate(el => el.getBoundingClientRect().top + window.scrollY);
+    const before = await position();
+    await row.getByRole('checkbox',{name:'选择任务 acceptance__slow'}).check();
+    await expect(page.getByRole('button',{name:'批量启用调度',exact:true})).toBeEnabled();
+    expect(await position()).toBeCloseTo(before,0);
+    await page.getByRole('button',{name:'取消选择',exact:true}).click();
+    expect(await position()).toBeCloseTo(before,0);
+  }
+  await page.setViewportSize({width:1400,height:900});
   await row.getByRole('checkbox',{name:'选择任务 acceptance__slow'}).check();
   await page.getByRole('button',{name:'批量启用调度',exact:true}).click();
   await expect(page.locator('.confirm-modal')).toContainText('正在执行的实例继续运行');
