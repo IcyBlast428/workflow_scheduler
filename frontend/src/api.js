@@ -214,7 +214,7 @@ export const api = {
   taskDetail(pid) { return request('/api/taskinfo/detail', { params: { pid } }); },
   taskFlow(pid) { return request('/api/taskinfo/flow', { params: { pid }, timeout: 30000 }); },
   executionMatrix(params = {}) { return request('/api/taskinfo/matrix', { params, timeout: 30000 }); },
-  recentExecutionMatrix() { return request('/api/taskinfo/matrix-recent', {timeout:30000}); },
+  recentExecutionMatrix(limit) { return request('/api/taskinfo/matrix-recent', {params:{limit},timeout:30000}); },
   taskSources(pid, dir = '', offset = 0) { return request('/api/taskinfo/source', { params: { pid, dir, offset } }); },
   taskSource(pid, file) { return request('/api/taskinfo/source', { params: { pid, file } }); },
   runs(pid) { return request('/api/taskinfo/runs', { params: { pid } }); },

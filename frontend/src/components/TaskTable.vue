@@ -92,14 +92,21 @@
           </td>
           <td class="action-cell">
             <div class="row-actions task-actions">
-              <button class="btn" @click="$emit('detail', row)">详情</button>
               <button
                 v-if="row.pending"
-                class="btn"
+                class="btn primary"
                 @click="$emit('execution', row)"
               >
                 查看执行
               </button>
+              <button
+                v-else-if="needsAttention(row)"
+                class="btn warning" @click="$emit('detail', row)"
+              >查看异常</button>
+              <button
+                v-else-if="!row.schedule_configured && permitted(row,'schedule')"
+                class="btn primary" :disabled="busy || pendingActions[row.id]" @click="$emit('schedule',row)"
+              >配置调度</button>
               <button
                 v-else-if="canOperate && permitted(row,'run') && canCallTask(row)"
                 class="btn primary"
@@ -110,7 +117,10 @@
               >
                 手动执行
               </button>
+              <button v-else class="btn" @click="$emit('detail',row)">详情</button>
               <ActionMenu>
+                <button class="btn" @click="$emit('detail',row)">任务详情</button>
+                <button v-if="canOperate && permitted(row,'run') && canCallTask(row) && (row.pending || needsAttention(row) || !row.schedule_configured && permitted(row,'schedule'))" class="btn" :disabled="busy || pendingActions[row.id]" @click="$emit('call',row)">手动执行</button>
                 <button v-if="permitted(row,'publish')" class="btn" @click="$emit('release', row.id)">代码版本</button>
                 <button
                   v-if="canOperate && permitted(row,'schedule') && canStart(row)"
@@ -211,6 +221,7 @@ defineEmits([
 ]);
 
 function permitted(row,capability) { return props.canManage || row.permissions?.includes(capability); }
+function needsAttention(row){return row.state==='invalid' || row.application?.status==='failed' || exitClass(row.last_status)==='danger';}
 function stateText(row) {
   if (row.state === 'invalid') {
     return '配置错误';

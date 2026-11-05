@@ -22,7 +22,7 @@ def recent_execution_matrix():
         return forwarded
     from app.bootstrap.recent_execution_matrix import cached_snapshot
     try:
-        return success_msg(cached_snapshot())
+        return success_msg(cached_snapshot(request.args.get('limit', '10')))
     except ValueError as exc:
         return (error_msg(str(exc)),400)
 
@@ -83,7 +83,7 @@ def task_detail():
     with GaussDB() as db:
         notifications = db.execute_query_sql('SELECT id,channel,status,attempts,message,created_at FROM wfs_notifications WHERE pid=? ORDER BY created_at DESC LIMIT 20', params=(pid,), return_json=True)
     from app.bootstrap.task_access import for_task
-    return success_msg({'permissions': for_task(g.identity, pid, spec.get('group_name')), 'pid': pid, 'task_name': spec.get('task_name') or spec.get('folder_name') or pid, 'description': description, 'schedule': load_schedule(pid), 'runs': records, 'versions': _business_rows(versions, 'changed_at'), 'audit': _business_rows(changes, 'created_at'), 'notifications': _business_rows(notifications, 'created_at'), 'diagnostics': {'active': runnings.count(), 'capacity': int(os.environ.get('WFS_MAX_ACTIVE_RUNS', '20')), 'next_run_time': str(next_time or ''), 'last_not_started': next((item for item in records if item['status'] in ('skipped', 'missed')), None)}})
+    return success_msg({'permissions': for_task(g.identity, pid, spec.get('group_name')), 'pid': pid, 'task_name': spec.get('task_name') or spec.get('folder_name') or pid, 'description': description, 'current_version': spec.get('task_release', ''), 'configuration_error': str(spec.get('error') or spec.get('main_file_error') or '')[:400], 'schedule': load_schedule(pid), 'runs': records, 'versions': _business_rows(versions, 'changed_at'), 'audit': _business_rows(changes, 'created_at'), 'notifications': _business_rows(notifications, 'created_at'), 'diagnostics': {'active': runnings.count(), 'capacity': int(os.environ.get('WFS_MAX_ACTIVE_RUNS', '20')), 'next_run_time': str(next_time or ''), 'last_not_started': next((item for item in records if item['status'] in ('skipped', 'missed')), None)}})
 
 @blueprint.get('/api/taskinfo/flow')
 def task_flow():

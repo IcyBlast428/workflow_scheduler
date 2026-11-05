@@ -2,6 +2,13 @@
   <ModalShell :open="Boolean(pid)" :label="`任务详情：${data.task_name || pid}`" panel-class="task-detail-modal" @close="close">
       <header class="modal-head"><h3>任务详情：{{ data.task_name || pid }}</h3><button class="btn icon-only" title="关闭" aria-label="关闭" @click="close">×</button></header>
       <div class="modal-body task-detail-body">
+        <section v-if="data.pid" class="workbench-summary" aria-label="任务运行摘要">
+          <div><small>调度状态</small><strong>{{ scheduleStatus }}</strong></div>
+          <div><small>最近结果</small><strong><span v-if="latestCompleted" class="tag" :class="statusClass(latestCompleted.status)">{{ statusLabel(latestCompleted.status) }}</span><template v-else>暂无记录</template></strong></div>
+          <div><small>下次执行</small><strong>{{ data.diagnostics?.next_run_time || '未安排' }}</strong></div>
+          <div><small>当前代码版本</small><strong class="mono" :title="data.current_version">{{ data.current_version?.slice(0,12) || '未记录' }}</strong></div>
+        </section>
+        <div v-if="taskIssue" class="inline-alert warning"><strong>{{ taskIssue }}</strong><div class="filter-actions"><button v-if="latestCompleted && ['failed','timed_out','interrupted','skipped','missed'].includes(latestCompleted.status)" class="btn" @click="selectTab('runs')">查看最近执行</button><button v-if="data.schedule?.application?.status==='failed'" class="btn" @click="selectTab('description')">查看配置生效信息</button></div></div>
         <div class="detail-toolbar">
           <div class="filter-actions detail-tabs" role="tablist" aria-label="详情内容"><button v-for="(item,index) in tabs" :key="item.id" :id="`${dialogId}-${item.id}`" role="tab" :aria-controls="`${dialogId}-panel-${item.id}`" :aria-selected="tab === item.id" :tabindex="tab === item.id ? 0 : -1" class="btn" :class="tab === item.id ? 'primary' : ''" @keydown="tabKey($event,index)" @click="selectTab(item.id)">{{ item.label }}</button></div>
           <div class="filter-actions detail-actions" aria-label="详情操作">
@@ -59,6 +66,9 @@ import LoadingStatus from './LoadingStatus.vue';
 const props = defineProps({ pid: {type:String,default:''}, canManage:Boolean, confirm:Function });
 const emit = defineEmits(['close','execution','confirmRestore','packages']);
 const data = ref({}), tab = ref('description'), error = ref(''), loading = ref(false), restoring = ref(false);
+const latestCompleted=computed(()=>data.value.runs?.find(run=>!['queued','running'].includes(run.status) && run.source!=='trial'));
+const scheduleStatus=computed(()=>data.value.configuration_error?'配置异常':data.value.schedule?.application?.status==='failed'?'生效失败':data.value.schedule?.application?.status==='pending'?'待生效':!data.value.schedule?.configured?'未配置':data.value.schedule.enabled?'已启用':'已暂停');
+const taskIssue=computed(()=>data.value.configuration_error || (data.value.schedule?.application?.status==='failed' && (data.value.schedule.application.message || '调度配置未生效')) || (['failed','timed_out','interrupted','skipped','missed'].includes(latestCompleted.value?.status) ? latestCompleted.value.reason || statusLabel(latestCompleted.value.status) : '') || '');
 const selectedRun = ref('');
 const sourceVisited = ref(false);
 const sourceLoading = ref(false);

@@ -14,14 +14,14 @@ for (const username of ['browser-viewer','browser-operator']) {
     await login(page, username, '/viewer/#admin');
     await expect(page.locator('.app-shell')).toBeVisible();
     await expect(page).toHaveURL(/\/viewer\/#tasks/);
-    await expect(page.getByRole('navigation').getByRole('button')).toHaveCount(3);
+    await expect(page.getByRole('navigation',{name:'工作区导航'}).getByRole('button')).toHaveText(['任务列表','任务执行']);
     for (const label of ['数据库连接','系统管理','任务示例','依赖仓库','总览','平台事件','手动执行','检查更新','批量暂停调度'])
       await expect(page.getByRole('button', {name:label,exact:true})).toHaveCount(0);
     const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
     await row.getByRole('button', {name:'更多',exact:true}).click();
-    await expect(page.locator('.action-menu').getByRole('button')).toHaveText(['最新输出', /收藏/]);
+    await expect(page.locator('.action-menu').getByRole('button')).toHaveText(['任务详情','最新输出', /收藏/]);
     await page.keyboard.press('Escape');
-    await row.getByRole('button', {name:'详情',exact:true}).click();
+    await row.locator('.task-name-link').click();
     await expect(page.getByRole('dialog').getByRole('tab')).toHaveText(['说明与配置','执行记录']);
     expect(requests.filter(path => path.startsWith('/api/admin') || path === '/api/taskinfo/dashboard')).toEqual([]);
     expect((await page.request.get('/api/admin/database-connections')).status()).toBe(403);

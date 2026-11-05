@@ -20,20 +20,31 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   await expect(dialog.locator('.release-code')).toContainText('+value="GITLAB_V1"');
   const publish = async () => {
     await dialog.getByRole('button', {name:'检查依赖环境',exact:true}).click();
-    await expect(dialog.getByRole('button', {name:'发布此版本',exact:true})).toBeVisible({timeout:35000});
+    const checklist = dialog.getByLabel('发布检查摘要');
+    await expect(checklist.locator('.passed')).toContainText('依赖环境：检查通过',{timeout:35000});
     const headers = {'X-CSRF-Token': await page.evaluate(() => sessionStorage.getItem('wfs_csrf_token'))};
     const policy=(await(await page.request.get('/api/admin/operational/policy/release')).json()).data;
     expect((await page.request.post('/api/admin/operational/policy/release',{headers,data:{...policy,require_trial:true}})).status()).toBe(200);
-    await dialog.getByRole('button',{name:'使用测试连接试运行此版本',exact:true}).click();
-    await page.locator('.confirm-modal').getByRole('button',{name:'提交试运行',exact:true}).click();
+    await dialog.getByRole('button',{name:'刷新发布检查',exact:true}).click();
+    await expect(checklist.locator('.blocked')).toContainText('需要同一版本的成功试运行');
+    await expect(dialog.getByRole('button',{name:'发布此版本',exact:true})).toHaveCount(0);
+    await checklist.getByRole('button',{name:'打开试运行设置',exact:true}).click();
+    await expect(dialog.locator('summary').filter({hasText:'试运行设置与执行请求'})).toBeFocused();
     const overview=(await(await page.request.get('/api/taskinfo/packages')).json()).data;
     const activePid=overview.tasks.find(task=>task.folder_name==='git_new').pid;
+    const requests='/api/admin/operational/requests?pid='+encodeURIComponent(activePid);
+    const previous=(await(await page.request.get(requests)).json()).data;
+    await dialog.getByRole('button',{name:'使用测试连接试运行此版本',exact:true}).click();
+    await page.locator('.confirm-modal').getByRole('button',{name:'提交试运行',exact:true}).click();
     await expect.poll(async()=>{
-      const rows=(await(await page.request.get('/api/admin/operational/requests?pid='+encodeURIComponent(activePid))).json()).data;
-      const row=rows.find(r=>r.kind==='trial');if(!row?.run_id)return 'pending';
+      const rows=(await(await page.request.get(requests)).json()).data;
+      const row=rows.find(r=>r.kind==='trial' && r.run_id && !previous.some(old=>old.run_id===r.run_id));if(!row)return 'pending';
       return (await(await page.request.get('/api/taskinfo/run?run_id='+row.run_id)).json()).data.record.status;
     },{timeout:30000}).toBe('success');
+    await dialog.getByRole('button',{name:'刷新发布检查',exact:true}).click();
+    await expect(checklist.locator('.passed')).toContainText('已有成功记录');
     await dialog.getByRole('button', {name:'发布此版本',exact:true}).click();
+    await expect(page.locator('.confirm-modal')).toContainText('已排队或运行的实例继续使用原版本');
     await page.locator('.confirm-modal').getByRole('button', {name:'确认发布',exact:true}).click();
     await expect(dialog.getByRole('status').filter({hasText:'任务代码已发布'})).toBeVisible();
   };
@@ -41,7 +52,9 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   await dialog.getByRole('button', {name:'关闭',exact:true}).click();
   const row = page.locator('.task-table tbody tr').filter({hasText:'git_new'});
   await expect(row).toContainText('未配置');
-  await row.getByRole('button', {name:'手动执行',exact:true}).click();
+  await expect(row.getByRole('button', {name:'配置调度',exact:true})).toBeVisible();
+  await row.getByRole('button', {name:'更多',exact:true}).click();
+  await page.getByLabel('任务更多操作').getByRole('button', {name:'手动执行',exact:true}).click();
   await expect(page.locator('.execution-output')).toContainText('GITLAB_V1');
   await page.locator('.execution-modal').getByTitle('关闭').click();
   const headers = {'X-CSRF-Token': await page.evaluate(() => sessionStorage.getItem('wfs_csrf_token'))};

@@ -3,9 +3,9 @@ import {navigate} from './navigation-helpers.js';
 async function login(page,hash='dashboard'){
  await page.goto('/#'+hash);await page.getByLabel('用户名',{exact:true}).fill('admin');await page.getByLabel('密码',{exact:true}).fill('browser-test-password');await page.getByRole('button',{name:'登录',exact:true}).click();await expect(page.locator('.app-shell')).toBeVisible();
 }
-test('six primary destinations, grouped settings, keyboard menu and narrow screen',async({page})=>{
+test('four primary destinations, grouped settings, keyboard menu and narrow screen',async({page})=>{
  await login(page);
- await expect(page.getByRole('navigation',{name:'工作区导航'}).getByRole('button')).toHaveText(['总览','任务列表','执行矩阵','执行记录','代码更新']);
+ await expect(page.getByRole('navigation',{name:'工作区导航'}).getByRole('button')).toHaveText(['总览','任务列表','任务执行','代码更新']);
  await page.getByRole('button',{name:/账户菜单$/}).click();await expect(page.getByRole('menuitem',{name:'平台设置',exact:true})).toBeFocused();
  await page.keyboard.press('ArrowDown');await expect(page.getByRole('menuitem',{name:'平台事件',exact:true})).toBeFocused();await page.keyboard.press('Escape');await expect(page.getByRole('menu')).toHaveCount(0);
  await navigate(page,'数据库连接');await expect(page.locator('.connection-panel')).toBeVisible();

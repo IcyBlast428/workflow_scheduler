@@ -109,6 +109,7 @@
         <button class="btn" type="button" @click="$emit('reset')">清空</button>
       </div>
     </form>
+    <div v-if="filterChips.length" class="log-filter-chips" aria-label="当前筛选"><span class="hint">当前筛选</span><button v-for="chip in filterChips" :key="chip.key" type="button" class="btn" :aria-label="'清除'+chip.label" @click="$emit('clear-filter',chip.key)">{{ chip.label }}：{{ chip.value }} <span aria-hidden="true">×</span></button></div>
     <LoadingStatus :active="taskLogs.loading" label="正在更新执行记录…" />
     <div class="log-update-lane" aria-live="polite"><button v-if="taskLogs.newRecords" class="btn" :disabled="taskLogs.loading" @click="$emit('updates')">有新执行记录 · 点击查看</button><span v-else class="hint">后台自动检查新结果；阅读、翻页时保留当前列表，避免新记录挤动内容。</span><span v-if="taskLogs.refreshError" class="hint">{{ taskLogs.refreshError }}</span></div>
     <LogTable
@@ -144,10 +145,26 @@
 import LogTable from '../components/LogTable.vue';
 import Pagination from '../components/Pagination.vue';
 import LoadingStatus from '../components/LoadingStatus.vue';
-defineProps({
+import { computed } from 'vue';
+import { recentDates } from '../timebase';
+const props=defineProps({
   taskLogs: { type: Object, required: true },
   matrixLogRange: Array,
 });
-defineEmits(['range', 'search', 'reset', 'open', 'page', 'page-size','updates','tasks']);
+const filterChips = computed(() => {
+  const params = props.taskLogs.params;
+  const defaults = recentDates();
+  const matrixRange = props.matrixLogRange?.join(' — ');
+  const customDates = !matrixRange && params.startDate && params.endDate && (params.startDate !== defaults.start || params.endDate !== defaults.end);
+  return [
+    { key:'taskid', label:'任务编号', value:props.taskLogs.ids.find(item => item.id === params.taskid)?.name || params.taskid },
+    { key:'taskname', label:'任务名称', value:params.taskname },
+    { key:'taskstate', label:'执行状态', value:params.taskstate },
+    { key:'scope', label:'查询范围', value:({archive:'归档记录',all:'近期与归档'})[params.scope] },
+    { key:'dates', label:'日期范围', value:customDates ? `${params.startDate} — ${params.endDate}` : '' },
+    { key:'range', label:'矩阵时间段', value:matrixRange },
+  ].filter(item => item.value);
+});
+defineEmits(['range', 'search', 'reset', 'open', 'page', 'page-size','updates','tasks','clear-filter']);
 </script>
-<style scoped>.log-update-lane{min-height:48px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 var(--panel-padding) 8px}.log-update-lane .hint{font-size:12px}</style>
+<style scoped>.log-update-lane,.log-filter-chips{min-height:48px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 var(--panel-padding) 8px}.log-update-lane .hint{font-size:12px}.log-filter-chips .btn{min-height:32px;white-space:normal;overflow-wrap:anywhere}</style>

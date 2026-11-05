@@ -26,11 +26,12 @@ test('dialogs keep focus, protect unsaved edits and restore task deep links', as
   await expect(schedule).not.toBeVisible();
   await expect(more).toBeFocused();
   await expect(page.locator('.app-shell')).not.toHaveAttribute('inert','');
-  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await row.locator('.task-name-link').click();
   await expect(page).toHaveURL(/pid=acceptance__slow/);
   await page.reload();
   const detail = page.getByRole('dialog',{name:/任务详情/});
   await expect(detail).toBeVisible();
+  await expect(detail.getByLabel('任务运行摘要')).toContainText('当前代码版本');
   await detail.getByRole('tab',{name:'说明与配置',exact:true}).press('ArrowRight');
   await expect(detail.getByRole('tab',{name:'DDL 与标签',exact:true})).toHaveAttribute('aria-selected','true');
   await detail.getByRole('tab',{name:'DDL 与标签',exact:true}).press('ArrowRight');
@@ -68,11 +69,11 @@ test('login, new-tab session, dismiss pause, execution, download and history', a
   await page.locator('.action-menu').getByRole('button',{name:'暂停调度',exact:true}).click();
   await page.locator('.confirm-modal').getByRole('button',{name:'仅暂停',exact:true}).click();
   await expect(row).toContainText('已暂停');
-  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await row.locator('.task-name-link').click();
   await page.getByRole('tab',{name:'执行与输出',exact:true}).click();
   await page.getByRole('button',{name:'查看执行',exact:true}).first().click();
   await expect(page.locator('.execution-output')).toContainText('浏览器回归完成',{timeout:20000});
-  await expect(page.locator('.execution-meta')).toContainText('成功');
+  await expect(page.getByLabel('执行摘要')).toContainText('成功');
   const downloadEvent = page.waitForEvent('download');
   await page.getByRole('link',{name:'下载保留日志'}).click();
   const download = await downloadEvent;
@@ -164,7 +165,7 @@ test('detail tabs retain code state and slow refresh keeps content and geometry'
   await page.getByLabel('密码').fill('browser-test-password');
   await page.getByRole('button',{name:'登录',exact:true}).click();
   const row = page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
-  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await row.locator('.task-name-link').click();
   const dialog = page.locator('.task-detail-modal');
   await expect(dialog.getByRole('button',{name:'刷新详情',exact:true})).toBeEnabled();
   const initialBox = await dialog.boundingBox();
@@ -235,7 +236,7 @@ test('source highlighting retains multi-line strings across pages and escapes HT
   await page.getByLabel('用户名').fill('admin');
   await page.getByLabel('密码').fill('browser-test-password');
   await page.getByRole('button',{name:'登录',exact:true}).click();
-  await page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'}).getByRole('button',{name:'详情',exact:true}).click();
+  await page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'}).locator('.task-name-link').click();
   const dialog = page.locator('.task-detail-modal');
   await dialog.getByRole('tab',{name:'查看代码',exact:true}).click();
   const code = dialog.locator('.source-code');

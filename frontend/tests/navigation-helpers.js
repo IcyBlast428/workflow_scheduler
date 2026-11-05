@@ -1,9 +1,9 @@
 export async function navigate(page,label){
  const aliases={'系统管理':'平台设置','任务示例':'任务示例与文档'};
  label=aliases[label] || label;
- if(['执行队列','执行矩阵'].includes(label)){
-  await page.getByRole('navigation',{name:'工作区导航'}).getByRole('button',{name:'执行矩阵',exact:true}).click();
-  await page.getByRole('navigation',{name:'执行矩阵分栏'}).getByRole('button',{name:label==='执行队列'?'执行队列':'当日轨迹',exact:true}).click();
+ if(['执行队列','执行矩阵','执行记录'].includes(label)){
+  await page.getByRole('navigation',{name:'工作区导航'}).getByRole('button',{name:'任务执行',exact:true}).click();
+  await page.getByRole('navigation',{name:'任务执行分栏'}).getByRole('button',{name:label==='执行矩阵'?'当日轨迹':label,exact:true}).click();
   return;
  }
  if(['数据库连接','依赖仓库'].includes(label)){

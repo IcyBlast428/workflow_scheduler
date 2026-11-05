@@ -160,11 +160,11 @@
           v-for="item in visibleNavItems"
           :key="item.id"
           class="nav-button"
-          :class="{ active: view === item.id }"
+          :class="{ active: activeNav.id === item.id }"
           type="button"
           :title="item.label"
           :aria-label="item.label"
-          :aria-current="view === item.id ? 'page' : undefined"
+          :aria-current="activeNav.id === item.id ? 'page' : undefined"
           @mouseenter="showNavHint(item, $event)"
           @mouseleave="navHint = null"
           @focus="showNavHint(item, $event)"
@@ -243,16 +243,30 @@
           />
         </template>
 
-        <template v-else-if="view === 'matrix' || view === 'queue' && canManage">
+        <template v-else-if="['matrix','taskLogs','queue'].includes(view)">
           <ExecutionMatrixWorkspace
             :user-key="user.name"
             :can-manage="canManage"
             :confirm="requestConfirm"
+            :selected-tab="view==='taskLogs'?'logs':view==='queue'?'queue':matrixTab"
+            @select="selectExecutionTab"
+            @record="openMatrixRecord"
+            @history="openTaskHistory"
             @settings="switchView('admin')"
             @task="detailPid = $event"
             @execution="openExecution"
             @logs="openMatrixLogs"
-          />
+          >
+            <template #logs>
+              <ExecutionLogsView
+                :task-logs="taskLogs" :matrix-log-range="matrixLogRange"
+                @range="setLogRange" @search="searchTaskLogs" @reset="resetTaskLogFilters"
+                @open="openTaskLog" @page="setTaskLogPage" @page-size="setTaskLogPageSize"
+                @updates="loadTaskLogs(true)" @tasks="switchView('tasks')"
+                @clear-filter="clearTaskLogFilter"
+              />
+            </template>
+          </ExecutionMatrixWorkspace>
         </template>
 
         <template v-else-if="view === 'tasks'">
@@ -289,21 +303,6 @@
               onlyFavorites = $event;
               loadTasks(true);
             "
-          />
-        </template>
-
-        <template v-else-if="view === 'taskLogs'">
-          <ExecutionLogsView
-            :task-logs="taskLogs"
-            :matrix-log-range="matrixLogRange"
-            @range="setLogRange"
-            @search="searchTaskLogs"
-            @reset="resetTaskLogFilters"
-            @open="openTaskLog"
-            @page="setTaskLogPage"
-            @page-size="setTaskLogPageSize"
-            @updates="loadTaskLogs(true)"
-            @tasks="switchView('tasks')"
           />
         </template>
 
@@ -426,6 +425,7 @@ import { useLiveUpdates } from './composables/useLiveUpdates';
 
 import {
   defineAsyncComponent,
+  nextTick,
   onErrorCaptured,
   computed,
   onMounted,
@@ -450,7 +450,7 @@ import { scheduleRequest } from './scheduleForm';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import ScheduleDialog from './components/ScheduleDialog.vue';
 import { useTaskWorkspace } from './composables/useTaskWorkspace';
-import { useLogWorkspace } from './composables/useLogWorkspace';
+import { recentLogDates, useLogWorkspace } from './composables/useLogWorkspace';
 import { useDashboardWorkspace } from './composables/useDashboardWorkspace';
 import MaintenanceControl from './components/MaintenanceControl.vue';
 import TaskDetailDialog from './components/TaskDetailDialog.vue';
@@ -517,9 +517,9 @@ const navItems = [
   { id: 'queue', label: '执行队列', iconPaths: ['M8 6h12','M8 12h12','M8 18h7','M3 6h1','M3 12h1','M3 18h1','M18 16v5m-2-2 2 2 2-2'], description: '等待派发的任务、等待原因与执行去向。' },
   {
     id: 'matrix',
-    label: '执行矩阵',
+    label: '任务执行',
     iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 12l9 4 9-4', 'M3 17l9 4 9-4'],
-    description: '最近执行结果、当日轨迹与队列管理。',
+    description: '最近结果、当日轨迹、历史记录与队列管理。',
   },
   {
     id: 'taskLogs',
@@ -563,6 +563,7 @@ const navItems = [
 const ready = ref(false);
 const token = ref(getToken());
 const view = ref(readRoute(window.location.hash).view);
+const matrixTab = ref(readRoute(window.location.hash).params.get('tab') || 'recent');
 const packagePid = ref('');
 const mobileNavOpen = ref(false);
 const loginLoading = ref(false);
@@ -602,7 +603,7 @@ const { summary: gitlabSummary, showReminder: showGitlabReminder, accept: accept
 const canOperate = computed(() => canManage.value || user.roles.includes('maintainer'));
 const visibleNavItems = computed(() =>
   navItems.filter(
-    (item) => canManage.value ? ['dashboard','tasks','matrix','taskLogs','gitlab'].includes(item.id) : ['tasks', 'matrix', 'taskLogs'].includes(item.id),
+    (item) => canManage.value ? ['dashboard','tasks','matrix','gitlab'].includes(item.id) : ['tasks', 'matrix'].includes(item.id),
   ),
 );
 
@@ -636,6 +637,8 @@ const { dashboard, loadDashboard, syncDashboardPolling } =
   });
 const {
   taskLogs,
+  hasCurrentTaskLogQuery,
+  clearTaskLogFilter,
   systemLogs,
   matrixLogRange,
   loadTaskLogs,
@@ -683,7 +686,7 @@ const scheduleDialog = reactive({
 });
 
 const activeNav = computed(
-  () => navItems.find((item) => item.id === (view.value==='queue'?'matrix':['connections','repository'].includes(view.value)?'admin':view.value)) || navItems[0],
+  () => navItems.find((item) => item.id === (['queue','taskLogs'].includes(view.value)?'matrix':['connections','repository'].includes(view.value)?'admin':view.value)) || navItems[0],
 );
 
 function pushToast(type, title, message) {
@@ -870,7 +873,7 @@ async function switchView(nextView) {
   if(nextView!==view.value && !await confirmUnsaved(requestConfirm))return;
   if (token.value && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(nextView)) nextView = 'tasks';
   view.value = nextView;
-  window.location.hash = queueTab ? 'matrix?tab=queue' : nextView;
+  window.location.hash = queueTab ? 'matrix?tab=queue' : routeHash(nextView);
   mobileNavOpen.value = false;
   syncDashboardPolling();
 }
@@ -1142,6 +1145,7 @@ async function openLatestLog(row) {
 }
 
 async function openTaskLog(row) {
+  const origin = document.activeElement;
   const serial = ++logDetailSerial;
   showModal(`任务日志：${row.id}`, '正在加载日志...');
   try {
@@ -1150,6 +1154,8 @@ async function openTaskLog(row) {
         await api.execution(row.logid);
         if (serial !== logDetailSerial || !modal.open) return;
         closeModal();
+        await nextTick();
+        origin?.focus({ preventScroll: true });
         openExecution(row.logid);
         return;
       } catch (error) {
@@ -1192,9 +1198,6 @@ watch(view, async (nextView) => {
   if (nextView === 'tasks' && !tasks.items.length) {
     await Promise.all([loadTasks(), loadGroups()]);
   }
-  if (nextView === 'taskLogs' && !taskLogs.rows.length) {
-    await Promise.all([loadTaskLogs(), loadTaskIds()]);
-  }
   if (nextView === 'systemLogs' && !systemLogs.rows.length) {
     await Promise.all([loadSystemLogs(), loadSystemIds()]);
   }
@@ -1208,6 +1211,7 @@ async function applyRoute() {
   }
   if(route.view!==view.value && !await confirmUnsaved(requestConfirm)){window.history.replaceState(null,'','#'+view.value);return;}
   view.value = route.view;
+  matrixTab.value = route.params.get('tab') || 'recent';
   if (!token.value) return;
   detailPid.value = route.run ? '' : route.pid;
   executionRunId.value = route.run;
@@ -1220,12 +1224,16 @@ async function applyRoute() {
       end: 'endDate',
       scope: 'scope',
     };
+    const dates=recentLogDates();
+    const defaults={start:dates.start,end:dates.end,scope:'online'};
     for (const [query, key] of Object.entries(mapping))
-      if (route.params.has(query))
-        taskLogs.params[key] = route.params.get(query).slice(0, 200);
+      taskLogs.params[key] = (route.params.get(query) ?? defaults[query] ?? '').slice(0, 200);
+    const range=[route.params.get('from'),route.params.get('to')];
+    matrixLogRange.value=range.every(value=>value && value.length<=32 && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/.test(value))?range:[];
     if (!['online', 'archive', 'all'].includes(taskLogs.params.scope))
       taskLogs.params.scope = 'online';
-    loadTaskLogs(true);
+    if (!hasCurrentTaskLogQuery()) loadTaskLogs(true);
+    if (!taskLogs.ids.length) loadTaskIds();
   }
 }
 function syncRoute() {
@@ -1233,17 +1241,21 @@ function syncRoute() {
   const values = Object.fromEntries(current.params);
   values.pid = detailPid.value;
   values.run = executionRunId.value;
-  if (view.value === 'taskLogs')
-    Object.assign(values, {
+  if (view.value === 'taskLogs') Object.assign(values, logRouteValues());
+  const hash = routeHash(view.value, values);
+  if (hash !== window.location.hash) window.history.pushState(null, '', hash);
+}
+function logRouteValues() {
+  return {
       taskid: taskLogs.params.taskid,
       taskname: taskLogs.params.taskname,
       state: taskLogs.params.taskstate,
       start: taskLogs.params.startDate,
       end: taskLogs.params.endDate,
       scope: taskLogs.params.scope,
-    });
-  const hash = routeHash(view.value, values);
-  if (hash !== window.location.hash) window.history.pushState(null, '', hash);
+      from: matrixLogRange.value[0] || '',
+      to: matrixLogRange.value[1] || '',
+  };
 }
 window.addEventListener('hashchange', applyRoute);
 watch([detailPid, executionRunId], syncRoute);
@@ -1264,16 +1276,20 @@ async function openActiveExecution(row) {
     await handleRequestFailure(error, { toastTitle: '执行记录读取失败' });
   }
 }
+function selectExecutionTab(tab) {
+  const hash=tab==='logs'?routeHash('taskLogs',logRouteValues()):routeHash('matrix',{tab});
+  if(hash!==window.location.hash)window.location.hash=hash;
+}
+function openMatrixRecord(record) {
+  return openTaskLog({id:record.pid,logid:record.run_id,datetime:record.query_end || record.end_time});
+}
+function openTaskHistory(record) {
+  const dates=recentLogDates();
+  const end=record.end_time?.slice(0,10) || dates.end;
+  window.location.hash=routeHash('taskLogs',{taskid:record.pid,scope:'all',start:end<dates.start?end:dates.start,end:end<dates.start?end:dates.end});
+}
 function openMatrixLogs(record) {
-  taskLogs.params.taskid = record.pid;
-  taskLogs.params.taskname = '';
-  taskLogs.params.scope = record.scope || 'online';
-  taskLogs.params.startDate = record.start_time.slice(0, 10);
-  taskLogs.params.endDate = record.end_time.slice(0, 10);
-  taskLogs.params.taskstate = '';
-  matrixLogRange.value = [record.query_start, record.query_end];
-  switchView('taskLogs');
-  loadTaskLogs(true);
+  window.location.hash=routeHash('taskLogs',{taskid:record.pid,taskname:'',state:'',scope:record.scope || 'online',start:record.start_time.slice(0,10),end:record.end_time.slice(0,10),from:record.query_start,to:record.query_end});
 }
 async function retryExecution(record) {
   if (retryingExecution.value) return;

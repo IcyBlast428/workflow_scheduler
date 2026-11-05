@@ -3,7 +3,7 @@ export const defaultCamera = () => ({ yaw: -12, pitch: 24, zoom: 1, x: 0, y: 0 }
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export function moveCamera(camera, button, dx, dy) {
   if (button === 0) { camera.yaw -= dx * .4; camera.pitch += dy * .25; }
-  if (button === 2) camera.zoom = clamp(camera.zoom * Math.exp(-dy * .009), .4, 3);
+  if (button === 2) camera.zoom = clamp(camera.zoom * Math.exp(dx * .009), .4, 3);
   if (button === 1) { camera.x += dx; camera.y += dy; }
 }
 export function layoutTasks(tasks) {
@@ -174,7 +174,7 @@ export function createMatrixScene(canvas, onSelect, options = {}) {
     getCamera(){return {...camera};},
     setCamera(value){camera=safeCamera(value);schedule();},
     restore(){camera=defaultCamera();options.onCamera?.({...camera});schedule();},
-    keyboard(e){if(!e.altKey)return;const moves={ArrowRight:[0,25,0],ArrowLeft:[0,-25,0],ArrowUp:[0,0,-20],ArrowDown:[0,0,20],'+':[2,0,-20],'-':[2,0,20]};if(moves[e.key]){e.preventDefault();moveCamera(camera,...moves[e.key]);options.onCamera?.({...camera});schedule();}},
+    keyboard(e){if(!e.altKey)return;const moves={ArrowRight:[0,25,0],ArrowLeft:[0,-25,0],ArrowUp:[0,0,-20],ArrowDown:[0,0,20],'+':[2,20,0],'-':[2,-20,0]};if(moves[e.key]){e.preventDefault();moveCamera(camera,...moves[e.key]);options.onCamera?.({...camera});schedule();}},
     dispose(){resize.disconnect();cancelAnimationFrame(frame);for(const [event,handler] of [['pointerdown',down],['pointermove',move],['pointerup',up],['pointercancel',cancel],['lostpointercapture',cancel],['contextmenu',menu]])canvas.removeEventListener(event,handler);}
   };
 }

@@ -38,7 +38,7 @@ def trial_evidence(pid,version):
 def preview(data):
     p=policy.load('release')
     result={'environment':p['environment'],'policy_revision':p['revision'],'window_open':policy.in_window(p),
-            'require_ci':p['require_ci'],'require_trial':p['require_trial'],'trial':trial_evidence(data['pid'],data['version'])}
+            'require_ci':p['require_ci'],'required_jobs':p['required_jobs'],'require_trial':p['require_trial'],'trial':trial_evidence(data['pid'],data['version'])}
     if p['require_ci']:
         try: result['ci']=evidence(data)
         except Exception: result['ci']={'status':'unavailable','jobs':[],'message':'无法核对 GitLab 流水线。'}

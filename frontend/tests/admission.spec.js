@@ -35,7 +35,7 @@ test('GaussDB platform source and embedded task authorization workspace',async({
   await expect(page.getByRole('button',{name:'测试并保存（重启生效）'})).toHaveCount(0);
   await page.getByRole('button',{name:'任务列表',exact:true}).click();
   const row=page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
-  await row.getByRole('button',{name:'详情',exact:true}).click();
+  await row.locator('.task-name-link').click();
   const dialog=page.getByRole('dialog');
   await dialog.getByRole('tab',{name:'连接授权',exact:true}).click();
   await expect(dialog).toContainText('任务默认无业务数据库权限');
@@ -45,7 +45,7 @@ test('GaussDB platform source and embedded task authorization workspace',async({
   await expect(dialog).toContainText('授权已保存，下次执行生效');
   await dialog.getByRole('tab',{name:'代码版本',exact:true}).click();
   await expect(page.getByRole('dialog')).toHaveCount(1);
-  await expect(dialog.getByText('GitLab 代码审查与任务版本')).toBeVisible();
+  await expect(dialog.locator('.release-top')).toContainText('当前版本');
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   expect(faults).toEqual([]);

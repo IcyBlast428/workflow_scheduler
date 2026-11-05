@@ -33,7 +33,7 @@
         <div v-else-if="!data.records.length && !data.active.length" class="matrix-empty matrix-empty-small">当天暂无执行记录</div>
         <div v-if="selectedTask" v-glass class="matrix-selection glass-surface glass-floating"><strong>{{ selectedTask.name }}</strong><span>{{ selectedTask.group }}<template v-if="selectedRecord"> · {{ statusName(selectedRecord.status) }} · {{ selectedRecord.time.slice(11,19) }}</template></span></div>
         <div v-glass class="matrix-surface-note glass-surface glass-floating">时间由左向右：当日 00:00 → 当前 → 未来 2 小时内的计划</div>
-        <div v-glass class="matrix-camera-bar glass-surface glass-floating"><span>Alt + 左键旋转 · 右键缩放 · 中键平移</span><button class="btn" @click="scene?.restore()" @keydown="scene?.keyboard($event)" title="键盘：Alt + 方向键旋转，Alt + 加减号缩放">恢复全景</button></div>
+        <div v-glass class="matrix-camera-bar glass-surface glass-floating"><span>按住 Alt：左键旋转 · 右键向右放大、向左缩小 · 中键平移</span><button class="btn" @click="scene?.restore()" @keydown="scene?.keyboard($event)" title="键盘：Alt + 方向键旋转，Alt + 加减号缩放">恢复全景</button></div>
       </div>
       <div class="matrix-details">
         <section class="matrix-card"><h3>任务定位</h3>
@@ -69,7 +69,7 @@ import LoadingStatus from './LoadingStatus.vue';
 import { createMatrixScene, layoutTasks } from '../executionMatrixScene';
 import { statusLabel } from '../executionLabels';
 import { readPreference, writePreference, mergeMatrixSnapshot, matrixQuery, matrixViewMode } from '../workspacePreferences';
-const props = defineProps({userKey:{type:String,default:''}});
+const props = defineProps({userKey:{type:String,default:''},active:Boolean});
 defineEmits(['task', 'execution', 'logs']);
 const canvas=ref(null),data=ref(null),date=ref(''),loading=ref(false),error=ref(''),selectedPid=ref(''),selectedKey=ref(''),focus=ref(false);
 const recordLimit=ref(200);
@@ -113,7 +113,7 @@ async function load(force=false){
   }catch(exc){if(!disposed&&current===serial)error.value=exc.message||'暂时无法读取执行矩阵。';}
   finally{if(current===serial){loading.value=false;inFlight=false;}}
 }
-function refresh(event){load(event?.detail?.silent!==true);}
+function refresh(event){if(props.active)load(event?.detail?.silent!==true);}
 function changeDate(){live.value=false;load(true);}
 function changeMode(){load(true);}
 async function toggleFullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await pageElement.value?.requestFullscreen();}catch{error.value='此浏览器暂不支持全屏，请使用浏览器的全屏功能。';}}
@@ -122,7 +122,7 @@ watch(displayMode,async()=>{await nextTick();ensureScene();updateScene();});
 watch([category,timeWindow,onlyAbnormal],()=>{updateScene();savePreferences();});
 watch(()=>props.userKey,restorePreferences,{immediate:true});
 watch(selectedPid,()=>{recordLimit.value=200;});
-onMounted(()=>{load();timer=setInterval(()=>{if(live.value&&!document.hidden)load();},10000);window.addEventListener('wfs:matrix-refresh',refresh);});
+onMounted(()=>{load();timer=setInterval(()=>{if(props.active&&live.value&&!document.hidden)load();},10000);window.addEventListener('wfs:matrix-refresh',refresh);});
 onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEventListener('wfs:matrix-refresh',refresh);scene?.dispose();});
 </script>
 

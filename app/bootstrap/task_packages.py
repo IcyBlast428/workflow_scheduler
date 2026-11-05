@@ -680,6 +680,9 @@ def preview(pid, version, filename=None):
     result['preflight'] = dict(active_instances=runnings.count(pid), entry=selected, entry_present=selected in new, entry_changed=bool(base and base['main_file'] != data['main_file']), shared_sdk_changed=bool(base and base.get('shared_sdk_sha256') != data.get('shared_sdk_sha256')), shared_sdk_current=(base or {}).get('shared_sdk_sha256', ''), shared_sdk_candidate=data.get('shared_sdk_sha256', ''), dependencies_changed=any((c['path'] in ('requirements.txt', 'requirements.lock', 'pyproject.toml') or c['path'].startswith('wheels/') for c in changes)), environment_ready=data['status'] in ('ready', 'applied'), schedule_enabled=str(config.get('enabled', '')).lower() in ('1', 'true', 'yes', 'on'), current_version=record.get('active_version'), candidate_version=version, business_verified=False)
     if filename is None:
         from app.bootstrap.release_controls import preview as gates
+        from app.extensions import scheduler
+        next_run = getattr(scheduler.get_job(pid), 'next_run_time', None)
+        result['preflight']['next_run_time'] = next_run.strftime('%Y-%m-%d %H:%M:%S') if next_run else ''
         result['gates'] = gates(data)
     if filename is not None:
         if filename not in old and filename not in new:

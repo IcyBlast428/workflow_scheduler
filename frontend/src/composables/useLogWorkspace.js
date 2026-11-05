@@ -77,6 +77,21 @@ export function useLogWorkspace({
       pagesize: taskLogs.params.pagesize,
     };
   }
+  function hasCurrentTaskLogQuery() {
+    return taskLogs.loaded && !taskLogs.loading && !taskLogs.error && JSON.stringify(appliedTaskQuery) === JSON.stringify(taskLogQueryParams());
+  }
+  function clearTaskLogFilter(key) {
+    if (key === 'range') matrixLogRange.value = [];
+    else if (key === 'scope') taskLogs.params.scope = 'online';
+    else if (key === 'dates') {
+      const dates = recentLogDates();
+      taskLogs.params.startDate = dates.start;
+      taskLogs.params.endDate = dates.end;
+    } else if (['taskid','taskname','taskstate'].includes(key)) taskLogs.params[key] = '';
+    else return;
+    syncRoute();
+    loadTaskLogs(true);
+  }
 
   async function loadTaskLogs(resetPage = false, options = {}) {
     const buffering=options.buffer===true;
@@ -230,6 +245,8 @@ export function useLogWorkspace({
   }
   return {
     taskLogs,
+    hasCurrentTaskLogQuery,
+    clearTaskLogFilter,
     systemLogs,
     matrixLogRange,
     loadTaskLogs,

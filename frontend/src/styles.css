@@ -1917,6 +1917,9 @@ tbody tr:hover {
 .execution-meta { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-soft); align-items: center; }
 .execution-meta span { overflow-wrap: anywhere; min-width: 0; }
 .execution-modal .modal-body > .btn { margin-bottom: 16px; }
+.workbench-summary {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:12px;padding:14px 16px;margin-bottom:16px;border:1px solid var(--line);border-radius:12px;background:var(--panel-soft)}
+.workbench-summary>div{min-width:0;display:grid;gap:7px}.workbench-summary small{color:var(--muted);font-size:12px}.workbench-summary strong{font-size:14px;overflow-wrap:anywhere}
+.execution-reason p,p.execution-reason{margin:6px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}.execution-content-tabs{margin-top:12px}
 .execution-modal .filter-actions .input { width: auto; flex: 1 1 260px; }
 .execution-output { padding: 16px; margin: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-soft); }
 .modal-head .hint { margin: 6px 0 0; }

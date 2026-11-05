@@ -6,7 +6,7 @@ async function login(page,view='dashboard'){
 test('missing lazy module shows recovery and refreshing restores the same page',async({page})=>{
  await login(page);
  await page.route('**/static/ExecutionMatrixWorkspace-*.js',route=>route.fulfill({status:404,body:'Missing old chunk'}));
- await page.getByRole('button',{name:'执行矩阵',exact:true}).click();await expect(page.locator('.asset-recovery')).toBeVisible();
+ await page.getByRole('button',{name:'任务执行',exact:true}).click();await expect(page.locator('.asset-recovery')).toBeVisible();
  await page.unroute('**/static/ExecutionMatrixWorkspace-*.js');await page.getByRole('button',{name:'刷新页面资源',exact:true}).click();
  await expect(page.locator('.recent-executions')).toBeVisible();await expect(page.locator('.asset-recovery')).toHaveCount(0);await expect(page).toHaveURL(/#matrix$/);
 });

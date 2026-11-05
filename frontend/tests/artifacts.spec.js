@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { navigate } from './navigation-helpers';
 
 
 test('nested project publication produces isolated CSV, JSON and escaped log downloads', async ({
@@ -19,12 +20,16 @@ test('nested project publication produces isolated CSV, JSON and escaped log dow
   const row = page
     .locator('.task-table tbody tr')
     .filter({ hasText: '目录与输出验收' });
-  await row.getByRole('button', { name: '手动执行', exact: true }).click();
+  const runTask = async () => {
+    await row.getByRole('button', { name: '更多', exact: true }).click();
+    await page.getByLabel('任务更多操作').getByRole('button', { name: '手动执行', exact: true }).click();
+  };
+  await runTask();
   const dialog = page.locator('.execution-modal');
   await expect(dialog.locator('.execution-output')).toContainText(
     'ARTIFACT_RUN_OK',
   );
-  await expect(dialog.locator('.execution-meta')).toContainText('成功');
+  await expect(dialog.getByLabel('执行摘要')).toContainText('成功');
   await dialog.getByRole('button', { name: '输出文件', exact: true }).click();
   const outputs = dialog.locator('.task-artifacts');
   await outputs
@@ -54,8 +59,8 @@ test('nested project publication produces isolated CSV, JSON and escaped log dow
   await expect(outputs.locator('.artifact-preview')).toContainText('<script>');
   expect(await page.evaluate(() => window.outputXss)).toBeUndefined();
   await dialog.getByTitle('关闭').click();
-  await row.getByRole('button', { name: '手动执行', exact: true }).click();
-  await expect(dialog.locator('.execution-meta')).toContainText('成功');
+  await runTask();
+  await expect(dialog.getByLabel('执行摘要')).toContainText('成功');
   await dialog.getByRole('button', { name: '输出文件', exact: true }).click();
   await outputs
     .getByRole('button', { name: '打开目录 reports', exact: true })
@@ -66,16 +71,16 @@ test('nested project publication produces isolated CSV, JSON and escaped log dow
   expect(newUrl).not.toBe(oldUrl);
   expect((await page.request.get(oldUrl)).status()).toBe(200);
   await dialog.getByTitle('关闭').click();
-  await page.getByRole('button', { name: '执行记录', exact: true }).click();
+  await navigate(page, '执行记录');
   await page.getByLabel('任务名称', { exact: true }).fill('目录与输出验收');
-  await page.getByRole('button', { name: '? 搜索', exact: true }).click();
-  await page
+  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  const recordDetails = page
     .getByRole('row')
     .filter({ hasText: '目录与输出验收' })
     .getByRole('button', { name: '详情', exact: true })
-    .first()
-    .click();
-  await expect(dialog.locator('.execution-meta')).toContainText('成功');
+    .first();
+  await recordDetails.click();
+  await expect(dialog.getByLabel('执行摘要')).toContainText('成功');
   await dialog.getByRole('button', { name: '输出文件', exact: true }).click();
   await outputs
     .getByRole('button', { name: '打开目录 reports', exact: true })
@@ -89,4 +94,7 @@ test('nested project publication produces isolated CSV, JSON and escaped log dow
       page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
     )
     .toBe(true);
+  await dialog.getByTitle('关闭').click();
+  await expect(recordDetails).toBeFocused();
+  await expect(page.getByLabel('任务名称', { exact: true })).toHaveValue('目录与输出验收');
 });
