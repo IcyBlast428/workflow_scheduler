@@ -125,13 +125,15 @@ class GaussDB:
                 )
             from app.bootstrap.postgres_native import Connection
 
-            self.conn = Connection(
-                host=self.__host,
-                port=int(self.__port),
-                dbname=self.__db,
-                user=self.__user,
-                password=self.__password,
-            )
+            from app.bootstrap.runtime_metrics import measure
+            with measure('database:connect'):
+                self.conn = Connection(
+                    host=self.__host,
+                    port=int(self.__port),
+                    dbname=self.__db,
+                    user=self.__user,
+                    password=self.__password,
+                )
             self.cursor = self.conn.cursor()
             try:
                 self.cursor.execute("SET statement_timeout = 10000")
@@ -171,7 +173,9 @@ class GaussDB:
         if not 1 <= timeout_seconds <= 3600:
             raise ValueError("WFS_DB_QUERY_TIMEOUT_SECONDS must be between 1 and 3600")
         # 高斯 DWS ODBC 驱动自带连接复用能力，Python 层不维护跨线程长连接。
-        self.conn = pyodbc.connect(conn_str, autocommit=True, timeout=10)
+        from app.bootstrap.runtime_metrics import measure
+        with measure('database:connect'):
+            self.conn = pyodbc.connect(conn_str, autocommit=True, timeout=10)
         self.conn.autocommit = True
         self.cursor = self.conn.cursor()
         # Server timeout also works when the ODBC driver rejects timeout attributes.
@@ -243,6 +247,7 @@ class GaussDB:
         except Exception as e:
             raise Exception(e)
 
+    @measured("database:config")
     def __get_db_config(self, db_name, schema):
         conf_dic = dict()
         if self.current_env == "production":

@@ -51,6 +51,7 @@
         :inert="loading"
       >
         <div class="schedule-layout">
+          <div class="configuration-guide"><strong>配置分工</strong><p>发布：管理代码、默认入口和依赖环境。此页：维护执行时间、名称与资源上限。重试、补跑等在任务详情 → 配置 → 运行策略中管理。</p></div>
           <div class="schedule-overview">
             <div class="runtime-card">
               <label class="toggle-row">
@@ -73,7 +74,8 @@
                   />
                 </div>
                 <div class="form-row">
-                  <label for="main-file">入口文件</label>
+                  <span class="field-label">当前执行入口</span><code class="entry-summary">{{ form.main_file || '沿用发布入口' }}</code>
+                  <details class="entry-override"><summary>高级：覆盖执行入口</summary><p class="hint">通常在代码发布时设置。仅在已发布文件中切换入口；此项不会安装依赖或发布新代码。</p><label for="main-file">入口文件</label>
                   <input
                     id="main-file"
                     v-model.trim="form.main_file"
@@ -87,10 +89,10 @@
                       :key="item"
                       :value="item"
                     ></option>
-                  </datalist>
+                  </datalist></details>
                 </div>
                 <div class="form-row">
-                  <label for="max-instances">最大并发</label>
+                  <label for="max-instances">同时执行上限</label>
                   <input
                     id="max-instances"
                     v-model.number="form.max_instances"
@@ -113,7 +115,7 @@
             </div>
 
             <section class="runtime-card schedule-metadata">
-              <strong>负责人、说明与资源限制</strong>
+              <strong>负责人、说明与执行资源</strong>
               <div class="schedule-grid">
                 <div class="form-row">
                   <label for="schedule-owner">负责人</label
@@ -505,6 +507,8 @@
               </div>
             </div>
           </section>
+          <section v-if="changes.length" class="schedule-change-review" aria-label="保存前变更摘要"><strong>本次将修改 {{ changes.length }} 项</strong><p class="hint">保存后由调度器应用新配置；请结合上方未来执行时间核对。</p><dl><div v-for="change in changes" :key="change.key"><dt>{{ change.label }}</dt><dd><span class="muted">{{ change.before }}</span><span aria-label="改为"> → </span><strong>{{ change.after }}</strong></dd></div></dl></section>
+          <p v-else class="hint">尚未修改配置。</p>
         </div>
 
         <footer class="confirm-footer schedule-footer">
@@ -525,7 +529,7 @@
 <script setup>
 import ModalShell from './ModalShell.vue';
 import { businessDateTime } from '../timebase';
-import { computed, onUnmounted, reactive, watch } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { resetScheduleForm } from '../scheduleForm';
 import LoadingStatus from './LoadingStatus.vue';
 
@@ -602,6 +606,10 @@ const weekdayOptions = [
 
 const form = reactive(defaultForm());
 let initialForm = '';
+const baseline=ref({});
+const fieldLabels={enabled:'自动调度',task_name:'任务名称',main_file:'执行入口',max_instances:'同时执行上限',timeout_seconds:'超时（秒）',owner:'负责人',description:'任务说明',memory_mb:'内存（MiB）',cpu_seconds:'CPU 时间（秒）',file_mb:'单文件（MiB）',misfire_grace_seconds:'延迟容忍（秒）',schedule_type:'策略类型',interval_minutes:'间隔（分钟）',interval_hours:'间隔（小时）',fixed_time:'执行时间',daily_times:'每日时间点',weekday:'星期',month_day:'每月日期',window_start:'窗口开始',window_end:'窗口结束',window_interval_minutes:'窗口间隔（分钟）',window_day_of_week:'窗口星期',run_datetime:'单次执行时间',cron_minute:'Cron 分钟',cron_hour:'Cron 小时',cron_day:'Cron 日期',cron_month:'Cron 月份',cron_day_of_week:'Cron 星期'};
+function displayChange(key,value){if(key==='enabled')return value?'启用':'暂停';if(key==='schedule_type')return Object.values(typeOptions).flat().find(item=>item.value===value)?.label || value;if(Array.isArray(value))return value.join('、') || '未设置';return value===undefined || value===''?'未填写':String(value);}
+const changes=computed(()=>Object.entries(fieldLabels).filter(([key])=>JSON.stringify(form[key])!==JSON.stringify(baseline.value[key])).map(([key,label])=>({key,label,before:displayChange(key,baseline.value[key]),after:displayChange(key,form[key])})));
 function requestClose() {
   if (!props.saving)
     emit('close', {
@@ -658,6 +666,7 @@ watch(
     form.schedule_family = familyForType(form.schedule_type);
     ensureOnceAtDateTime();
     initialForm = JSON.stringify(form);
+    baseline.value=JSON.parse(initialForm);
   },
   { immediate: true },
 );
@@ -778,3 +787,8 @@ function submit() {
   emit('save', JSON.parse(JSON.stringify(form)));
 }
 </script>
+
+<style scoped>
+.configuration-guide,.schedule-change-review{border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;background:var(--panel-soft)}.configuration-guide p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.7}.entry-summary{display:block;padding:10px 12px;min-height:40px;background:var(--panel-soft);border-radius:6px;overflow-wrap:anywhere}.entry-override{margin-top:8px}.entry-override summary{cursor:pointer;color:var(--muted);font-size:13px}.entry-override .hint{line-height:1.6}.schedule-change-review dl{display:grid;gap:8px;margin:12px 0 0}.schedule-change-review dl>div{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px}.schedule-change-review dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}.schedule-change-review dt{color:var(--muted-strong)}.field-label{min-height:20px;line-height:20px;font-weight:600}
+@media(max-width:600px){.schedule-change-review dl>div{grid-template-columns:1fr;gap:4px}}
+</style>

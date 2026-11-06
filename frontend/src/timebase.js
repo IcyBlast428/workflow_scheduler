@@ -19,3 +19,15 @@ export function timestamp(value) {
   const text = String(value).replace(' ', 'T');
   return Date.parse(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(text) ? text : `${text}+08:00`);
 }
+
+// API dates without an offset are business time, never the browser's timezone.
+export function displayDateTime(value, fallback = '—') {
+  const instant = timestamp(value);
+  if (!Number.isFinite(instant)) return value ? String(value) : fallback;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(instant));
+  const date = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${date.year}-${date.month}-${date.day} ${date.hour}:${date.minute}:${date.second}`;
+}

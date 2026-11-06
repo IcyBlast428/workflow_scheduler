@@ -1,3 +1,4 @@
+import {detailTab} from './navigation-helpers.js';
 import { test, expect } from '@playwright/test';
 async function login(page, route='tasks') {
   await page.goto('/#'+route);
@@ -14,6 +15,7 @@ test('maintenance rejects new requests, preserves receipts and drains running ta
   const first=await call();expect(first.status()).toBe(200);const run=(await first.json()).data.run_id;
   await expect.poll(async()=>((await(await page.request.get('/api/taskinfo/run?run_id='+run)).json()).data.record.status)).toBe('running');
   const panel=page.getByLabel('执行维护模式');
+  await panel.getByRole('button',{name:'维护操作',exact:true}).click();
   await panel.getByRole('button',{name:'进入维护',exact:true}).click();
   await page.locator('.confirm-modal').getByRole('button',{name:'进入维护',exact:true}).click();
   await expect(panel).toContainText('维护模式：暂停启动新执行');
@@ -37,13 +39,13 @@ test('GaussDB platform source and embedded task authorization workspace',async({
   const row=page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
   await row.locator('.task-name-link').click();
   const dialog=page.getByRole('dialog');
-  await dialog.getByRole('tab',{name:'连接授权',exact:true}).click();
+  await detailTab(page,'连接授权');
   await expect(dialog).toContainText('任务默认无业务数据库权限');
   await expect(dialog.getByLabel('访问模式')).toHaveCount(0);
   await dialog.getByRole('button',{name:'保存授权',exact:true}).click();
   await page.locator('.confirm-modal').getByRole('button',{name:'保存授权',exact:true}).click();
   await expect(dialog).toContainText('授权已保存，下次执行生效');
-  await dialog.getByRole('tab',{name:'代码版本',exact:true}).click();
+  await detailTab(page,'代码版本');
   await expect(page.getByRole('dialog')).toHaveCount(1);
   await expect(dialog.locator('.release-top')).toContainText('当前版本');
   await page.setViewportSize({width:390,height:844});

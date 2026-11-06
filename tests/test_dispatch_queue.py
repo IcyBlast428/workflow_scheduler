@@ -188,7 +188,9 @@ class QueueIntegrationTests(unittest.TestCase):
         executor.shutdown()
         try:
             with patch.object(core,'discover_task_specs',return_value=specs),ThreadPoolExecutor(max_workers=3) as pool:
-                deadline=time.monotonic()+20
+                # This is a correctness check, not a throughput SLA. Native PostgreSQL
+                # connections on Windows may need more than 20 seconds for the burst.
+                deadline=time.monotonic()+60
                 while time.monotonic()<deadline:
                     queue.dispatch()
                     self.assertLessEqual(runnings.count(),3)

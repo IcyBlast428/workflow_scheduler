@@ -46,6 +46,7 @@
 </template>
 <script setup>
 import { computed, ref, watch, onBeforeUnmount, defineAsyncComponent } from 'vue';
+import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 import {confirmUnsaved} from '../composables/useUnsavedChanges';
 import ModalShell from './ModalShell.vue';
@@ -56,7 +57,7 @@ const emit = defineEmits(['close', 'changed', 'execution']);
 const record = ref(null), candidate = ref(null), versions = ref([]), preview = ref(null), entry = ref('');
 const loading = ref(false), busy = ref(false), busyLabel = ref(''), error = ref(''), message = ref('');
 const path = ref(''), diff = ref(''), diffLoading = ref(false);
-let generation = 0, timer, alive = true, diffSequence = 0, previewSequence = 0;
+let generation = 0, alive = true, diffSequence = 0, previewSequence = 0;
 const short = value => value?.slice(0, 8) || '—';
 const label = value => ({ staged:'待检查', preparing:'检查中', ready:'检查通过', applied:'已发布', failed:'检查失败',cleaned:'已清理' }[value] || value);
 const counts = computed(() => Object.fromEntries(['added','modified','deleted'].map(kind => [kind, preview.value?.changes.filter(f => f.kind === kind).length || 0])));
@@ -104,12 +105,12 @@ async function inspect(version) {
   if (!version) return; const token = generation, request = ++previewSequence; diffSequence++; path.value = ''; diff.value = ''; diffLoading.value = false;
   const data = await api.packagePreview(props.pid, version);
   if (!alive || token !== generation || request !== previewSequence) return;
-  preview.value = data; entry.value = data.release.main_file; clearTimeout(timer);
-  if (data.release.status === 'preparing') timer = setTimeout(() => work('正在读取依赖检查结果…', async () => { await inspect(version); await refresh(); }), 2000);
+  preview.value = data; entry.value = data.release.main_file;
+
 }
 async function work(text, action) {
   if (busy.value) return; const token = generation; busy.value = true; busyLabel.value = text; error.value = '';
-  try { await action(); } catch (err) { if (alive && token === generation) error.value = err.message; }
+  try { await action(); } catch (err) { if (alive && token === generation) error.value = err.message; return false; }
   finally { if (alive && token === generation) { busy.value = false; busyLabel.value = ''; } }
 }
 async function inspectFile(filename) {
@@ -137,13 +138,14 @@ async function remove() {
 }
 async function restore() { await work('正在恢复任务…', async () => { await api.packageAction({action:'restore',pid:props.pid,revision:record.value.revision,reason:publishReason.value}); await refresh(); message.value = '任务已恢复，自动调度保持暂停。'; changed(); }); }
 watch(() => props.pid, async pid => {
-  const token = ++generation; clearTimeout(timer); diffSequence++; record.value = null; candidate.value = null; versions.value = []; preview.value = null; error.value = ''; message.value = ''; path.value = ''; diff.value = ''; diffLoading.value = false; busy.value = false;
+  const token = ++generation; diffSequence++; record.value = null; candidate.value = null; versions.value = []; preview.value = null; error.value = ''; message.value = ''; path.value = ''; diff.value = ''; diffLoading.value = false; busy.value = false;
   if (!pid) return; loading.value = true;
   try { await refresh(); if (token === generation && versions.value.length) await inspect(versions.value[0].version); }
-  catch (err) { if (alive && token === generation) error.value = err.message; }
+  catch (err) { if (alive && token === generation) error.value = err.message; return false; }
   finally { if (alive && token === generation) loading.value = false; }
 }, { immediate:true });
-onBeforeUnmount(() => { alive = false; generation++; clearTimeout(timer); });
+useRefreshLoop({load:()=>work('正在读取依赖检查结果…',async()=>{await inspect(preview.value?.release.version);await refresh();}),enabled:()=>Boolean(props.pid && preview.value?.release.status==='preparing'),interval:2000,immediate:false});
+onBeforeUnmount(() => { alive = false; generation++; });
 </script>
 <style>
 .release-top .filter-actions { flex-wrap: wrap; justify-content: flex-end; }

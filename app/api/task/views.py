@@ -180,7 +180,7 @@ def _recent_run_stats():
                 from app.bootstrap.execution_state import state_status
                 rows = [(bucket, state_status(state), count) for bucket, state, count in raw]
                 rank = db.execute_query_sql(f'SELECT pid,COUNT(*) FROM wfs_run_history WHERE end_time>=? AND {FAILURE_SQL} GROUP BY pid ORDER BY COUNT(*) DESC LIMIT 8', params=(since,))
-            latest = db.execute_query_sql('SELECT pid,taskname,state,start_time,end_time,group_name,folder_name FROM wfs_run_history ORDER BY end_time DESC,id DESC LIMIT 8', return_json=True)
+            latest = db.execute_query_sql('SELECT id AS run_id,pid,taskname,state,start_time,end_time,group_name,folder_name FROM wfs_run_history ORDER BY end_time DESC,id DESC LIMIT 8', return_json=True)
         for bucket, status, count in rows:
             key = datetime.datetime.fromisoformat(str(bucket)).strftime('%m-%d %H:00')
             if key in trend_by_hour:

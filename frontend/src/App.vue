@@ -230,7 +230,7 @@
           </button>
         </div>
 
-        <MaintenanceControl v-if="canManage && ['tasks','admin'].includes(view)" :confirm="requestConfirm" />
+        <MaintenanceControl v-if="canManage && view === 'admin'" :confirm="requestConfirm" />
         <template v-if="view === 'dashboard'">
           <DashboardView
             :dashboard="dashboard"
@@ -271,7 +271,7 @@
 
         <template v-else-if="view === 'tasks'">
           <TaskWorkspaceView
-            :tasks="tasks"
+            :tasks="tasks" :user-key="user.name"
             :selected-tasks="selectedTasks"
             :favorites="favorites"
             :only-favorites="onlyFavorites"
@@ -303,7 +303,9 @@
               onlyFavorites = $event;
               loadTasks(true);
             "
-          />
+          >
+            <template #maintenance><MaintenanceControl v-if="canManage" :confirm="requestConfirm" compact /></template>
+          </TaskWorkspaceView>
         </template>
 
         <template v-else-if="view === 'packages' && canManage"
@@ -446,7 +448,9 @@ import { LOGIN_CORNER_RADIUS } from './loginBackdropScene';
 import { useGitlabUpdates } from './composables/useGitlabUpdates';
 import UserMenu from './components/UserMenu.vue';
 import { api, clearToken, getToken, setToken } from './api';
-import { scheduleRequest } from './scheduleForm';
+import { navItems } from './workspaceNavigation.js';
+import { useScheduleWorkspace } from './composables/useScheduleWorkspace.js';
+import { useTaskActions } from './composables/useTaskActions.js';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import ScheduleDialog from './components/ScheduleDialog.vue';
 import { useTaskWorkspace } from './composables/useTaskWorkspace';
@@ -464,7 +468,6 @@ const TaskReleaseDialog = defineAsyncComponent(() => import('./components/TaskRe
 const ExecutionMatrixWorkspace = defineAsyncComponent(
   () => import('./components/ExecutionMatrixWorkspace.vue'),
 );
-import { canTrigger } from './executionLabels';
 import { confirmUnsaved } from './composables/useUnsavedChanges';
 import { useConfirm } from './composables/useConfirm';
 onErrorCaptured(error => { if (isAssetFailure(error)) { assetFailure.value = true; return false; } });
@@ -489,77 +492,6 @@ function showNavHint(item, event) {
   };
 }
 
-const navItems = [
-  {
-    id: 'dashboard',
-    label: '总览',
-    iconPaths: [
-      'M4 13.5a8 8 0 1 1 16 0',
-      'M8 15h8',
-      'M12 15l3.4-5.8',
-      'M7 19h10',
-    ],
-    description: 'CPU、内存与任务运行关系。',
-  },
-  {
-    id: 'tasks',
-    label: '任务列表',
-    iconPaths: [
-      'M4.5 6.5h15',
-      'M4.5 12h15',
-      'M4.5 17.5h15',
-      'M8 4.5v4',
-      'M16 10v4',
-      'M11 15.5v4',
-    ],
-    description: '已发布任务、调度状态与运行控制。',
-  },
-  { id: 'queue', label: '执行队列', iconPaths: ['M8 6h12','M8 12h12','M8 18h7','M3 6h1','M3 12h1','M3 18h1','M18 16v5m-2-2 2 2 2-2'], description: '等待派发的任务、等待原因与执行去向。' },
-  {
-    id: 'matrix',
-    label: '任务执行',
-    iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 12l9 4 9-4', 'M3 17l9 4 9-4'],
-    description: '最近结果、当日轨迹、历史记录与队列管理。',
-  },
-  {
-    id: 'taskLogs',
-    label: '执行记录',
-    iconPaths: [
-      'M7 4.5h7l3 3v12H7z',
-      'M14 4.5v4h4',
-      'M9.5 12h5',
-      'M9.5 15.5h5',
-    ],
-    description: '脚本执行历史与输出摘要。',
-  },
-  {
-    id: 'systemLogs',
-    label: '平台事件',
-    iconPaths: ['M12 3.8l7 4v8.4l-7 4-7-4V7.8z', 'M12 8v5', 'M12 16.3v.2'],
-    description: '调度器事件与系统异常记录。',
-  },
-  {
-    id: 'packages',
-    label: '任务示例与文档',
-    iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 7v10l9 4 9-4V7', 'M12 11v10'],
-    description: '任务编写示例、完整项目与 GitLab 发布说明。',
-  },
-  {
-    id: 'repository',
-    label: '依赖仓库',
-    iconPaths: ['M4 5h16v5H4z','M4 14h16v5H4z','M8 7.5h.01','M8 16.5h.01','M12 10v4'],
-    description: '任务独立环境的私有 PyPI 与离线依赖设置。',
-  },
-  {
-    id: 'admin',
-    label: '平台设置',
-    iconPaths: ['M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8','M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z'],
-    description: '运行策略、发布设置、账户权限与审计。',
-  },
-  { id: 'gitlab', label: '代码更新', iconPaths: ['M7 4v11a4 4 0 0 0 4 4h6', 'M17 4v4a4 4 0 0 1-4 4H7', 'M4 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0', 'M14 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0'], description: 'GitLab 分支检查、更新提醒与代码差异。' },
-  {id: 'connections', label: '数据库连接', iconPaths: ['M4 6c0-4 16-4 16 0s-16 4-16 0','M4 6v12c0 4 16 4 16 0V6','M4 12c0 4 16 4 16 0'], description: '平台与任务业务数据库连接设置。'},
-];
-
 const ready = ref(false);
 const token = ref(getToken());
 const view = ref(readRoute(window.location.hash).view);
@@ -568,15 +500,11 @@ const packagePid = ref('');
 const mobileNavOpen = ref(false);
 const loginLoading = ref(false);
 const busy = ref(false);
-const pendingActions = reactive({});
-const retryingExecution = ref(false);
 const detailPid = ref('');
 const executionRunId = ref('');
 const toasts = ref([]);
 const { confirmState, requestConfirm, resolveConfirm } = useConfirm();
 
-let scheduleLoadSeq = 0;
-let schedulePreviewSeq = 0;
 
 const {
   backendStatus,
@@ -673,17 +601,8 @@ const modal = reactive({
   wrap: true,
 });
 
-const scheduleDialog = reactive({
-  open: false,
-  loading: false,
-  saving: false,
-  error: '',
-  preview: [],
-  previewLoading: false,
-  previewError: '',
-  task: null,
-  data: null,
-});
+const {scheduleDialog,openScheduleDialog,closeScheduleDialog,previewSchedule,saveSchedule}=useScheduleWorkspace({markBackendHealthy,handleRequestFailure,requestConfirm,pushToast,loadTasks,loadDashboard});
+const {pendingActions,retryingExecution,canCallTask,callTaskTitle,editTask,handleCallTask,pauseTask,retryExecution,confirmRestore}=useTaskActions({view,taskLogs,loadTasks,loadTaskLogs,markBackendHealthy,handleRequestFailure,requestConfirm,pushToast,openExecution});
 
 const activeNav = computed(
   () => navItems.find((item) => item.id === (['queue','taskLogs'].includes(view.value)?'matrix':['connections','repository'].includes(view.value)?'admin':view.value)) || navItems[0],
@@ -780,26 +699,6 @@ async function copyModalContent() {
   } catch (error) {
     pushToast('error', '复制失败', '当前环境不支持剪贴板写入。');
   }
-}
-
-function canCallTask(row) {
-  return canTrigger(row);
-}
-
-function callTaskTitle(row) {
-  if (row.state === 'invalid') {
-    return '配置错误的任务不能手动触发';
-  }
-  if (!canTrigger(row)) {
-    return '并发名额已满，请等待正在运行的实例结束';
-  }
-  if (row.state === 'pause') {
-    return '暂停任务也可以手动执行一次';
-  }
-  if (row.state !== 'true') {
-    return '任务未进入调度，也可以手动执行一次';
-  }
-  return '立即执行一次任务';
 }
 
 async function loadUser() {
@@ -910,225 +809,6 @@ async function refreshActiveView(options = {}) {
   }
 }
 
-async function editTask(row, state) {
-  if (state === 'kill') {
-    const confirmed = await requestConfirm({
-      title: `强制停止任务 ${row.id}`,
-      message: '该操作会终止正在运行的任务进程，并将任务加入暂停列表。',
-      details: [
-        `任务名称：${row.name}`,
-        `组名：${row.group_name || '-'}`,
-        '如果脚本正在写入数据，请确认它具备幂等或补偿能力。',
-      ],
-      confirmText: '强制停止',
-      danger: true,
-    });
-    if (!confirmed) {
-      return;
-    }
-  }
-  pendingActions[row.id] = state;
-  try {
-    const message = await api.editTask({
-      id: row.id,
-      state,
-    });
-    markBackendHealthy('后端连接正常');
-    pushToast('success', '操作成功', message);
-    await loadTasks();
-  } catch (error) {
-    await handleRequestFailure(error, { toastTitle: '操作失败' });
-  } finally {
-    delete pendingActions[row.id];
-  }
-}
-
-async function handleCallTask(row) {
-  if (!canCallTask(row)) {
-    pushToast('error', '无法触发任务', callTaskTitle(row));
-    return;
-  }
-  pendingActions[row.id] = true;
-  try {
-    const message = await api.callTask({ pid: row.id });
-    markBackendHealthy('后端连接正常');
-    pushToast('success', '任务已排队', message.message || message);
-    if (message.run_id) openExecution(message.run_id);
-    const refreshes = [loadTasks()];
-    if (view.value === 'taskLogs' && taskLogs.params.currentPage === 1) {
-      refreshes.push(loadTaskLogs(false, { silent: true }));
-    }
-    await Promise.all(refreshes);
-  } catch (error) {
-    await handleRequestFailure(error, { toastTitle: '任务触发失败' });
-    if (error.code === 'HTTP_409' && await requestConfirm({title:'核对原执行请求',message:'请先查看执行记录，确认原请求是否已经执行。',details:['只在确认需要新的执行后清除原请求编号，否则再次点击会继续核对原请求。','清除后再次手动执行可能重复业务操作。'],confirmText:'已核对，允许新请求',cancelText:'继续保留原请求',danger:true})) api.discardManualRequest(row.id);
-  } finally {
-    delete pendingActions[row.id];
-  }
-}
-
-async function pauseTask(row) {
-  if (row.pending) {
-    const confirmed = await requestConfirm({
-      title: `任务 ${row.id} 正在执行`,
-      message: '暂停只会移除后续调度；如果要立即停止当前进程，请选择强制停止。',
-      details: [
-        '选择“强制停止”会终止当前进程。',
-        '选择“仅暂停”会保留当前执行；关闭窗口或选择“取消”不会执行操作。',
-      ],
-      confirmText: '强制停止',
-      cancelText: '仅暂停',
-      danger: true,
-    });
-    if (confirmed === null) return;
-    if (confirmed) {
-      editTask(row, 'kill');
-      return;
-    }
-    editTask(row, 'pause');
-    return;
-  }
-  editTask(row, 'pause');
-}
-
-async function openScheduleDialog(row) {
-  const keepData =
-    scheduleDialog.open &&
-    scheduleDialog.task?.id === row.id &&
-    scheduleDialog.data;
-  const seq = ++scheduleLoadSeq;
-  schedulePreviewSeq += 1;
-  scheduleDialog.open = true;
-  scheduleDialog.loading = true;
-  scheduleDialog.saving = false;
-  scheduleDialog.error = '';
-  if (!keepData) scheduleDialog.preview = [];
-  scheduleDialog.previewError = '';
-  scheduleDialog.previewLoading = false;
-  scheduleDialog.task = { ...row };
-  if (!keepData) scheduleDialog.data = null;
-  try {
-    const data = await api.taskSchedule({
-      pid: row.id,
-    });
-    if (seq !== scheduleLoadSeq || scheduleDialog.task?.id !== row.id) {
-      return;
-    }
-    if (data.pid && data.pid !== row.id) {
-      throw new Error(
-        `后端返回 PID ${data.pid} 与当前任务 ${row.id} 不一致，请刷新页面后重试。`,
-      );
-    }
-    scheduleDialog.task = {
-      ...row,
-      id: row.id,
-      name: data.task_name || row.name,
-      group_name: data.group_name || row.group_name || '',
-      folder_name: data.folder_name || row.folder_name || '',
-    };
-    markBackendHealthy('后端连接正常');
-    scheduleDialog.data = data;
-    scheduleDialog.preview = data.preview || [];
-    scheduleDialog.previewError = data.preview_error || '';
-  } catch (error) {
-    if (seq !== scheduleLoadSeq || scheduleDialog.task?.id !== row.id) {
-      return;
-    }
-    scheduleDialog.error = error.message;
-    await handleRequestFailure(error, { toastTitle: '调度配置加载失败' });
-  } finally {
-    if (seq === scheduleLoadSeq && scheduleDialog.task?.id === row.id) {
-      scheduleDialog.loading = false;
-    }
-  }
-}
-
-async function closeScheduleDialog(options = {}) {
-  if (scheduleDialog.saving) return;
-  if (
-    options.dirty &&
-    !(await requestConfirm({
-      eyebrow: '未保存的修改',
-      title: '放弃未保存的配置？',
-      message: '当前修改尚未保存。关闭后会恢复已保存的配置。',
-      confirmText: '放弃修改',
-      cancelText: '继续编辑',
-    }))
-  )
-    return;
-  if (scheduleDialog.saving) {
-    return;
-  }
-  scheduleLoadSeq += 1;
-  schedulePreviewSeq += 1;
-  scheduleDialog.previewLoading = false;
-  scheduleDialog.open = false;
-}
-
-async function previewSchedule(form) {
-  if (!scheduleDialog.open || !scheduleDialog.task) {
-    return;
-  }
-  const seq = ++schedulePreviewSeq;
-  scheduleDialog.previewLoading = true;
-  scheduleDialog.previewError = '';
-  try {
-    const data = await api.previewTaskSchedule(
-      scheduleRequest(scheduleDialog.task.id, form),
-    );
-    if (seq !== schedulePreviewSeq) {
-      return;
-    }
-    scheduleDialog.preview = data.preview || [];
-  } catch (error) {
-    if (seq !== schedulePreviewSeq) {
-      return;
-    }
-    scheduleDialog.preview = [];
-    scheduleDialog.previewError = error.message;
-  } finally {
-    if (seq === schedulePreviewSeq) {
-      scheduleDialog.previewLoading = false;
-    }
-  }
-}
-
-async function saveSchedule(form) {
-  if (!scheduleDialog.task || scheduleDialog.saving) {
-    return;
-  }
-  const taskId = scheduleDialog.task.id;
-  scheduleDialog.saving = true;
-  scheduleDialog.error = '';
-  try {
-    const data = await api.updateTaskSchedule(scheduleRequest(taskId, form));
-    if (scheduleDialog.task?.id !== taskId) {
-      return;
-    }
-    if (data.pid && data.pid !== taskId) {
-      throw new Error(`后端保存 PID ${data.pid} 与当前任务 ${taskId} 不一致。`);
-    }
-    markBackendHealthy('后端连接正常');
-    scheduleDialog.data = data;
-    scheduleDialog.preview = data.preview || [];
-    scheduleDialog.previewError = data.preview_error || '';
-    scheduleDialog.open = false;
-    pushToast(
-      data.application?.status === 'failed' ? 'error' : 'success',
-      '任务配置已保存',
-      data.application?.status === 'failed'
-        ? `保存成功，但生效失败：${data.application.message}。请刷新任务重新应用。`
-        : `${taskId} 已生效。`,
-    );
-    await Promise.all([loadTasks(), loadDashboard({ silent: true })]);
-  } catch (error) {
-    scheduleDialog.error = error.message;
-    await handleRequestFailure(error, { toastTitle: '调度策略保存失败' });
-  } finally {
-    scheduleDialog.saving = false;
-  }
-}
-
 async function openLatestLog(row) {
   const serial = ++logDetailSerial;
   showModal(`最新输出：${row.name || row.id}`, '正在读取输出…');
@@ -1209,7 +889,7 @@ async function applyRoute() {
     switchView('tasks');
     return;
   }
-  if(route.view!==view.value && !await confirmUnsaved(requestConfirm)){window.history.replaceState(null,'','#'+view.value);return;}
+  if((route.view!==view.value || route.pid!==detailPid.value) && !await confirmUnsaved(requestConfirm)){window.history.replaceState(null,'',routeHash(view.value,{pid:detailPid.value,run:executionRunId.value}));return;}
   view.value = route.view;
   matrixTab.value = route.params.get('tab') || 'recent';
   if (!token.value) return;
@@ -1239,6 +919,7 @@ async function applyRoute() {
 function syncRoute() {
   const current = readRoute(window.location.hash);
   const values = Object.fromEntries(current.params);
+  if(!detailPid.value || current.pid!==detailPid.value){delete values.detail;delete values.detailRun;}
   values.pid = detailPid.value;
   values.run = executionRunId.value;
   if (view.value === 'taskLogs') Object.assign(values, logRouteValues());
@@ -1291,62 +972,11 @@ function openTaskHistory(record) {
 function openMatrixLogs(record) {
   window.location.hash=routeHash('taskLogs',{taskid:record.pid,taskname:'',state:'',scope:record.scope || 'online',start:record.start_time.slice(0,10),end:record.end_time.slice(0,10),from:record.query_start,to:record.query_end});
 }
-async function retryExecution(record) {
-  if (retryingExecution.value) return;
-  const confirmed = await requestConfirm({
-    title: '再次执行任务',
-    message: `手动执行 ${record.pid}，会生成新的执行记录。`,
-    details: [
-      '请先确认上次执行是否已写入业务数据；系统不会自动重试或补跑重启前的执行。',
-    ],
-    confirmText: '再执行一次',
-    danger: true,
-  });
-  if (!confirmed) return;
-  retryingExecution.value = true;
-  try {
-    api.discardManualRequest(record.pid);
-    const result = await api.callTask({ pid: record.pid });
-    openExecution(result.run_id);
-    await loadTasks();
-  } catch (error) {
-    await handleRequestFailure(error, { toastTitle: '再次执行失败' });
-  } finally {
-    retryingExecution.value = false;
-  }
-}
 function showFilteredTasks(status) {
   tasks.params.status = status;
   switchView('tasks');
   loadTasks(true);
 }
-async function confirmRestore(payload) {
-  const confirmed = await requestConfirm({
-    title: '恢复调度配置',
-    message: `将 ${payload.pid} 恢复为历史版本 ${payload.restore_version}，并生成新版本。`,
-    details: ['会沿用所选版本的调度启用状态；正在执行的实例继续运行。'],
-    confirmText: '恢复配置',
-    danger: true,
-  });
-  if (!confirmed) return;
-  try {
-    const result = await api.restore({
-      pid: payload.pid,
-      version: payload.version,
-      restore_version: payload.restore_version,
-    });
-    pushToast(
-      result.application?.status === 'failed' ? 'error' : 'success',
-      '配置已恢复',
-      result.application?.message || '已生成新版本并应用调度。',
-    );
-    payload.done();
-    loadTasks();
-  } catch (error) {
-    await handleRequestFailure(error, { toastTitle: '恢复配置失败' });
-  }
-}
-
 onMounted(async () => {
   document.addEventListener('visibilitychange', handleVisibilityChange);
   if (!navItems.some((item) => item.id === view.value)) {

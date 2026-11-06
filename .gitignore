@@ -129,3 +129,7 @@ dmypy.json
 node_modules/
 frontend/test-results/
 frontend/playwright-report/
+
+# Machine-specific deployment secrets and concurrent installer lock
+deploy/root-test/runtime.env
+.deploy.lock

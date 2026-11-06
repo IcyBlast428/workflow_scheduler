@@ -18,24 +18,24 @@
   --surface-glass: rgba(30, 28, 25, .72);
   --surface-glass-soft: rgba(28, 27, 25, .86);
   --surface-glass-body: rgba(20, 20, 22, .97);
-  --surface-glass-edge: rgba(212, 175, 101, .25);
-  --surface-glass-low-edge: rgba(187, 153, 88, .12);
+  --surface-glass-edge: rgba(210, 210, 220, .18);
+  --surface-glass-low-edge: rgba(210, 210, 220, .08);
   --surface-glass-highlight: rgba(255, 231, 178, .12);
   --surface-glass-shadow: rgba(0, 0, 0, .4);
   --surface-nav-glass: rgba(15, 15, 17, .94);
   --panel-soft: #121214;
   --topbar-bg: rgba(14, 14, 16, 0.92);
-  --button-bg: #22201c;
+  --button-bg: #222225;
   --input-bg: #101012;
   --chip-bg: #171614;
-  --table-head: #151412;
+  --table-head: #141416;
   --row-hover: #252119;
   --ink: #e9e4da;
   --ink-strong: #fff8e7;
-  --muted: #aaa394;
-  --muted-strong: #d0c7b6;
-  --line: #373229;
-  --line-strong: #5b4c31;
+  --muted: #b0afb5;
+  --muted-strong: #d0ced4;
+  --line: #35363a;
+  --line-strong: #55565c;
   --brand: #d4af65;
   --brand-strong: #f0ce89;
   --brand-soft: rgba(212, 175, 101, 0.14);
@@ -63,7 +63,7 @@
   --login-text: #fff8e7;
   --login-muted: rgba(230, 219, 197, 0.78);
   --login-packet-core: #fff1ce;
-  --tag-info-bg: #30291d;
+  --tag-info-bg: #2b2b30;
   --modal-backdrop: rgba(0, 0, 0, 0.62);
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
 }
@@ -694,9 +694,11 @@ select:focus {
 
 .cpu-panel .cpu-timeline {
   flex: none;
-  height: clamp(420px, 55vh, 640px);
-  min-height: 420px;
+  height: 320px;
+  min-height: 300px;
 }
+
+.cpu-panel.chart-expanded .cpu-timeline { height: clamp(420px, 65vh, 720px); }
 
 .rank-item,
 .recent-item {

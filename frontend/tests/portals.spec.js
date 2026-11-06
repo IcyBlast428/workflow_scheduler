@@ -22,7 +22,8 @@ for (const username of ['browser-viewer','browser-operator']) {
     await expect(page.locator('.action-menu').getByRole('button')).toHaveText(['任务详情','最新输出', /收藏/]);
     await page.keyboard.press('Escape');
     await row.locator('.task-name-link').click();
-    await expect(page.getByRole('dialog').getByRole('tab')).toHaveText(['说明与配置','执行记录']);
+    await expect(page.getByRole('dialog').getByRole('navigation',{name:'任务工作区'}).getByRole('button')).toHaveText(['概览','执行']);
+    await expect(page.getByRole('dialog').getByRole('tab')).toHaveText(['说明与配置']);
     expect(requests.filter(path => path.startsWith('/api/admin') || path === '/api/taskinfo/dashboard')).toEqual([]);
     expect((await page.request.get('/api/admin/database-connections')).status()).toBe(403);
     expect((await page.request.get('/api/taskinfo/source?pid=acceptance__slow')).status()).toBe(403);

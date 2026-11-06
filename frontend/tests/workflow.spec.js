@@ -1,3 +1,4 @@
+import {detailTab} from './navigation-helpers.js';
 import { test, expect } from '@playwright/test';
 
 test('dialogs keep focus, protect unsaved edits and restore task deep links', async ({page}) => {
@@ -33,8 +34,6 @@ test('dialogs keep focus, protect unsaved edits and restore task deep links', as
   await expect(detail).toBeVisible();
   await expect(detail.getByLabel('任务运行摘要')).toContainText('当前代码版本');
   await detail.getByRole('tab',{name:'说明与配置',exact:true}).press('ArrowRight');
-  await expect(detail.getByRole('tab',{name:'DDL 与标签',exact:true})).toHaveAttribute('aria-selected','true');
-  await detail.getByRole('tab',{name:'DDL 与标签',exact:true}).press('ArrowRight');
   await expect(detail.getByRole('tab',{name:'执行流程',exact:true})).toHaveAttribute('aria-selected','true');
   await detail.press('Escape');
   await expect(detail).not.toBeVisible();
@@ -70,7 +69,7 @@ test('login, new-tab session, dismiss pause, execution, download and history', a
   await page.locator('.confirm-modal').getByRole('button',{name:'仅暂停',exact:true}).click();
   await expect(row).toContainText('已暂停');
   await row.locator('.task-name-link').click();
-  await page.getByRole('tab',{name:'执行与输出',exact:true}).click();
+  await detailTab(page,'执行与输出');
   await page.getByRole('button',{name:'查看执行',exact:true}).first().click();
   await expect(page.locator('.execution-output')).toContainText('浏览器回归完成',{timeout:20000});
   await expect(page.getByLabel('执行摘要')).toContainText('成功');
@@ -80,7 +79,7 @@ test('login, new-tab session, dismiss pause, execution, download and history', a
   expect(await download.failure()).toBeNull();
   await expect(page.getByRole('dialog')).toHaveCount(1);
   await page.locator('.task-detail-modal .embedded-workspace').getByTitle('关闭').click();
-  await page.getByRole('tab',{name:'配置历史',exact:true}).click();
+  await detailTab(page,'配置历史');
   await expect(page.getByRole('button',{name:'恢复此配置'}).first()).toBeVisible();
   await page.getByRole('button',{name:'恢复此配置'}).first().click();
   await expect(page.locator('.confirm-modal')).toBeVisible();
@@ -142,6 +141,8 @@ test('favorites persist and batch controls preview effects before applying', asy
   await expect(page.locator('.confirm-modal')).toContainText('正在执行的实例继续运行');
   await page.locator('.confirm-modal').getByRole('button',{name:'启用调度',exact:true}).click();
   await expect(row).toContainText('调度已启用');
+  // Live status can arrive before the batch response clears its previous selection.
+  await expect(row.getByRole('checkbox',{name:'选择任务 acceptance__slow'})).toBeEnabled();
   await row.getByRole('checkbox',{name:'选择任务 acceptance__slow'}).check();
   await page.getByRole('button',{name:'批量暂停调度',exact:true}).click();
   await page.locator('.confirm-modal').getByRole('button',{name:'暂停调度',exact:true}).click();
@@ -182,7 +183,7 @@ test('detail tabs retain code state and slow refresh keeps content and geometry'
   const initialBox = await dialog.boundingBox();
   let sourceRequests = 0;
   page.on('request',request => { if (request.url().includes('/api/taskinfo/source')) sourceRequests++; });
-  await dialog.getByRole('tab',{name:'查看代码',exact:true}).click();
+  await detailTab(page,'查看代码');
   const code = dialog.locator('.source-code');
   await expect(code).toContainText('print');
   const originalNode = await code.elementHandle();
@@ -190,7 +191,7 @@ test('detail tabs retain code state and slow refresh keeps content and geometry'
   await dialog.getByLabel('搜索文件内容').fill('print');
   const requestsBeforeSwitch = sourceRequests;
   for (const name of ['执行与输出','配置历史','操作记录','说明与配置','查看代码']) {
-    await dialog.getByRole('tab',{name,exact:true}).click();
+    await detailTab(page,name);
     const box = await dialog.boundingBox();
     expect(box.y).toBe(initialBox.y);
     expect(box.height).toBe(initialBox.height);
@@ -249,7 +250,7 @@ test('source highlighting retains multi-line strings across pages and escapes HT
   await page.getByRole('button',{name:'登录',exact:true}).click();
   await page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'}).locator('.task-name-link').click();
   const dialog = page.locator('.task-detail-modal');
-  await dialog.getByRole('tab',{name:'查看代码',exact:true}).click();
+  await detailTab(page,'查看代码');
   const code = dialog.locator('.source-code');
   await expect(code.locator('.source-line').last().locator('.hljs-string')).toHaveText('middle');
   const refresh = dialog.locator('.source-files').getByRole('button',{name:'刷新文件',exact:true});

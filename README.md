@@ -2,6 +2,10 @@
 
 Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台正式部署采用 **systemd + GaussDB/DWS**；任务代码由现有 GitLab 管理，依赖从私有 PyPI 准备。
 
+## 快速部署
+
+内网 root 固定目录安装请先阅读 [START-HERE.md](START-HERE.md)。解压到 `/data/workflow_scheduler` 后运行 `bash deploy.sh`，自动完成环境准备、配置引导、建表和服务启动。
+
 ## 当前架构
 
 - Web 与单实例 Scheduler 分离，由 systemd 管理。

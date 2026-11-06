@@ -45,6 +45,7 @@ import ModalShell from './ModalShell.vue';
 import TaskArtifacts from './TaskArtifacts.vue';
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue';
 import { timestamp } from '../timebase';
+import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
 import { statusLabel, statusClass, emptyExecutionLog } from '../executionLabels';
@@ -56,7 +57,8 @@ const elapsed=computed(()=>{const seconds=(timestamp(record.value.end_time)-time
 const failureHint=computed(()=>['failed','timed_out','interrupted'].includes(record.value.status)&&!record.value.reason ? content.value.split('\n').reverse().find(line=>/\b(?:error|exception|traceback)\b|失败|异常/i.test(line))?.trim().slice(0,320) || '' : '');
 const initialLoading = ref(false), contentView=ref('logs'),outputsVisited=ref(false);
 const pageStart=ref(0), logSize=ref(0), logUnavailable=ref(false), historical=ref(false), offset=ref('tail'), inFlight=ref(false);
-let timer, generation = 0;
+let generation = 0;
+const complete=ref(false);
 const filtered = computed(() => search.value ? content.value.split('\n').filter(line => line.toLowerCase().includes(search.value.toLowerCase())).join('\n') : content.value);
 async function refresh(manual=false) {
   if (!props.runId || inFlight.value || historical.value && manual!==true || document.visibilityState === 'hidden') return;
@@ -75,16 +77,17 @@ async function refresh(manual=false) {
     error.value = '';
     await nextTick();
     if (follow.value && logElement.value) logElement.value.scrollTop = logElement.value.scrollHeight;
-    if (!['queued','running'].includes(record.value.status) && !result.has_more) window.clearInterval(timer);
-  } catch (err) { if (seq === generation) error.value = err.message; }
-  finally { inFlight.value = false; if (seq === generation) initialLoading.value = false; }
+    complete.value=!['queued','running'].includes(record.value.status) && !result.has_more;
+  } catch (err) { if (seq === generation) error.value = err.message; return false; }
+  finally { if (seq === generation) {inFlight.value = false;initialLoading.value = false;} }
 }
-function showPage(position){historical.value=position!=='tail';offset.value=position;content.value='';initialLoading.value=true;refresh(true);}
+function showPage(position){generation++;inFlight.value=false;complete.value=false;historical.value=position!=='tail';offset.value=position;content.value='';initialLoading.value=true;refresh(true);}
 watch(() => props.runId, () => {
   contentView.value='logs';outputsVisited.value=false;search.value='';
-  generation++; window.clearInterval(timer); offset.value = 'tail'; historical.value=false; pageStart.value=0;logSize.value=0;logUnavailable.value=false; content.value = ''; record.value = {}; error.value = '';
+  generation++; inFlight.value=false;complete.value=false; offset.value = 'tail'; historical.value=false; pageStart.value=0;logSize.value=0;logUnavailable.value=false; content.value = ''; record.value = {}; error.value = '';
   initialLoading.value = Boolean(props.runId);
-  if (props.runId) { timer = window.setInterval(refresh, 1500); refresh(); }
+  if (props.runId) refresh();
 }, { immediate: true });
-onUnmounted(() => { generation++; window.clearInterval(timer); });
+useRefreshLoop({load:refresh,enabled:()=>Boolean(props.runId && !historical.value && !complete.value),interval:1500,immediate:false});
+onUnmounted(() => { generation++; });
 </script>

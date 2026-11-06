@@ -136,8 +136,8 @@ def _dispatch(recover=False):
     if admission.maintenance()['enabled'] or dispatch_control.reason(include_interval=False):
         return
     with admission.store() as db:
-        rows = db.execute("SELECT id,pid,kind,payload,expires_at FROM work_requests WHERE status='pending' AND due_at<=? ORDER BY due_at,created_at,id LIMIT 100", (str(now),)).fetchall()
-    for identifier, pid, kind, raw, expiry in rows:
+        rows = db.execute("SELECT id,pid,kind,payload,expires_at,created_at FROM work_requests WHERE status='pending' AND due_at<=? ORDER BY due_at,created_at,id LIMIT 100", (str(now),)).fetchall()
+    for identifier, pid, kind, raw, expiry, created in rows:
         if dispatch_control.reason(include_interval=False):
             break
         context = json.loads(raw)
@@ -155,6 +155,8 @@ def _dispatch(recover=False):
             from app.bootstrap.core import call_task_once
             result = admission.manual_request(context['actor'], pid, identifier, lambda: call_task_once(pid, actor=context['actor'], context={**context, 'request_id': identifier, 'expires_at': expiry}))
             status, run_id, message = ('accepted', result['run_id'], '')
+            from app.bootstrap.runtime_metrics import record_delay
+            record_delay('queue:dispatch_wait', created, business_now())
         except (admission.CapacityUnavailable, admission.MaintenanceClosed) as exc:
             with admission.store() as db:
                 db.execute("UPDATE work_requests SET status='pending',due_at=?,message=? WHERE id=?", (str(business_now() + dt.timedelta(seconds=1)), str(exc).replace('本次调度跳过', '等待名额').replace('本次计划跳过', '等待名额'), identifier))

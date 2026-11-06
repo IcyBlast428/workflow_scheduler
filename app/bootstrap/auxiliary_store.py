@@ -94,9 +94,11 @@ class Store:
         tables = ",".join(
             physical(self.namespace, table) for table in SCHEMAS[self.namespace]
         )
-        self.database.cursor.execute(
-            "LOCK TABLE " + tables + " IN SHARE ROW EXCLUSIVE MODE"
-        )
+        from app.bootstrap.runtime_metrics import measure
+        with measure('lock:' + self.namespace):
+            self.database.cursor.execute(
+                "LOCK TABLE " + tables + " IN SHARE ROW EXCLUSIVE MODE"
+            )
         self.locked = True
 
     def _mapped(self, sql):

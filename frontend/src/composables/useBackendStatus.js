@@ -1,4 +1,5 @@
 import { reactive, onScopeDispose } from 'vue';
+import {useRefreshLoop} from './useRefreshLoop.js';
 import { api } from '../api';
 
 export function useBackendStatus() {
@@ -65,12 +66,7 @@ export function useBackendStatus() {
       });
     return pending;
   }
-  const timer = window.setInterval(() => {
-    if (!document.hidden) checkBackend();
-  }, 30000);
-  onScopeDispose(() => {
-    stopped = true;
-    window.clearInterval(timer);
-  });
+  useRefreshLoop({load:checkBackend,interval:30000,immediate:false});
+  onScopeDispose(()=>{stopped=true;});
   return { backendStatus, markBackendHealthy, checkBackend };
 }

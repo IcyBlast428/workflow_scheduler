@@ -89,6 +89,7 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
+import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 import { useUnsavedChanges } from '../composables/useUnsavedChanges';
 const emit = defineEmits(['state']);
@@ -96,7 +97,7 @@ const settings = ref(null), state = ref(null), tasks = ref([]), loading = ref(fa
 const error = ref(''), message = ref(''), selected = ref(null), fileDiff = ref(null), fileIndex = ref(-1), diffLoading = ref(false), diffError = ref('');
 const form = reactive({ tasks: [] }), taskRoots = ref(''), sharedPaths = ref(''), filter = ref('all');
 const {saved:settingsSaved}=useUnsavedChanges(()=>({form,roots:taskRoots.value,paths:sharedPaths.value}),()=>Boolean(settings.value));
-let timer, sequence = 0, stateSequence = 0, alive = true,refreshInFlight=0,visibleRefreshes=0;
+let sequence = 0, stateSequence = 0, alive = true,refreshInFlight=0,visibleRefreshes=0;
 const filters = [{ id: 'all', label: '全部' }, { id: 'branch', label: '待合并' }, { id: 'release', label: '待部署 / 发布' }];
 const filtered = computed(() => (state.value?.items || []).filter(item => filter.value === 'all' || (filter.value === 'branch' ? item.kind === 'branch' : item.kind !== 'branch')));
 const diffLines = computed(() => (fileDiff.value?.diff || '').split('\n'));
@@ -128,8 +129,8 @@ async function refresh(silent=false) {
   const current = ++stateSequence;
   refreshInFlight++;
   if(silent!==true){visibleRefreshes++;loading.value = true;}
-  try { const value = await api.gitlabState(); if (alive && current === stateSequence) applyState(value); }
-  catch (exc) { if (alive && current === stateSequence) error.value = exc.message; }
+  try { const value = await api.gitlabState(); if (alive && current === stateSequence) {applyState(value);error.value='';} }
+  catch (exc) { if (alive && current === stateSequence) error.value = exc.message; return false; }
   finally { refreshInFlight--;if(silent!==true)visibleRefreshes--;if(alive)loading.value=visibleRefreshes>0; }
 }
 async function save() {
@@ -169,9 +170,10 @@ onMounted(async () => {
     applySettings(configuration); tasks.value = packages.tasks.filter(task => !task.deleted_at);
     await refresh();
   } catch (exc) { if (alive) error.value = exc.message; }
-  if (alive) timer = setInterval(() => { if (!document.hidden && !saving.value && !checking.value && !loading.value) refresh(true); }, 5000);
+
 });
-onBeforeUnmount(() => { alive = false; sequence += 1; stateSequence += 1; clearInterval(timer); });
+useRefreshLoop({load:()=>{if(!saving.value && !checking.value && !loading.value)return refresh(true);},immediate:false});
+onBeforeUnmount(() => { alive = false; sequence += 1; stateSequence += 1;  });
 </script>
 
 <style scoped>

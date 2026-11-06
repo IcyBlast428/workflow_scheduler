@@ -21,9 +21,8 @@
       <p class="runtime-meta">上次维护：{{ (runtime.maintenance?.maintenance?.completed_at || '-').split('.')[0] }}</p>
       <p v-if="runtime.journal?.oldest_pending" class="runtime-meta">最早待补写：{{ runtime.journal.oldest_pending }}</p>
       <div class="runtime-alerts"><span class="tag info">待发告警 {{ runtime.alerts?.pending || 0 }}</span><span class="tag warning">待核对 {{ runtime.alerts?.unknown || 0 }}</span><span class="tag danger">发送失败 {{ runtime.alerts?.failed || 0 }}</span></div>
-      <details class="disclosure"><summary>接口与数据库耗时 <span class="muted">最近最多 512 次采样</span></summary><div class="disclosure-body">
-        <div class="table-wrap"><table class="runtime-metrics"><thead><tr><th>接口 / 数据库操作</th><th>P95</th><th>最大耗时</th></tr></thead><tbody><tr v-for="(metric,name) in runtime.metrics || {}" :key="name"><td class="mono">{{ name }}</td><td>{{ metric.p95_ms }} ms</td><td>{{ metric.max_ms }} ms</td></tr></tbody></table><p v-if="!Object.keys(runtime.metrics || {}).length" class="table-empty-note">暂无采样记录。</p></div>
-      </div></details>
+      <p v-if="runtimeError" class="inline-alert warning" role="status">性能状态更新失败：{{ runtimeError }}。保留上次结果，稍后自动重试。</p>
+      <RuntimeDiagnostics :runtime="runtime" />
     </section>
     <OperationalWorkbench v-show="['runtime','release','storage'].includes(section)" :section="section" />
     <VersionStorage v-show="section==='storage'" />
@@ -46,6 +45,8 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 import { api } from '../api';
 import { actionLabel } from '../executionLabels';
+import RuntimeDiagnostics from './RuntimeDiagnostics.vue';
+import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import LoadingStatus from './LoadingStatus.vue';
 import DispatchSettings from './DispatchSettings.vue';
 import OperationalWorkbench from './OperationalWorkbench.vue';
@@ -64,12 +65,21 @@ function readSection(){const legacy=location.hash.slice(1).split('?')[0];const i
 function selectSection(id){section.value=id;visited.add(id);history.replaceState(null,'',location.pathname+'#admin?section='+id);}
 onMounted(()=>{readSection();window.addEventListener('hashchange',readSection);});onBeforeUnmount(()=>window.removeEventListener('hashchange',readSection));
 const accounts = ref([]), records = ref([]), error = ref(''), message = ref(''), saving = ref(false);
-const runtime = ref({});
+const runtime = ref({}), runtimeError=ref('');
+let runtimePending=null, alive=true;
+function loadRuntime(){
+  if(runtimePending)return runtimePending;
+  runtimePending=api.runtime().then(value=>{if(alive){runtime.value=value;runtimeError.value='';}return true;})
+    .catch(err=>{if(alive)runtimeError.value=err.message;return false;}).finally(()=>{runtimePending=null;});
+  return runtimePending;
+}
+useRefreshLoop({load:loadRuntime,enabled:()=>section.value==='runtime',interval:30000,immediate:false});
+onBeforeUnmount(()=>{alive=false;});
 const loading = ref(false);
 const roles = {viewer:'普通用户',operator:'普通用户（原操作员）',admin:'管理员',maintainer:'任务维护员'};
 const form = reactive({username:'',password:'',role:'viewer',enabled:true});
 function edit(item) { Object.assign(form,{...item,password:'',enabled:Boolean(item.enabled)}); message.value = ''; }
-async function load() { if (loading.value) return; loading.value = true; try { [accounts.value, records.value,runtime.value] = await Promise.all([api.users(),api.audit(),api.runtime()]); error.value = ''; } catch (err) { error.value = err.message; } finally { loading.value = false; } }
+async function load() { if (loading.value) return; loading.value = true; try { [accounts.value, records.value] = await Promise.all([api.users(),api.audit(),loadRuntime()]); error.value = ''; } catch (err) { error.value = err.message; } finally { loading.value = false; } }
 async function save() { saving.value = true; try { message.value = await api.saveUser({...form}); form.password = ''; await load(); } catch (err) { error.value = err.message; } finally { saving.value = false; } }
 onMounted(load);
 </script>

@@ -1,0 +1,70 @@
+export const navItems = [
+  {
+    id: 'dashboard',
+    label: '总览',
+    iconPaths: [
+      'M4 13.5a8 8 0 1 1 16 0',
+      'M8 15h8',
+      'M12 15l3.4-5.8',
+      'M7 19h10',
+    ],
+    description: 'CPU、内存与任务运行关系。',
+  },
+  {
+    id: 'tasks',
+    label: '任务列表',
+    iconPaths: [
+      'M4.5 6.5h15',
+      'M4.5 12h15',
+      'M4.5 17.5h15',
+      'M8 4.5v4',
+      'M16 10v4',
+      'M11 15.5v4',
+    ],
+    description: '已发布任务、调度状态与运行控制。',
+  },
+  { id: 'queue', label: '执行队列', iconPaths: ['M8 6h12','M8 12h12','M8 18h7','M3 6h1','M3 12h1','M3 18h1','M18 16v5m-2-2 2 2 2-2'], description: '等待派发的任务、等待原因与执行去向。' },
+  {
+    id: 'matrix',
+    label: '任务执行',
+    iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 12l9 4 9-4', 'M3 17l9 4 9-4'],
+    description: '最近结果、当日轨迹、历史记录与队列管理。',
+  },
+  {
+    id: 'taskLogs',
+    label: '执行记录',
+    iconPaths: [
+      'M7 4.5h7l3 3v12H7z',
+      'M14 4.5v4h4',
+      'M9.5 12h5',
+      'M9.5 15.5h5',
+    ],
+    description: '脚本执行历史与输出摘要。',
+  },
+  {
+    id: 'systemLogs',
+    label: '平台事件',
+    iconPaths: ['M12 3.8l7 4v8.4l-7 4-7-4V7.8z', 'M12 8v5', 'M12 16.3v.2'],
+    description: '调度器事件与系统异常记录。',
+  },
+  {
+    id: 'packages',
+    label: '任务示例与文档',
+    iconPaths: ['M3 7l9-4 9 4-9 4z', 'M3 7v10l9 4 9-4V7', 'M12 11v10'],
+    description: '任务编写示例、完整项目与 GitLab 发布说明。',
+  },
+  {
+    id: 'repository',
+    label: '依赖仓库',
+    iconPaths: ['M4 5h16v5H4z','M4 14h16v5H4z','M8 7.5h.01','M8 16.5h.01','M12 10v4'],
+    description: '任务独立环境的私有 PyPI 与离线依赖设置。',
+  },
+  {
+    id: 'admin',
+    label: '平台设置',
+    iconPaths: ['M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8','M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z'],
+    description: '运行策略、发布设置、账户权限与审计。',
+  },
+  { id: 'gitlab', label: '代码更新', iconPaths: ['M7 4v11a4 4 0 0 0 4 4h6', 'M17 4v4a4 4 0 0 1-4 4H7', 'M4 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0', 'M14 4a3 3 0 1 0 6 0a3 3 0 1 0-6 0'], description: 'GitLab 分支检查、更新提醒与代码差异。' },
+  {id: 'connections', label: '数据库连接', iconPaths: ['M4 6c0-4 16-4 16 0s-16 4-16 0','M4 6v12c0 4 16 4 16 0V6','M4 12c0 4 16 4 16 0'], description: '平台与任务业务数据库连接设置。'},
+];

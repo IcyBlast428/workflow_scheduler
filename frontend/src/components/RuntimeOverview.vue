@@ -1,7 +1,7 @@
 <template>
   <section class="panel attention-panel" :class="{'is-clear': loaded && !error && data.scheduler?.healthy && !data.issues?.length}">
-    <div class="panel-head"><div><h2>需要处理</h2><p>配置、执行和服务维护的待处理事项。</p></div><button class="btn" :disabled="loading" @click="load">刷新</button></div>
-    <div class="panel-body">
+    <div class="panel-head"><div><h2>{{ healthy ? '✓ 系统运行正常' : '需要处理' }}</h2><p>配置、执行和服务维护的待处理事项。</p></div><div class="filter-actions"><button v-if="healthy" class="btn" :aria-expanded="expanded" @click="expanded=!expanded">{{ expanded ? '收起状态' : '查看状态' }}</button><button class="btn" :disabled="loading" @click="load">刷新</button></div></div>
+    <div v-show="!healthy || expanded" class="panel-body">
       <div class="runtime-alerts"><span class="tag" :class="data.scheduler?.healthy ? 'success' : 'warning'">调度器：{{ data.scheduler?.healthy ? '正常' : data.scheduler?.message || '检测中' }}</span><span class="tag info">业务时区：Asia/Shanghai · UTC+8</span><span class="tag info">数据库：{{ data.database || '-' }}</span></div>
       <p v-if="error" class="inline-alert danger" role="alert">{{ error }}</p>
       <p v-else-if="!data.issues?.length" class="hint">{{ !loaded ? '正在检查运行状态…' : '当前未发现需要处理的事项。' }}</p>
@@ -11,19 +11,22 @@
   </section>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
+import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 defineProps({ canManage: Boolean }); defineEmits(['detail','execution','admin','queue']);
+const expanded=ref(false);
+const healthy=computed(()=>loaded.value && !error.value && data.value.scheduler?.healthy && !data.value.issues?.length);
 const resolving=ref(''),note=ref('');
-const data = ref({}), error = ref(''), loading = ref(false), loaded = ref(false); let timer, stopped = false;
+const data = ref({}), error = ref(''), loading = ref(false), loaded = ref(false); let stopped = false;
 async function load() {
   if (loading.value || stopped || document.visibilityState === 'hidden') return;
   loading.value = true;
   try { const result = await api.attention(); if (!stopped) { data.value = result; loaded.value = true; error.value = ''; } }
-  catch (err) { if (!stopped) error.value = err.message; }
+  catch (err) { if (!stopped) error.value = err.message; return false; }
   finally { if (!stopped) loading.value = false; }
 }
 async function resolve(key){try{await api.resolveIssue({key,note:note.value});resolving.value='';await load();}catch(e){error.value=e.message;}}
-onMounted(() => { load(); timer = setInterval(load,30000); });
-onBeforeUnmount(() => { stopped = true; clearInterval(timer); });
+useRefreshLoop({load,interval:30000});
+onBeforeUnmount(() => { stopped = true; });
 </script>

@@ -1,6 +1,6 @@
 <template>
   <div class="table-wrap task-table-wrap">
-    <table class="task-table">
+    <table class="task-table" :class="[density, ...['group','pending','failed'].filter(key=>!columns.includes(key)).map(key=>'hide-'+key)]">
       <colgroup>
         <col class="col-name" />
         <col class="col-group" />
@@ -196,6 +196,8 @@
 import ActionMenu from './ActionMenu.vue';
 import { canTrigger, exitLabel, exitClass } from '../executionLabels';
 const props = defineProps({
+  columns: { type: Array, default: () => ['group','pending','failed'] },
+  density: { type: String, default: 'standard' },
   rows: { type: Array, required: true },
   favorites: { type: Array, default: () => [] },
   selected: { type: Array, default: () => [] },
@@ -295,4 +297,9 @@ function callTaskTitle(row) {
 </script>
 <style scoped>
 .gitlab-row-update{background:#d4a54b0a}.gitlab-row-delete{background:#d45c5c0b}.gitlab-row-update .task-name-cell{box-shadow:inset 3px 0 #c5a164}.gitlab-row-delete .task-name-cell{box-shadow:inset 3px 0 #bc6969}.task-change-badge{margin-top:8px;cursor:pointer;text-align:left;white-space:normal;font:inherit;font-size:12px;border:1px solid currentColor}
+</style>
+
+<style scoped>
+.task-table.hide-group .col-group,.task-table.hide-group tr>:nth-child(2),.task-table.hide-pending .col-pending,.task-table.hide-pending tr>:nth-child(4),.task-table.hide-failed .col-failed,.task-table.hide-failed tr>:nth-child(6){display:none}
+.task-table.hide-group.hide-pending.hide-failed{min-width:720px}.task-table.compact td{padding-block:9px}.task-table.compact .task-name-link{font-size:15px}.task-table.compact .task-name-copy{gap:4px}.task-table.compact .btn{min-height:34px;padding-block:6px}
 </style>

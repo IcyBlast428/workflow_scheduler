@@ -1,6 +1,6 @@
 {
   "index.html": {
-    "file": "static/index-B-T8JlaG.js",
+    "file": "static/index-Cx0C13Lr.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -15,11 +15,11 @@
       "src/components/ExecutionMatrixWorkspace.vue"
     ],
     "css": [
-      "static/index-B1mBA6ov.css"
+      "static/index-CDHaRXPu.css"
     ]
   },
   "src/components/AdminPanel.vue": {
-    "file": "static/AdminPanel-CU_lDfim.js",
+    "file": "static/AdminPanel-CC26ZumD.js",
     "name": "AdminPanel",
     "src": "src/components/AdminPanel.vue",
     "isDynamicEntry": true,
@@ -27,11 +27,11 @@
       "index.html"
     ],
     "css": [
-      "static/AdminPanel-BnBMMqR_.css"
+      "static/AdminPanel-DxZLBoqv.css"
     ]
   },
   "src/components/ExecutionMatrixWorkspace.vue": {
-    "file": "static/ExecutionMatrixWorkspace-D1jVZmy8.js",
+    "file": "static/ExecutionMatrixWorkspace-D0iHUieU.js",
     "name": "ExecutionMatrixWorkspace",
     "src": "src/components/ExecutionMatrixWorkspace.vue",
     "isDynamicEntry": true,
@@ -39,11 +39,11 @@
       "index.html"
     ],
     "css": [
-      "static/ExecutionMatrixWorkspace-DNBSBeLi.css"
+      "static/ExecutionMatrixWorkspace-CRZ8UL91.css"
     ]
   },
   "src/components/GitlabUpdates.vue": {
-    "file": "static/GitlabUpdates-Czhxx0I-.js",
+    "file": "static/GitlabUpdates-DsZeHKmA.js",
     "name": "GitlabUpdates",
     "src": "src/components/GitlabUpdates.vue",
     "isDynamicEntry": true,
@@ -51,11 +51,11 @@
       "index.html"
     ],
     "css": [
-      "static/GitlabUpdates-Oth15BVg.css"
+      "static/GitlabUpdates-Dhz4VWP9.css"
     ]
   },
   "src/components/TaskConnections.vue": {
-    "file": "static/TaskConnections-C3o1IV8h.js",
+    "file": "static/TaskConnections-BO5oz5XA.js",
     "name": "TaskConnections",
     "src": "src/components/TaskConnections.vue",
     "isDynamicEntry": true,
@@ -67,7 +67,7 @@
     ]
   },
   "src/components/TaskExamples.vue": {
-    "file": "static/TaskExamples-3U-TXDo3.js",
+    "file": "static/TaskExamples-ChTwc1VK.js",
     "name": "TaskExamples",
     "src": "src/components/TaskExamples.vue",
     "isDynamicEntry": true,
@@ -79,7 +79,7 @@
     ]
   },
   "src/components/TaskOperations.vue": {
-    "file": "static/TaskOperations-DaTU8L_-.js",
+    "file": "static/TaskOperations-C3r2A-Nb.js",
     "name": "TaskOperations",
     "src": "src/components/TaskOperations.vue",
     "isDynamicEntry": true,
@@ -91,7 +91,7 @@
     ]
   },
   "src/components/TaskReleaseDialog.vue": {
-    "file": "static/TaskReleaseDialog-B2T-OVKt.js",
+    "file": "static/TaskReleaseDialog-QNqyd5MC.js",
     "name": "TaskReleaseDialog",
     "src": "src/components/TaskReleaseDialog.vue",
     "isDynamicEntry": true,

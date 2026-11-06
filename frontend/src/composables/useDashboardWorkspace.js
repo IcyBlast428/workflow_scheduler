@@ -1,5 +1,6 @@
 import { reactive, watch, onScopeDispose } from 'vue';
 import { api } from '../api.js';
+import {useRefreshLoop} from './useRefreshLoop.js';
 import { timestamp } from '../timebase.js';
 export function useDashboardWorkspace({
   token,
@@ -7,10 +8,7 @@ export function useDashboardWorkspace({
   markBackendHealthy,
   handleRequestFailure,
 }) {
-  let dashboardPollTimer = null,
-    dashboardPollInFlight = false,
-    serial = 0;
-  const DASHBOARD_POLL_MS = 5000;
+  let serial = 0, pending = null;
   const dashboard = reactive({
     loading: false,
     loaded: false,
@@ -39,7 +37,16 @@ export function useDashboardWorkspace({
     },
     warning: '',
   });
-  async function loadDashboard(options = {}) {
+  function loadDashboard(options = {}) {
+    if (!options.silent) dashboard.loading=true;
+    if (pending) return pending;
+    const request=fetchDashboard(options);
+    pending=request;
+    const clear=()=>{if(pending===request){pending=null;dashboard.loading=false;}};
+    request.then(clear,clear);
+    return request;
+  }
+  async function fetchDashboard(options = {}) {
     const current = ++serial;
     if (!options.silent) {
       dashboard.loading = true;
@@ -83,12 +90,14 @@ export function useDashboardWorkspace({
         incoming,
       );
       dashboard.warning = data.warning || '';
+      return true;
     } catch (error) {
       if (current !== serial) return;
       await handleRequestFailure(error, {
         state: dashboard,
         toastTitle: options.silent ? '' : '总览加载失败',
       });
+      return false;
     } finally {
       if (current === serial && !options.silent) {
         dashboard.loading = false;
@@ -96,53 +105,10 @@ export function useDashboardWorkspace({
     }
   }
 
-  function shouldPollDashboard() {
-    return Boolean(
-      token.value &&
-        view.value === 'dashboard' &&
-        document.visibilityState !== 'hidden',
-    );
-  }
-
-  async function pollDashboard() {
-    if (!shouldPollDashboard() || dashboardPollInFlight) {
-      return;
-    }
-    dashboardPollInFlight = true;
-    try {
-      await loadDashboard({ silent: true });
-    } finally {
-      dashboardPollInFlight = false;
-    }
-  }
-
-  function syncDashboardPolling() {
-    if (shouldPollDashboard()) {
-      if (!dashboardPollTimer) {
-        dashboardPollTimer = window.setInterval(
-          pollDashboard,
-          DASHBOARD_POLL_MS,
-        );
-      }
-      return;
-    }
-    stopDashboardPolling();
-  }
-
-  function stopDashboardPolling() {
-    if (dashboardPollTimer) {
-      window.clearInterval(dashboardPollTimer);
-      dashboardPollTimer = null;
-    }
-    dashboardPollInFlight = false;
-  }
-  watch(
-    () => Boolean(token.value && view.value === 'dashboard'),
-    syncDashboardPolling,
-  );
-  onScopeDispose(() => {
-    serial++;
-    stopDashboardPolling();
-  });
-  return { dashboard, loadDashboard, syncDashboardPolling };
+  const polling=useRefreshLoop({load:()=>loadDashboard({silent:true}),
+    enabled:()=>Boolean(token.value && view.value==='dashboard'),immediate:false});
+  function syncDashboardPolling(){polling.sync();}
+  watch(token,()=>{serial++;pending=null;dashboard.loading=false;});
+  onScopeDispose(()=>{serial++;});
+  return {dashboard,loadDashboard,syncDashboardPolling};
 }

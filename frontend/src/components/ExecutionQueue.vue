@@ -15,24 +15,25 @@
 </template>
 <script setup>
 import { ref,watch,onMounted,onBeforeUnmount } from 'vue';
+import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 const props=defineProps({confirm:Function,active:{type:Boolean,default:true}});defineEmits(['execution','detail','settings']);
 const state=ref({}),error=ref(''),message=ref(''),loading=ref(false),busy=ref(''),query=ref(''),status=ref(''),updated=ref('');
-const applied=ref({query:'',status:'',page:1}),loaded=ref(false);let alive=true,timer,generation=0,inFlight=false;
+const applied=ref({query:'',status:'',page:1}),loaded=ref(false);let alive=true,generation=0,inFlight=false;
 const statuses={pending:'等待派发',dispatching:'派发中',accepted:'已派发',expired:'等待超时',rejected:'未接收',unknown:'待人工核对',cancelled:'已取消'};
 const kinds={scheduled:'自动计划',manual:'参数化执行',trial:'试运行',retry:'重试',backfill:'补跑'};
 const waiting=value=>value==null?'—':value<60?value+' 秒':Math.floor(value/60)+' 分 '+value%60+' 秒';
 const percent=value=>value==null?'待采样':value+'%';
 const tone=status=>({pending:'warning',dispatching:'brand',expired:'danger',rejected:'danger',unknown:'warning',accepted:'info',cancelled:'info'})[status];
-async function load(silent=false){if(silent===true && inFlight)return;const seq=++generation;inFlight=true;if(silent!==true)loading.value=true;try{const value=await api.dispatchStatus(applied.value);if(!alive || seq!==generation)return;state.value=value;loaded.value=true;applied.value.page=value.page;error.value='';updated.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});}catch(e){if(alive && seq===generation)error.value=e.message;}finally{if(alive && seq===generation){loading.value=false;inFlight=false;}}}
+async function load(silent=false){if(silent===true && inFlight)return;const seq=++generation;inFlight=true;if(silent!==true)loading.value=true;try{const value=await api.dispatchStatus(applied.value);if(!alive || seq!==generation)return;state.value=value;loaded.value=true;applied.value.page=value.page;error.value='';updated.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});}catch(e){if(alive && seq===generation)error.value=e.message;return false;}finally{if(alive && seq===generation){loading.value=false;inFlight=false;}}}
 function search(){applied.value={query:query.value,status:status.value,page:1};load();}
 function filter(value){status.value=value;search();}
 function reset(){query.value='';status.value='';search();}
 function go(delta){applied.value={...applied.value,page:(state.value.page || 1)+delta};load();}
-async function cancel(item){if(!await props.confirm({title:'取消待派发请求',message:'取消 '+item.task_name+' 的这一次请求，不停用调度，也不停止已运行的任务。',confirmText:'取消此请求',danger:true}))return;busy.value=item.id;try{await api.cancelExecutionRequest(item.id);message.value='请求已取消。';await load();}catch(e){error.value=e.message;}finally{busy.value='';}}
+async function cancel(item){if(!await props.confirm({title:'取消待派发请求',message:'取消 '+item.task_name+' 的这一次请求，不停用调度，也不停止已运行的任务。',confirmText:'取消此请求',danger:true}))return;busy.value=item.id;try{await api.cancelExecutionRequest(item.id);message.value='请求已取消。';await load();}catch(e){error.value=e.message;return false;}finally{busy.value='';}}
 function refresh(event){if(props.active)load(event?.detail?.silent===true);}
-watch(() => props.active, active => { if (active) load(loaded.value); });
-onMounted(()=>{load();timer=setInterval(()=>{if(props.active && !document.hidden && !loading.value && !busy.value)load(true);},5000);window.addEventListener('wfs:matrix-refresh',refresh);});onBeforeUnmount(()=>{alive=false;generation++;clearInterval(timer);window.removeEventListener('wfs:matrix-refresh',refresh);});
+useRefreshLoop({load:()=>load(loaded.value),enabled:()=>props.active && !busy.value});
+onMounted(()=>{window.addEventListener('wfs:matrix-refresh',refresh);});onBeforeUnmount(()=>{alive=false;generation++;window.removeEventListener('wfs:matrix-refresh',refresh);});
 </script>
 <style scoped>
 .execution-queue p{margin:0}.queue-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.queue-summary button{text-align:left;font:inherit;color:inherit;cursor:pointer}.queue-summary strong{font-size:23px}.queue-health{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px}.queue-filters{display:grid;grid-template-columns:minmax(180px,1fr) minmax(160px,.6fr) auto;gap:16px;align-items:end}.queue-filters label{display:grid;gap:8px}.queue-table{min-width:850px}.queue-table td{max-width:300px;overflow-wrap:anywhere}.queue-table .filter-actions{flex-wrap:wrap}.queue-pagination{justify-content:flex-end}.queue-pagination>span{margin-right:auto}@media(max-width:760px){.queue-summary{grid-template-columns:1fr 1fr}.queue-filters{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.queue-filters>.filter-actions{grid-column:1/-1}.queue-summary strong{font-size:20px}}

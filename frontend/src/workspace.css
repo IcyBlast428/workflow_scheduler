@@ -128,3 +128,8 @@
 @media(max-width:560px){
 .task-table{min-width:0;width:100%;table-layout:auto}.task-table colgroup,.task-table thead{display:none}.task-table tbody,.task-table tr{display:block}.task-table tbody tr{padding:14px;border-bottom:1px solid var(--line)}.task-table tr>td{display:none}.task-table tr>.task-name-cell,.task-table tr>.action-cell{display:block;position:static;width:auto;max-width:none;padding:0;border:0;box-shadow:none}.task-table .task-name-copy{width:100%}.task-table .task-name-link{white-space:normal}.task-table .action-cell{margin-top:12px}.task-table .mobile-task-status{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mobile-task-status small{color:var(--muted);overflow-wrap:anywhere}.mobile-task-status small:last-child{flex-basis:100%}.task-table .task-actions{flex-wrap:wrap}
 }
+
+/* Consistent focus and neutral secondary controls across workspaces. */
+button:focus-visible,summary:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.attention-panel.is-clear{padding:10px 20px;margin-bottom:12px}.attention-panel.is-clear h2{font-size:15px;margin:0}.attention-panel.is-clear .panel-head{flex:1;justify-content:space-between}.attention-panel.is-clear .panel-body{flex-basis:100%}
+.issue-row>.recent-run-copy{flex:1;min-width:0}.cell-subtitle,.modal-subtitle{font-size:12px;line-height:1.6}

@@ -4,11 +4,13 @@ async function login(page){
 }
 
 test('background attention checks preserve compact layout while the request is pending',async({page})=>{
- await page.clock.install();
+ const now=new Date();await page.clock.install({time:now});await page.clock.pauseAt(now);
  let checks=0,release;
  const state={code:20000,data:{scheduler:{healthy:true},database:'GaussDB',issues:[]}};
  await page.route('**/api/taskinfo/attention',async route=>{checks++;if(checks>1)await new Promise(resolve=>release=resolve);await route.fulfill({json:state});});
- await login(page);
+ const dashboardResponse=page.waitForResponse(response=>response.url().includes('/api/taskinfo/dashboard'));
+ await login(page);await (await dashboardResponse).finished();
+ await expect(page.locator('.dashboard-loading')).toHaveCount(0);
  const card=page.locator('.attention-panel');await expect(card).toHaveClass(/is-clear/);
  const before=await card.boundingBox(),chartBefore=await page.locator('.cpu-panel').boundingBox();
  await page.clock.fastForward(30001);await expect.poll(()=>checks).toBe(2);await expect(card.getByRole('button',{name:'刷新',exact:true})).toBeDisabled();

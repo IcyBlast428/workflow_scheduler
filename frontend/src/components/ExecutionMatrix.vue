@@ -63,6 +63,7 @@
 import { timestamp } from '../timebase';
 import MatrixHeatmap from './MatrixHeatmap.vue';
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
 import { createMatrixScene, layoutTasks } from '../executionMatrixScene';
@@ -78,7 +79,7 @@ const preferenceKey=()=>`wfs:matrix:${props.userKey || 'anonymous'}`;
 let savedCamera;
 function restorePreferences(){const value=readPreference(preferenceKey(),{});displayMode.value=matrixViewMode(value.displayMode,window.innerWidth);category.value=typeof value.category==='string'?value.category:'';timeWindow.value=['day','360','60'].includes(value.timeWindow)?value.timeWindow:'day';onlyAbnormal.value=Boolean(value.onlyAbnormal);savedCamera=value.orientation==='horizontal-time-v1'?value.camera:undefined;scene?.setCamera(savedCamera);}
 function savePreferences(camera=scene?.getCamera()){writePreference(preferenceKey(),{orientation:'horizontal-time-v1',displayMode:displayMode.value,category:category.value,timeWindow:timeWindow.value,onlyAbnormal:onlyAbnormal.value,camera});}
-let scene=null,timer=null,serial=0,disposed=false,inFlight=false;
+let scene=null,serial=0,disposed=false,inFlight=false;
 const allGroups=computed(()=>[...new Set((data.value?.tasks || []).map(task=>task.group))]);
 const visibleData=computed(()=>{
   if(!data.value)return null;
@@ -109,7 +110,7 @@ async function load(force=false){
     await nextTick();
     ensureScene();
     updateScene();
-  }catch(exc){if(!disposed&&current===serial)error.value=exc.message||'暂时无法读取执行矩阵。';}
+  }catch(exc){if(!disposed&&current===serial)error.value=exc.message||'暂时无法读取执行矩阵。';return false;}
   finally{if(current===serial){loading.value=false;inFlight=false;}}
 }
 function refresh(event){if(props.active)load(event?.detail?.silent!==true);}
@@ -120,8 +121,9 @@ watch(displayMode,async()=>{await nextTick();ensureScene();updateScene();});
 watch([category,timeWindow,onlyAbnormal],()=>{updateScene();savePreferences();});
 watch(()=>props.userKey,restorePreferences,{immediate:true});
 watch(selectedPid,()=>{recordLimit.value=200;});
-onMounted(()=>{load();timer=setInterval(()=>{if(props.active&&live.value&&!document.hidden)load();},10000);window.addEventListener('wfs:matrix-refresh',refresh);});
-onBeforeUnmount(()=>{disposed=true;++serial;clearInterval(timer);window.removeEventListener('wfs:matrix-refresh',refresh);scene?.dispose();});
+useRefreshLoop({load,enabled:()=>props.active&&live.value,interval:10000});
+onMounted(()=>{window.addEventListener('wfs:matrix-refresh',refresh);});
+onBeforeUnmount(()=>{disposed=true;++serial;window.removeEventListener('wfs:matrix-refresh',refresh);scene?.dispose();});
 </script>
 
 <style scoped>

@@ -110,7 +110,7 @@ const props = defineProps({
   retentionHours: { type: Number, default: 6 },
 });
 
-const MIN_CHART_HEIGHT = 420;
+const MIN_CHART_HEIGHT = 300;
 const TASK_LANE_HEIGHT = 24;
 const TASK_BAR_HEIGHT = 18;
 const TASK_AREA_PADDING = 10;
@@ -251,7 +251,7 @@ const taskLaneCount = computed(() => {
 });
 
 const plotTop = computed(() => margin.top);
-const plotHeight = computed(() => Math.max(260, chartHeight.value - margin.top - margin.bottom));
+const plotHeight = computed(() => Math.max(180, chartHeight.value - margin.top - margin.bottom));
 const plotBottom = computed(() => plotTop.value + plotHeight.value);
 const taskLaneIndexes = computed(() => Array.from({ length: taskLaneCount.value }, (_, index) => index));
 
@@ -684,7 +684,7 @@ function taskTitle(block) {
 .cpu-timeline {
   position: relative;
   height: 100%;
-  min-height: 420px;
+  min-height: 300px;
   overflow: hidden;
   touch-action: none;
 }

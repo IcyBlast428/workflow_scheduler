@@ -2,6 +2,7 @@
 
 当前版本只面向全新 GaussDB/DWS 部署，无旧数据迁移。
 
+- [简化部署入口](../START-HERE.md)
 - [正式部署](systemd-deployment.md)
 - [固定目录测试部署](../deploy/root-test/README.md)
 - [本机协议测试](local-postgres-windows.md)

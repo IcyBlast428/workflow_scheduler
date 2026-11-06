@@ -210,6 +210,9 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                 register(process.pid,isolated_unit)
             identity = Path(f'/proc/{process.pid}/stat').read_text().split()[21] if os.name != 'nt' else ''
             update_run(run_id, status='running', start_time=str(start), process_id=process.pid, process_identity=identity)
+            if current.get('source') != 'trial':
+                from app.bootstrap.runtime_metrics import record_delay
+                record_delay('task:start_delay', current.get('scheduled_time') or current['created_at'], start)
             reader = threading.Thread(target=_drain_output, args=(process.stdout, chunks, run_id, flags), daemon=True)
             reader.start()
             deadline = time.monotonic() + timeout_seconds if timeout_seconds else None

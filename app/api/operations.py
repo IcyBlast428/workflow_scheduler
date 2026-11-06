@@ -166,13 +166,16 @@ def runtime_health():
         return forwarded
     from app.bootstrap import operations, journal
     from app.bootstrap.run_summary import coverage
-    from app.bootstrap.runtime_metrics import snapshot
+    from app.bootstrap.runtime_metrics import diagnostics
+    from app.bootstrap.execution_health import execution_health
     with GaussDB() as db:
         alerts = db.execute_query_sql('SELECT status,COUNT(*) FROM wfs_notifications GROUP BY status')
         summary = coverage(db)
+    performance = diagnostics()
+    health = execution_health()
     directory = operations._directory
     usage = shutil.disk_usage(directory)
-    return success_msg({'journal': journal.health(directory), 'maintenance': operations.service_state(), 'summary': summary, 'alerts': dict(alerts), 'free_mb': usage.free // 1024 // 1024, 'metrics': snapshot()})
+    return success_msg({'journal': journal.health(directory), 'maintenance': operations.service_state(), 'summary': summary, 'alerts': dict(alerts), 'free_mb': usage.free // 1024 // 1024, 'metrics': performance['metrics'], 'performance': performance, 'execution_health': health})
 
 @blueprint.get('/api/taskinfo/attention')
 def attention():

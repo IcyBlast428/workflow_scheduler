@@ -1,10 +1,12 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import {useRefreshLoop} from './useRefreshLoop.js';
 import { api } from '../api';
 
 export function useGitlabUpdates(enabled) {
   const summary = ref(null), dismissed = ref('');
-  let timer, generation = 0;
-  async function refresh() {
+  let pending=null, generation = 0;
+  function refresh(){if(pending)return pending;pending=fetchSummary().finally(()=>{pending=null;});return pending;}
+  async function fetchSummary() {
     if (!enabled.value || document.hidden) return;
     const current = generation;
     try {
@@ -12,6 +14,7 @@ export function useGitlabUpdates(enabled) {
       if (current === generation && enabled.value) summary.value = value;
     } catch {
       // GitLab reminders must not replace the platform's own health status.
+      return false;
     }
   }
   function accept(value) {
@@ -20,17 +23,11 @@ export function useGitlabUpdates(enabled) {
   function dismiss() { dismissed.value = summary.value?.fingerprint || ''; }
   watch(enabled, active => {
     generation += 1;
-    clearInterval(timer);
     summary.value = null;
     dismissed.value = '';
-    if (active) {
-      refresh();
-      timer = setInterval(refresh, 60000);
-    }
   }, { immediate: true });
-  function visible() { if (!document.hidden) refresh(); }
-  document.addEventListener('visibilitychange', visible);
-  onBeforeUnmount(() => { clearInterval(timer); generation += 1; document.removeEventListener('visibilitychange', visible); });
+  useRefreshLoop({load:refresh,enabled:()=>enabled.value,interval:60000});
+  onBeforeUnmount(() => { generation += 1; });
   const showReminder = computed(() => enabled.value && summary.value?.enabled && summary.value?.unread
     && summary.value.count > 0 && summary.value.fingerprint !== dismissed.value);
   return { summary, showReminder, refresh, accept, dismiss };
