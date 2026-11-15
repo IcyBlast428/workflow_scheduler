@@ -16,7 +16,6 @@ for (const [name, language] of Object.entries({ python, sql, bash, json, yaml, i
 
 export function languageForFilename(filename = '') {
   const name = filename.split('/').pop().toLowerCase();
-  if (name === '.wfs-task.json') return 'json';
   const extension = name.split('.').pop();
   return ({ py:'python', pyw:'python', sql:'sql', sh:'bash', bash:'bash', json:'json',
     yml:'yaml', yaml:'yaml', ini:'ini', cfg:'ini', toml:'ini', js:'javascript', mjs:'javascript',

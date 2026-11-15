@@ -16,12 +16,17 @@
         </div>
         <p class="hint">{{ scheduleImpact }}。已排队或运行中的执行继续使用原版本。</p>
       </section>
-      <section v-if="candidate" class="surface-card release-candidate" :class="candidate.kind"><span class="tag" :class="candidate.kind === 'delete' ? 'danger' : candidate.kind === 'new' ? 'success' : 'warning'">{{ {new:'新任务待发布',update:'有更新待发布',delete:'GitLab 已删除'}[candidate.kind] }}</span><p class="mono">{{ candidate.path }} @ {{ candidate.sha.slice(0, 8) }}</p><p v-if="candidate.error" class="danger-text">{{ candidate.error }}</p><p v-if="candidate.kind === 'delete'" class="hint">确认后停止后续调度，任务移入回收站。历史版本、运行日志和输出文件保留；已排队或运行的实例继续完成。</p><div class="filter-actions"><button v-if="candidate.kind === 'delete'" class="btn danger" :disabled="busy || candidate.blocked" @click="remove">确认删除任务</button><button v-else class="btn primary" :disabled="busy || candidate.blocked" @click="stage">{{ preview?.release.git_source?.sha === candidate.sha ? '重新获取 GitLab 版本' : '获取 GitLab 版本并查看差异' }}</button></div></section>
+      <section v-if="candidate" class="surface-card release-candidate" :class="candidate.kind"><span class="tag" :class="candidate.kind === 'delete' ? 'danger' : candidate.kind === 'new' ? 'success' : 'warning'">{{ {new:'新任务待发布',update:'有更新待发布',delete:'GitLab 已删除'}[candidate.kind] }}</span><p class="mono">{{ candidate.path }} @ {{ candidate.sha.slice(0, 8) }}</p><p v-if="candidate.error" class="danger-text">{{ candidate.error }}</p><p v-if="candidate.kind === 'delete'" class="hint">确认后停止后续调度，任务移入回收站。历史版本、运行日志和输出文件保留；已排队或运行的实例继续完成。</p><div v-if="candidate.kind !== 'delete'" class="gitlab-task-configuration">
+        <label>任务标识（自动生成）<input class="input mono" :value="candidate.pid" readonly /></label>
+        <p class="hint">任务标识由平台生成且不可修改。无需 .wfs-task.json；名称与入口在此配置。</p><p v-if="candidate.kind==='update'" class="hint">已有调度配置中的名称与入口优先；如需调整，请到任务配置页修改。</p>
+        <label>发布任务名称<input class="input" v-model.trim="taskName" maxlength="200" :disabled="busy" /></label>
+        <label>发布 Python 入口<select class="select" v-model="sourceEntry" :disabled="busy"><option value="" disabled>请选择 Python 入口</option><option v-for="file in candidate.main_file_options" :key="file" :value="file">{{ file }}</option></select></label>
+      </div><div class="filter-actions"><button v-if="candidate.kind === 'delete'" class="btn danger" :disabled="busy || candidate.blocked" @click="remove">确认删除任务</button><button v-else class="btn primary" :disabled="busy || candidate.blocked || !taskName || !sourceEntry" @click="stage">{{ preview?.release.git_source?.sha === candidate.sha ? '重新获取 GitLab 版本' : '获取 GitLab 版本并查看差异' }}</button></div></section>
       <div v-if="record" class="release-overview"><span class="tag info">{{ record.deleted_at ? '回收站' : record.active_version ? '当前版本 ' + short(record.active_version) : '尚未发布' }}</span><span class="hint">{{ record.group_name }} / {{ record.folder_name }}</span><button v-if="record.deleted_at" class="btn" :disabled="busy" @click="restore">恢复任务（暂停）</button></div>
       <section v-if="versions.length" class="release-history" aria-label="代码版本历史"><button v-for="version in versions" :key="version.version" class="btn" :class="preview?.release.version === version.version ? 'primary' : ''" :disabled="busy" @click="work('正在读取代码版本…', () => inspect(version.version))">{{ short(version.version) }} · {{ label(version.status) }}</button></section>
       <section v-if="preview" class="surface-card release-preview" aria-label="发布版本预览">
         <h3>版本 {{ short(preview.release.version) }}</h3><p class="hint">新增 {{ counts.added }} · 修改 {{ counts.modified }} · 删除 {{ counts.deleted }} 个文件</p>
-        <p v-if="preview.release.git_source" class="mono">GitLab 提交 {{ preview.release.git_source.sha }}</p><p class="hint">{{ preview.release.message || '先核对文件差异，再检查依赖并确认发布。' }}</p>
+        <p v-if="preview.release.task_name">发布任务名称：{{ preview.release.task_name }}</p><p v-if="preview.release.git_source" class="mono">GitLab 提交 {{ preview.release.git_source.sha }}</p><p class="hint">{{ preview.release.message || '先核对文件差异，再检查依赖并确认发布。' }}</p>
         <div ref="entryField" tabindex="-1" class="form-row"><label for="release-entry">Python 入口</label><select id="release-entry" v-model="entry" class="select" :disabled="busy || !['staged','failed'].includes(preview.release.status)"><option v-for="file in preview.release.manifest.filter(f => f.path.endsWith('.py'))" :key="file.path" :value="file.path">{{ file.path }}</option></select></div>
         <p class="hint">依赖：{{ preview.release.requirements.join('，') || 'Python 标准库' }}。独立环境检查通过后才能发布；不会在检查期间运行任务。</p>
         <section v-if="preview.preflight" class="release-checklist" aria-label="发布前检查">
@@ -48,7 +53,7 @@
 import { computed, ref, watch, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
-import {confirmUnsaved} from '../composables/useUnsavedChanges';
+import {confirmUnsaved,useUnsavedChanges} from '../composables/useUnsavedChanges';
 import ModalShell from './ModalShell.vue';
 import LoadingStatus from './LoadingStatus.vue';
 const TaskOperations=defineAsyncComponent(()=>import('./TaskOperations.vue'));
@@ -93,11 +98,15 @@ const scheduleImpact = computed(() => {
 });
 async function close() { if (!busy.value && await confirmUnsaved(props.confirm)) emit('close'); }
 function changed() { emit('changed'); window.dispatchEvent(new Event('wfs:task-releases-refresh')); }
+const taskName=ref(''),sourceEntry=ref('');
+const publicationForm=useUnsavedChanges(()=>({taskName:taskName.value,main_file:sourceEntry.value}),()=>Boolean(candidate.value && candidate.value.kind!=='delete' && !loading.value));
+let configurationId='';
 async function refresh() {
   const token = generation, pid = props.pid;
   const [state, detail] = await Promise.all([api.gitlabTasks(), api.packages(pid)]);
   if (!alive || token !== generation) return;
   candidate.value = state.items.find(i => i.pid === pid) || null;
+  if(configurationId!==candidate.value?.id){configurationId=candidate.value?.id || '';taskName.value=candidate.value?.task_name || '';sourceEntry.value=candidate.value?.main_file || '';publicationForm.saved();}
   record.value = detail.task || null;
   versions.value = detail.versions || [];
 }
@@ -119,12 +128,13 @@ async function inspectFile(filename) {
   catch (err) { if (alive && token === generation && request === diffSequence) error.value = err.message; }
   finally { if (alive && token === generation && request === diffSequence) diffLoading.value = false; }
 }
-async function stage() { await work('正在获取并校验 GitLab 代码…', async () => { const data = await api.gitlabTaskAction({action:'stage', id:candidate.value.id}); await refresh(); await inspect(data.version); changed(); }); }
+async function stage() { await work('正在获取并校验 GitLab 代码…', async () => { const data = await api.gitlabTaskAction({action:'stage', id:candidate.value.id, configuration:{task_name:taskName.value, main_file:sourceEntry.value}}); await refresh(); await inspect(data.version); changed(); }); }
 async function prepare() { await work('正在准备独立依赖环境…', async () => { await api.packageAction({action:'prepare',pid:props.pid,version:preview.value.release.version,main_file:entry.value}); await inspect(preview.value.release.version); }); }
 async function publish() {
   if(!canPublish.value || blockedChecks.value.length)return;
   const { version, published_at: publishedAt } = preview.value.release;
-  const { revision, task_name: taskName } = record.value;
+  const { revision } = record.value;
+  const taskName = preview.value.release.task_name || record.value.task_name;
   const pid = props.pid;
   const rollback = Boolean(publishedAt);
   if (!await props.confirm({title:rollback ? '回滚任务代码' : '发布任务代码',message:`确认${rollback ? '回滚' : '发布'} ${taskName}？`,details:[`所选版本 ${short(version)}。${scheduleImpact.value}。`,'新的执行使用所选版本。已排队或运行的实例继续使用原版本。','保留调度配置、历史版本和业务输出。'],confirmText:rollback ? '确认回滚' : '确认发布',danger:rollback})) return;
@@ -148,6 +158,7 @@ useRefreshLoop({load:()=>work('正在读取依赖检查结果…',async()=>{awai
 onBeforeUnmount(() => { alive = false; generation++; });
 </script>
 <style>
+.gitlab-task-configuration{display:grid;gap:12px;margin:16px 0;min-width:0}.gitlab-task-configuration label{display:grid;gap:8px;min-width:0}
 .release-top .filter-actions { flex-wrap: wrap; justify-content: flex-end; }
 .release-check-summary h4 { margin: 0 0 12px; }
 .release-check-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(185px, 100%), 1fr)); gap: 12px; }

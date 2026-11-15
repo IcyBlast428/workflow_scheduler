@@ -1,6 +1,6 @@
 # 多层目录任务
 
-将 report_job、resources、sql 等完整目录复制到 GitLab 的一个任务目录，在根目录的 .wfs-task.json 中指定稳定 task_id，main_file 使用 `report_job/main.py` 或兼容入口 `main.py`。合并到目标分支后在任务列表审查、准备环境并发布，目录层级原样保留；不再上传 ZIP 或选择外层目录处理方式。
+将 report_job、resources、sql 等完整目录复制到 GitLab 的一个任务目录，在平台发布页面填写任务名称、选择入口 `report_job/main.py` 或 `main.py`，无需编写配置文件或任务编号。合并到目标分支后在任务列表审查、准备环境并发布，目录层级原样保留；不再上传 ZIP 或选择外层目录处理方式。
 
 平台以包根目录为工作目录，并为有 __init__.py 的包入口保留 Python 包语义，所以 report_job/main.py 中可使用 `from .helpers import total`。读取资源推荐 `Path(os.environ['WFS_TASK_ROOT']) / 'resources/input.json'`。
 

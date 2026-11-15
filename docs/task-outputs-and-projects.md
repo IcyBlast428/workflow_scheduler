@@ -52,11 +52,7 @@ sql/report.sql
 README.md
 ```
 
-在任务根目录添加 `.wfs-task.json`，指定稳定编号及实际入口：
-
-```json
-{"task_id":"daily_report","task_name":"日报汇总","main_file":"report_job/main.py"}
-```
+不需要添加 `.wfs-task.json`。平台自动生成唯一任务标识；在发布页面填写任务名称，并选择实际入口，例如 `report_job/main.py`。
 
 发布步骤：代码合并到配置的 GitLab 目标分支 → 在「任务列表」审查新增或更新 → 获取固定提交并核对文件差异 → 检查依赖环境 → 确认发布。任务根目录以内的层级原样保留，不再需要选择 ZIP 外层目录处理方式。「任务示例」可下载完整示例 ZIP，解压后将文件提交到 GitLab；平台不再接收 ZIP 上传。版本发布与保护规则见[任务发布手册](task-packages.md)。
 

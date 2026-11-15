@@ -337,7 +337,7 @@ def scan(config, previous=None):
             except GitLabError as exc:
                 warnings.append(('平台' if task is None else '任务 ' + task['pid']) + '已部署基线比对失败：' + str(exc))
         if not config['tasks']:
-            warnings.append('任务新增、修改与删除请在任务列表查看；旧任务首次接入可通过目录绑定确认编号。')
+            warnings.append('任务新增、修改与删除请在任务列表查看；任务标识由平台自动生成；目录移动请绑定已有任务。')
         from app.bootstrap.gitlab_tasks import catalog
         try:
             task_catalog = catalog(client, config, target_sha, (previous or {}).get('task_catalog'))

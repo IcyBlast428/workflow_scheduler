@@ -11,11 +11,18 @@ test('task documentation owns business examples and preserves type switching and
   const examples=page.locator('.task-examples .database-usage-examples');
   await expect(examples.getByRole('heading',{name:'任务中的统一用法'})).toBeVisible();
   await expect(examples.locator('.connection-example')).toContainText('SELECT id, status FROM demo_db_usage');
+  await expect(examples.locator('.hljs-keyword').first()).toBeVisible();
+  await expect(examples.locator('.hljs-string').first()).toBeVisible();
+  // Connection IDs are user input; highlighting must preserve them as text.
+  await examples.getByLabel('示例连接标识').fill('<img src=x onerror=alert(1)>');
+  await expect(examples.locator('pre')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(examples.locator('pre img')).toHaveCount(0);
   await examples.getByLabel('示例连接标识').fill('my_reports');
   await examples.getByLabel('示例类型',{exact:true}).selectOption('insert');await expect(examples.locator('pre')).toContainText('INSERT INTO');
   await examples.getByLabel('示例类型',{exact:true}).selectOption('async');await expect(examples.locator('pre')).toContainText('await db.async_execute');
   await examples.getByRole('button',{name:'复制示例'}).click();await expect(examples.getByRole('button',{name:'已复制'})).toBeVisible();
   expect(await page.evaluate(()=>window.exampleCopiedText)).toContain('NewDB("my_reports")');
+  expect(await page.evaluate(()=>window.exampleCopiedText)).toBe(await examples.locator('pre').textContent());
   await examples.getByLabel('示例类型',{exact:true}).selectOption('transaction');
   await examples.getByLabel('示例数据库类型').selectOption('clickhouse');
   await expect(examples.getByLabel('示例类型',{exact:true}).locator('option[value="transaction"]')).toHaveCount(0);
@@ -36,4 +43,5 @@ test('task documentation owns business examples and preserves type switching and
   const platform=page.locator('.platform-database .database-usage-examples');
   await expect(platform).toContainText('仅用于平台内部开发');await expect(platform).toContainText('任务示例与文档');
   await platform.getByLabel('示例类型',{exact:true}).selectOption('async');await expect(platform.locator('pre')).toContainText('await asyncio.to_thread');
+  await expect(platform.locator('.hljs-keyword').first()).toBeVisible();
 });

@@ -1,5 +1,0 @@
-{
-  "task_id": "demo_sqlite_transaction",
-  "task_name": "多表事务与 DDL",
-  "main_file": "main.py"
-}

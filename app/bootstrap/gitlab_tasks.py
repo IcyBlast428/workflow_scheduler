@@ -3,14 +3,15 @@
 No Git checkout, reset or clean touches runtime code or business output files.
 Only complete target-branch inventories can authorize a deletion.
 """
-import base64
 import hashlib
 import io
 import json
 import stat
+import shutil
 import time
 from urllib.parse import quote
 import zipfile
+import uuid
 
 from app.bootstrap import gitlab_updates as updates, task_packages as packages
 
@@ -23,8 +24,18 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
+def generated_task_id(config, directory):
+    """Stable server-generated identity; DB primary key and CAS reject collisions.
+
+    The repository and full path are included, so similarly named directories in
+    different roots/projects never intentionally share an identity. A directory
+    move must be explicitly bound to its existing platform task.
+    """
+    return 'task_' + uuid.uuid5(uuid.NAMESPACE_URL, project_key(config) + '/' + directory).hex
+
+
 def catalog(client, config, sha, previous=None):
-    if previous and previous.get('sha') == sha and previous.get('complete'):
+    if previous and previous.get('sha') == sha and previous.get('complete') and previous.get('identity_version') == 2:
         return previous
     deadline = time.monotonic() + 45
     entries = []
@@ -58,33 +69,22 @@ def catalog(client, config, sha, previous=None):
         groups.setdefault(directory, []).append(dict(path=relative, id=updates._sha(entry.get('id')), mode=entry.get('mode'), type=entry.get('type')))
     tasks = []
     identities = set()
+    existing_ids = set(packages.registry()) if bindings else set()
     for directory, files in sorted(groups.items()):
         if time.monotonic() > deadline:
             raise updates.GitLabError('任务身份读取超时，请稍后重试。')
         python = sorted(f['path'] for f in files if f['path'].endswith('.py'))
-        identity = next((f for f in files if f['path'] == '.wfs-task.json'), None)
-        metadata = {}
-        if identity:
-            raw, _ = client.get('/repository/blobs/' + identity['id'])
-            try:
-                if raw.get('encoding') != 'base64' or raw.get('size', 999999) > 4096:
-                    raise ValueError()
-                metadata = json.loads(base64.b64decode(raw['content'], validate=True).decode('utf-8-sig'))
-                if not isinstance(metadata, dict):
-                    raise ValueError()
-            except (ValueError, TypeError, KeyError, UnicodeError):
-                raise updates.GitLabError(directory + ' 的 .wfs-task.json 无效。') from None
         group, folder = directory.split('/')[-2:]
-        pid = bindings.get(directory) or metadata.get('task_id') or group + '__' + folder
+        pid = bindings.get(directory) or generated_task_id(config, directory)
         if not isinstance(pid, str) or not packages.IDENTIFIER.fullmatch(pid) or pid in identities:
-            raise updates.GitLabError('任务编号无效或重复，请核对 .wfs-task.json 和目录绑定。')
+            raise updates.GitLabError('任务标识冲突，请检查平台中的目录绑定。')
+        if directory in bindings and pid not in existing_ids:
+            raise updates.GitLabError('目录绑定只能选择平台已有任务；新任务标识由平台自动生成。')
         identities.add(pid)
-        entry = metadata.get('main_file') or ('main.py' if 'main.py' in python else python[0] if len(python) == 1 else '')
+        entry = 'main.py' if 'main.py' in python else python[0] if len(python) == 1 else ''
         error = ''
         if not python:
             error = '任务目录已没有 Python 入口，请恢复入口或删除整个任务目录。'
-        elif entry not in python:
-            error = '存在多个入口，请在 .wfs-task.json 中指定 main_file。'
         try:
             packages._name(group, '分类')
             packages._name(folder, '目录')
@@ -95,13 +95,13 @@ def catalog(client, config, sha, previous=None):
                     raise packages.PackageError('不支持符号链接、子模块或特殊文件。')
         except packages.PackageError as exc:
             error = str(exc)
-        name = metadata.get('task_name') or folder
+        name = folder
         if not isinstance(name, str) or not name.strip() or len(name) > 200:
             raise updates.GitLabError('任务名称无效。')
         tasks.append(dict(pid=pid, path=directory, group_name=group, folder_name=folder, task_name=name,
-                          main_file=entry, files=files, fingerprint=_digest(sorted(files, key=lambda f: f['path'])), error=error,
-                          discoverable=bool(python or identity)))
-    return dict(complete=True, error='', tasks=tasks, sha=sha)
+                          main_file=entry, main_file_options=python, files=files, fingerprint=_digest(sorted(files, key=lambda f: f['path'])), error=error,
+                          discoverable=bool(python)))
+    return dict(complete=True, error='', tasks=tasks, sha=sha, identity_version=2)
 
 
 def _context():
@@ -114,11 +114,15 @@ def changes():
     config, snapshot = _context()
     inventory = snapshot.get('task_catalog', {})
     error = snapshot.get('error') or inventory.get('error', '')
+    if inventory and inventory.get('identity_version') != 2:
+        # An old scan must be refreshed, never interpreted as new task identities.
+        inventory = {}
+        error = error or '发布流程已更新，请重新检查 GitLab 任务目录。'
     complete = bool(config['enabled'] and not error and inventory.get('complete') and snapshot.get('revision') == config['revision'])
     if not config['enabled']:
         return dict(enabled=False, items=[], error='', checked_at=None, complete=False)
     if not inventory:
-        error = '请先在代码更新页完成 GitLab 检查。'
+        error = error or '请先在代码更新页完成 GitLab 检查。'
     if snapshot.get('checked_at') and time.time() - snapshot['checked_at'] > max(900, config['interval'] * 3):
         complete, error = False, 'GitLab 检查结果已过期，请重新检查。'
     managed = packages.registry()
@@ -133,9 +137,13 @@ def changes():
         source = (record or {}).get('git_source') or {}
         if record and record.get('deleted_at'):
             continue  # An explicit local deletion must not silently restore a task.
-        if source and source.get('project_key') != key:
-            continue
-        if source.get('fingerprint') == remote['fingerprint'] and source.get('path') == remote['path']:
+        explicitly_bound = any(t['pid'] == remote['pid'] and t['path'] == remote['path'] for t in config['tasks'])
+        # Directory bindings may attach an existing platform task, but must not
+        # steal an identity already associated with a different repository.
+        foreign_identity = bool(record and (
+            (bool(source) and source.get('project_key') != key)
+            or (source.get('path') != remote['path'] and not explicitly_bound)))
+        if not foreign_identity and source.get('fingerprint') == remote['fingerprint'] and source.get('path') == remote['path']:
             continue
         collision = next((r for r in managed.values() if r['pid'] != remote['pid'] and
                           r['group_name'] == remote['group_name'] and r['folder_name'] == remote['folder_name']), None)
@@ -143,6 +151,14 @@ def changes():
                 'kind': 'update' if record and record.get('active_version') else 'new',
                 'revision': (record or {}).get('revision', 0), 'active_version': (record or {}).get('active_version'),
                 'sha': inventory.get('sha'), 'file_count': len(remote['files'])}
+        if record and not foreign_identity:
+            item['task_name'] = record.get('git_defaults', {}).get('task_name', record['task_name'])
+            item['main_file'] = record.get('git_defaults', {}).get('main_file', item['main_file'])
+        if item['main_file'] not in item['main_file_options']:
+            item['main_file'] = ''
+        item['configuration_required'] = not bool(item['main_file'])
+        if foreign_identity:
+            item['error'] = '自动任务标识已被另一来源占用，禁止覆盖。请检查平台目录绑定。'
         if collision:
             item['error'] = '该目录已属于另一任务，请核对稳定任务编号或目录绑定。'
         items.append(item)
@@ -224,10 +240,19 @@ def _archive(client, item, remote):
     return result.getvalue()
 
 
-def stage(identifier, actor):
+def stage(identifier, actor, fields=None):
     item = _candidate(identifier)
     if item['kind'] == 'delete':
         raise packages.PackageError('此变更应执行删除操作。')
+    fields = {} if fields is None else fields
+    if not isinstance(fields, dict) or set(fields) - {'task_name', 'main_file'}:
+        raise packages.PackageError('只能配置任务名称和入口；任务标识由平台生成，不可修改。')
+    name = fields.get('task_name', item['task_name'])
+    if not isinstance(name, str) or not name.strip() or len(name) > 200 or any(ord(c) < 32 for c in name):
+        raise packages.PackageError('请填写有效的任务名称，最多 200 个字符。')
+    entry = fields.get('main_file', item['main_file'])
+    if not isinstance(entry, str) or entry not in item['main_file_options']:
+        raise packages.PackageError('请在页面选择本次代码中的 Python 入口。')
     config, snapshot = _context()
     client = updates.Client(config)
     try:
@@ -247,13 +272,26 @@ def stage(identifier, actor):
         if record is None:
             from app.bootstrap.timebase import business_now
             record = dict(pid=item['pid'], group_name=item['group_name'], folder_name=item['folder_name'],
-                          task_name=item['task_name'], active_version=None, deleted_at=None, origin='gitlab',
+                          task_name=name.strip(), active_version=None, deleted_at=None, origin='gitlab',
                           created_at=str(business_now()), created_by=actor, revision=0)
-        data = packages._create(record, blob=blob, entry=item['main_file'], actor=actor,
+        data = packages._create(record, blob=blob, entry=entry, actor=actor,
                                 note='GitLab ' + config['target'] + ' @ ' + item['sha'], archive_layout='preserve')
-        if item['pid'] not in managed:
-            record = packages._write_task(record, expected=0)
-            data['base_revision'] = record['revision']
+        # Persist the chosen defaults with the same cross-process CAS as identity.
+        # A competing initial publication cannot create a second task or overwrite it.
+        record['git_defaults'] = dict(main_file=entry, task_name=name.strip())
+        if not record.get('active_version'):
+            record['task_name'] = name.strip()
+            record['git_source'] = dict(project_key=project_key(config), path=item['path'], fingerprint='', sha='')
+        try:
+            record = packages._write_task(record, expected=item['revision'])
+        except Exception:
+            from app.bootstrap.database import GaussDB
+            with GaussDB() as db:
+                db.execute_sql('DELETE FROM wfs_task_releases WHERE pid=? AND version=?', params=(data['pid'], data['version']))
+            shutil.rmtree(packages.release_dir(data['pid'], data['version']))
+            raise
+        data['base_revision'] = record['revision']
+        data['task_name'] = name.strip()
         data['git_source'] = dict(project_key=project_key(config), path=item['path'], sha=item['sha'],
                                   fingerprint=item['fingerprint'], group_name=item['group_name'], folder_name=item['folder_name'])
         packages._write_release(data)

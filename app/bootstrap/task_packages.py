@@ -559,6 +559,8 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
         record['active_version'] = version
         if data.get('git_source'):
             record['git_source'] = data['git_source']
+            record['task_name'] = data.get('task_name') or record['task_name']
+            record['git_defaults'] = dict(main_file=data['main_file'], task_name=record['task_name'])
             record.update(group_name=data['git_source']['group_name'], folder_name=data['git_source']['folder_name'])
         elif record.get('git_source'):
             record['git_source'] = {**record['git_source'], 'sha': '', 'fingerprint': ''}

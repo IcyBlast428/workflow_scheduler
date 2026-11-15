@@ -7,11 +7,17 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   await page.getByLabel('用户名', {exact:true}).fill('admin');
   await page.getByLabel('密码', {exact:true}).fill('browser-test-password');
   await page.getByRole('button', {name:'登录',exact:true}).click();
-  const card = page.locator('.new-task-card').filter({hasText:'GitLab new report'});
+  const card = page.locator('.new-task-card').filter({hasText:'git_new'});
   await expect(card).toContainText('GitLab 新任务');
   await page.screenshot({path:'../data/gitlab-task-new.png',fullPage:true});
   await card.getByRole('button', {name:'审查并发布',exact:true}).click();
   const dialog = page.getByRole('dialog', {name:'任务代码版本',exact:true});
+  const taskId=await dialog.getByLabel('任务标识（自动生成）').inputValue();
+  expect(taskId).toMatch(/^task_[0-9a-f]{32}$/);
+  await expect(dialog.getByLabel('任务标识（自动生成）')).toHaveAttribute('readonly','');
+  await dialog.getByLabel('发布任务名称').fill('平台报表任务');
+  await expect(dialog.getByLabel('发布 Python 入口')).toHaveValue('main.py');
+  await page.screenshot({path:'../data/gitlab-task-configuration.png',fullPage:true});
   await dialog.getByRole('button', {name:'获取 GitLab 版本并查看差异',exact:true}).click();
   await expect(dialog.getByLabel('发布版本预览')).toContainText('新增 2');
   await expect(dialog.getByLabel('发布前检查')).toContainText('文件存在');
@@ -50,7 +56,8 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   };
   await publish();
   await dialog.getByRole('button', {name:'关闭',exact:true}).click();
-  const row = page.locator('.task-table tbody tr').filter({hasText:'git_new'});
+  const row = page.locator('.task-table tbody tr').filter({hasText:taskId});
+  await expect(row).toContainText('平台报表任务');
   await expect(row).toContainText('未配置');
   await expect(row.getByRole('button', {name:'配置调度',exact:true})).toBeVisible();
   await row.getByRole('button', {name:'更多',exact:true}).click();

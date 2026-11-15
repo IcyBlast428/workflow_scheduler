@@ -15,7 +15,6 @@ TOKEN = 'disposable-gitlab-read-token'
 def serve():
     calls = []
     repository = {'app/jobs/acceptance/slow/main.py': b'print("GITLAB_SLOW_V2")\n',
-                  'app/jobs/acceptance/git_new/.wfs-task.json': b'{"task_id":"git_new","task_name":"GitLab new report","main_file":"main.py"}',
                   'app/jobs/acceptance/git_new/main.py': b'from helper import value\nprint(value,flush=True)\n',
                   'app/jobs/acceptance/git_new/helper.py': b'value="GITLAB_V1"\n'}
     def blob_id(content):

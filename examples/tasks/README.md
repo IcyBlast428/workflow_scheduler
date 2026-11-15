@@ -1,6 +1,6 @@
 # 任务编写示例
 
-「任务示例」页从 catalog.json 和这里的源码生成初始示例，管理员后续编辑独立持久化。每个子目录是独立示例；复制到 GitLab 的 `app/jobs/<分类>/<任务>`，添加稳定任务身份文件并合并到目标分支，再在任务列表审查发布。ZIP 仅用于下载完整示例，平台已移除上传入口。
+「任务示例」页从 catalog.json 和这里的源码生成初始示例，管理员后续编辑独立持久化。每个子目录是独立示例；复制到 GitLab 的 `app/jobs/<分类>/<任务>`，合并到目标分支，再在任务列表填写名称、选择入口并审查发布。任务标识由平台自动生成且不可修改。ZIP 仅用于下载完整示例，平台已移除上传入口。
 
 - `hello/`：标准库入门，将 main.py 放在任务根目录，无需依赖文件。
 - `database_query/`：通过 `NewDB('mysql_orders')` 查询。需要管理员配置业务连接，准备 `orders(id, status)` 表；只有 SELECT 1 的连通性检查不需要业务表。
@@ -14,7 +14,6 @@
 最终 GitLab 任务目录结构：
 
 ```text
-.wfs-task.json     # 稳定 task_id、task_name 和 main_file
 main.py
 helper.py          # 可选，自定义模块
 sql/query.sql      # 可选，按实际代码使用

@@ -49,7 +49,6 @@ def index():
 def example_package():
     import io
     import zipfile
-    import json
     from pathlib import Path
     examples = {'outputs': 'file_output', 'nested': 'nested_report', **{name: 'feature_suite/' + name for name in ('report_flow', 'database_transaction', 'retry_once', 'business_backfill', 'queue_observer', 'business_connection')}}
     kind = request.args.get('kind', 'outputs')
@@ -58,7 +57,6 @@ def example_package():
     root = Path(__file__).resolve().parents[2] / 'examples/tasks' / examples[kind]
     result = io.BytesIO()
     with zipfile.ZipFile(result, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('.wfs-task.json', json.dumps({'task_id': 'example_' + kind, 'task_name': '示例任务（请修改编号与名称）', 'main_file': 'main.py'}, ensure_ascii=False, indent=2))
         for path in sorted(root.rglob('*')):
             if path.is_file() and (not path.is_symlink()) and ('__pycache__' not in path.parts) and (path.name != '.wfs-task.json'):
                 archive.write(path, path.relative_to(root).as_posix())
@@ -95,7 +93,9 @@ def gitlab_tasks():
             raise packages.PackageError('请求内容必须为对象。')
         actor = g.identity['username']
         if body.get('action') == 'stage':
-            result = tasks.stage(body.get('id'), actor)
+            if 'pid' in body or 'task_id' in body:
+                raise packages.PackageError('任务标识由平台生成，不可修改。')
+            result = tasks.stage(body.get('id'), actor, body.get('configuration'))
         elif body.get('action') == 'delete':
             result = tasks.remove(body.get('id'), actor)
         else:

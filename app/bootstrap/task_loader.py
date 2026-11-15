@@ -157,20 +157,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_o
     group_dir = task_dir.parent
     inferred_main_file = infer_main_file(task_dir)
     python_executable, python_source = '', 'unprepared'
-    identity_error = ''
-    manifest = task_dir / '.wfs-task.json'
     pid = pid_override or build_task_pid(group_name, folder_name)
-    # 稳定 task_id 脱离目录名，目录调整后仍能关联原有调度、授权和执行历史。
-    if manifest.exists():
-        try:
-            if manifest.is_symlink() or manifest.stat().st_size > 4096:
-                raise ValueError('invalid identity manifest')
-            identity = json.loads(manifest.read_text(encoding='utf-8'))
-            pid = identity['task_id']
-            if not isinstance(pid,str) or len(pid)>200 or not PID_PATTERN.fullmatch(pid):
-                raise ValueError('invalid stable task ID')
-        except (OSError,ValueError,KeyError,TypeError) as exc:
-            identity_error = '任务标识文件无效：'+str(exc)
     max_instances = 1
     timeout_seconds = 0
 
@@ -201,7 +188,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_o
         'main_file_options': list_python_entry_files(task_dir),
         'python_executable': python_executable,
         'python_source': python_source,
-        'error': identity_error or None,
+        'error': None,
         'main_file_error': '',
         'config_record': None,
     }

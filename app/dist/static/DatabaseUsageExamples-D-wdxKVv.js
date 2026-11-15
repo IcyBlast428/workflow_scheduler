@@ -1,6 +1,6 @@
-import{_ as f,p as x,o as _,c as p,a as c,t as l,I as S,d as w,i as R,m as N,F as v,r as D,q as A,b as T,k as b,e as g}from"./index-BQeCxpGS.js";function I({kind:e="business",connectionId:n="business_db",dialect:u="postgresql"}={}){if(e==="platform")return L();const r=JSON.stringify(String(n||"business_db")),s=u==="clickhouse",a=E=>`from app.common.database import NewDB
+import{_ as f,p as x,o as _,c as p,a as r,t as l,I as S,d as w,i as R,m as N,F as v,r as D,s as A,q as I,G as L,b as T,k as b,e as g}from"./index-C3YeOcER.js";function h({kind:e="business",connectionId:n="business_db",dialect:c="postgresql"}={}){if(e==="platform")return B();const u=JSON.stringify(String(n||"business_db")),s=c==="clickhouse",a=E=>`from app.common.database import NewDB
 
-with NewDB(${r}) as db:
+with NewDB(${u}) as db:
 ${y(E)}`,i="仅在隔离的测试业务库运行写入示例，先创建 demo_db_usage 表；重复插入前请更换示例 ID。",m=s?"CREATE TABLE IF NOT EXISTS demo_db_usage (id UInt64, status String) ENGINE = MergeTree ORDER BY id":"CREATE TABLE IF NOT EXISTS demo_db_usage (id INTEGER PRIMARY KEY, status VARCHAR(40))",d=s?"ALTER TABLE demo_db_usage UPDATE status = :status WHERE id = :id SETTINGS mutations_sync = 1":"UPDATE demo_db_usage SET status = :status WHERE id = :id",o=s?"ALTER TABLE demo_db_usage DELETE WHERE id = :id SETTINGS mutations_sync = 1":"DELETE FROM demo_db_usage WHERE id = :id",t=[{id:"setup",title:"准备测试表",description:"一次性准备以下示例使用的独立表，不操作平台系统表。",code:a(`db.execute(${JSON.stringify(m)})`),note:i},{id:"query",title:"查询",description:"参数由驱动绑定；as_dict=True 返回字典列表。",code:a(`rows = db.query(
     "SELECT id, status FROM demo_db_usage WHERE id = ?",
     (1,),
@@ -35,7 +35,7 @@ db.executemany(
 from app.common.database import NewDB
 
 async def main():
-    async with NewDB(${r}) as db:
+    async with NewDB(${u}) as db:
         await db.async_execute(
             "INSERT INTO demo_db_usage (id, status) VALUES (?, ?)",
             (101, "pending"),
@@ -72,17 +72,17 @@ def update_batch(tx):
     )
 
 async def main():
-    async with NewDB(${r}) as db:
+    async with NewDB(${u}) as db:
         rows = await db.async_transaction(update_batch)
         print(rows)
 
 if __name__ == "__main__":
     asyncio.run(main())`,note:"回调正常返回才提交，异常自动回滚。不要捕获外部 db 在回调中使用，不要返回连接或游标。运行中的回调即使 await 被取消，仍会继续执行并最终释放连接。"}),t}function y(e){return e.split(`
 `).map(n=>n?`    ${n}`:"").join(`
-`)}function L(){const e="仅供平台内部开发与维护。任务代码必须使用获得授权的 NewDB 业务连接，不得使用 GaussDB 访问平台库。写入示例请在隔离测试环境运行。",n=u=>`from app.bootstrap.database import GaussDB
+`)}function B(){const e="仅供平台内部开发与维护。任务代码必须使用获得授权的 NewDB 业务连接，不得使用 GaussDB 访问平台库。写入示例请在隔离测试环境运行。",n=c=>`from app.bootstrap.database import GaussDB
 
 with GaussDB() as db:
-${y(u)}`;return[{id:"setup",title:"准备测试表",description:"使用独立示例表，不修改任何 wfs_* 平台系统表。",code:n(`db.execute_sql(
+${y(c)}`;return[{id:"setup",title:"准备测试表",description:"使用独立示例表，不修改任何 wfs_* 平台系统表。",code:n(`db.execute_sql(
     "CREATE TABLE IF NOT EXISTS demo_db_usage (id INTEGER PRIMARY KEY, status VARCHAR(40))"
 )`),note:e},{id:"query",title:"查询",description:"return_json=True 返回字典列表，否则返回元组列表。",code:n(`rows = db.execute_query_sql(
     "SELECT id, status FROM demo_db_usage WHERE id = ?",
@@ -146,4 +146,4 @@ async def main():
     print(rows)
 
 if __name__ == "__main__":
-    asyncio.run(main())`,note:`${e} 这是同步驱动的线程卸载，并非原生异步驱动。取消 await 不会中止已开始的 SQL；批量异步调用请限制并发，避免占满平台连接池。`}]}const h={class:"surface-card database-usage-examples"},B={class:"examples-heading"},H={class:"hint"},k=["value"],q={key:0,class:"hint"},O={key:1,class:"inline-alert warning",role:"status"},U={__name:"DatabaseUsageExamples",props:{kind:{type:String,default:"business"},connectionId:String,dialect:String},setup(e){const n=e,u=g(()=>I({kind:n.kind,connectionId:n.connectionId,dialect:n.dialect})),r=b("query"),s=b(!1),a=b(""),i=g(()=>u.value.find(d=>d.id===r.value)||u.value[0]);x(i,()=>{s.value=!1,a.value="",u.value.some(d=>d.id===r.value)||(r.value=u.value[0]?.id)});async function m(){s.value=!1,a.value="";const d=i.value?.code;if(d)try{if(navigator.clipboard?.writeText)try{await navigator.clipboard.writeText(d),s.value=!0;return}catch{}const o=document.activeElement,t=document.createElement("textarea");t.value=d,t.setAttribute("readonly",""),t.style.cssText="position:fixed;left:-9999px;top:0;",document.body.appendChild(t);let E=!1;try{t.select(),E=document.execCommand("copy")}finally{t.remove(),o?.focus()}if(!E)throw new Error("copy");s.value=!0}catch{a.value="未能自动复制，请选中下方代码手动复制。"}}return(d,o)=>(_(),p("section",h,[c("div",B,[c("h3",null,l(e.kind==="platform"?"平台数据库开发示例":"任务中的统一用法"),1),c("button",{type:"button",class:"btn",onClick:m},l(s.value?"已复制":"复制示例"),1)]),c("p",H,l(e.kind==="platform"?"仅用于平台内部开发，任务代码必须使用“任务示例与文档”中的 NewDB 示例，不能访问平台内部库。":"先在任务详情中授权连接，再通过 NewDB 使用连接标识。直接配置与 Nacos 来源使用相同写法。"),1),S(d.$slots,"settings",{},void 0,!0),c("label",null,[o[1]||(o[1]=w("示例类型",-1)),R(c("select",{class:"select","aria-label":"示例类型","onUpdate:modelValue":o[0]||(o[0]=t=>r.value=t)},[(_(!0),p(v,null,D(u.value,t=>(_(),p("option",{key:t.id,value:t.id},l(t.title),9,k))),128))],512),[[N,r.value]])]),c("p",null,l(i.value?.description),1),c("pre",{class:A({"connection-example":e.kind==="business"})},[c("code",null,l(i.value?.code),1)],2),i.value?.note?(_(),p("p",q,l(i.value.note),1)):T("",!0),a.value?(_(),p("p",O,l(a.value),1)):T("",!0),o[2]||(o[2]=c("p",{class:"hint"},"示例仅供复制参考，页面不会执行 SQL。请按实际表结构调整，并在测试库验证。",-1))]))}},W=f(U,[["__scopeId","data-v-2aa43b85"]]);export{W as D};
+    asyncio.run(main())`,note:`${e} 这是同步驱动的线程卸载，并非原生异步驱动。取消 await 不会中止已开始的 SQL；批量异步调用请限制并发，避免占满平台连接池。`}]}const k={class:"surface-card database-usage-examples"},H={class:"examples-heading"},q={class:"hint"},O=["value"],C={key:0,class:"hint"},U={key:1,class:"inline-alert warning",role:"status"},W={__name:"DatabaseUsageExamples",props:{kind:{type:String,default:"business"},connectionId:String,dialect:String},setup(e){const n=e,c=g(()=>h({kind:n.kind,connectionId:n.connectionId,dialect:n.dialect})),u=b("query"),s=b(!1),a=b(""),i=g(()=>c.value.find(d=>d.id===u.value)||c.value[0]);x(i,()=>{s.value=!1,a.value="",c.value.some(d=>d.id===u.value)||(u.value=c.value[0]?.id)});async function m(){s.value=!1,a.value="";const d=i.value?.code;if(d)try{if(navigator.clipboard?.writeText)try{await navigator.clipboard.writeText(d),s.value=!0;return}catch{}const o=document.activeElement,t=document.createElement("textarea");t.value=d,t.setAttribute("readonly",""),t.style.cssText="position:fixed;left:-9999px;top:0;",document.body.appendChild(t);let E=!1;try{t.select(),E=document.execCommand("copy")}finally{t.remove(),o?.focus()}if(!E)throw new Error("copy");s.value=!0}catch{a.value="未能自动复制，请选中下方代码手动复制。"}}return(d,o)=>(_(),p("section",k,[r("div",H,[r("h3",null,l(e.kind==="platform"?"平台数据库开发示例":"任务中的统一用法"),1),r("button",{type:"button",class:"btn",onClick:m},l(s.value?"已复制":"复制示例"),1)]),r("p",q,l(e.kind==="platform"?"仅用于平台内部开发，任务代码必须使用“任务示例与文档”中的 NewDB 示例，不能访问平台内部库。":"先在任务详情中授权连接，再通过 NewDB 使用连接标识。直接配置与 Nacos 来源使用相同写法。"),1),S(d.$slots,"settings",{},void 0,!0),r("label",null,[o[1]||(o[1]=w("示例类型",-1)),R(r("select",{class:"select","aria-label":"示例类型","onUpdate:modelValue":o[0]||(o[0]=t=>u.value=t)},[(_(!0),p(v,null,D(c.value,t=>(_(),p("option",{key:t.id,value:t.id},l(t.title),9,O))),128))],512),[[N,u.value]])]),r("p",null,l(i.value?.description),1),A(L,{class:I({"connection-example":e.kind==="business"}),code:i.value?.code||"",language:"python",label:"数据库示例代码"},null,8,["class","code"]),i.value?.note?(_(),p("p",C,l(i.value.note),1)):T("",!0),a.value?(_(),p("p",U,l(a.value),1)):T("",!0),o[2]||(o[2]=r("p",{class:"hint"},"示例仅供复制参考，页面不会执行 SQL。请按实际表结构调整，并在测试库验证。",-1))]))}},F=f(W,[["__scopeId","data-v-d85b1ac0"]]);export{F as D};
