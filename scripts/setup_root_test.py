@@ -1,4 +1,4 @@
-"""Initialize the explicit root / fixed-directory intranet test profile."""
+"""Initialize the root production deployment in the fixed project directory."""
 import argparse
 import getpass
 import os
@@ -9,6 +9,7 @@ import subprocess
 from werkzeug.security import generate_password_hash
 
 PROJECT = Path('/data/workflow_scheduler')
+UNIT_DIR = Path('/etc/systemd/system')
 
 
 def initialize(project, password):
@@ -55,13 +56,13 @@ def main():
     parser.add_argument('--install', action='store_true', help='Install and start the unified production service')
     args = parser.parse_args()
     if os.name != 'posix' or os.geteuid() != 0:
-        parser.error('Run as root on the Linux test server')
+        parser.error('Run as root on the Linux production server')
     if Path(__file__).resolve().parents[1] != PROJECT:
         parser.error('Extract this project directly into /data/workflow_scheduler')
     python = PROJECT / '.venv/bin/python'
     if not python.is_file():
         parser.error('Create /data/workflow_scheduler/.venv and install dependencies first')
-    destinations = [(PROJECT/'deploy/root-test'/name, Path('/etc/systemd/system')/name)
+    destinations = [(PROJECT/name, UNIT_DIR/name)
                     for name in ('wfs.service',)]
     if args.install:
         from install_systemd import assert_legacy_scheduler_retired

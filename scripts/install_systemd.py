@@ -3,7 +3,6 @@ import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
-import re
 import subprocess
 import tempfile
 
@@ -34,7 +33,7 @@ def unit_path(value):
 
 def render(*, scope='system', project='/data/workflow_scheduler', python=None, environment_file=None,
            helper=None, data=None, logs=None,
-           user='wfs', group='wfs', web_port=8008, control_port=8009, unset=(), https_proxy=False):
+           web_port=8008, control_port=8009, unset=(), https_proxy=False):
     project = str(project)
     environment_file = environment_file or project + '/deploy/root-test/runtime.env'
     helper = helper or project + '/scripts/wait_ready.py'
@@ -42,8 +41,6 @@ def render(*, scope='system', project='/data/workflow_scheduler', python=None, e
     logs = logs or project + '/logs'
     if scope not in ('system', 'user') or web_port == control_port or not all(1 <= p <= 65535 for p in (web_port, control_port)):
         raise ValueError('Invalid scope or service ports')
-    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*\$?', user) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', group):
-        raise ValueError('Invalid service account')
     for path in (project, python or str(PurePosixPath(project)/'.venv/bin/python'), environment_file, helper, data, logs):
         if not PurePosixPath(path).is_absolute():
             raise ValueError('Service paths must be absolute')
@@ -51,20 +48,21 @@ def render(*, scope='system', project='/data/workflow_scheduler', python=None, e
     base = 'wfs' if scope == 'system' else 'wfs-local'
     units = {}
     if scope == 'system':
-        removed = {'GUNICORN_CMD_ARGS', 'GUNICORN_FD', 'WFS_LOCAL_DB_PATH', 'WFS_POSTGRES_TEST', 'WFS_DEV_RUN_ALL', *unset}
+        # Production always uses root; driver paths stay in runtime.env so the
+        # template does not silently override a deployment's configured driver.
+        removed = {'GUNICORN_CMD_ARGS', 'GUNICORN_FD', 'WFS_LOCAL_DB_PATH', 'WFS_POSTGRES_TEST', 'WFS_DEV_RUN_ALL', 'WFS_DB_DIALECT', *unset}
         command = [python, project + '/scripts/serve.py', '--project', project, '--python', python,
-                   '--web-host', '127.0.0.1', '--web-port', str(web_port), '--control-port', str(control_port),
+                   '--web-host', '0.0.0.0', '--web-port', str(web_port), '--control-port', str(control_port),
                    '--data', data, '--logs', logs]
         lines = [MARKER, '[Unit]', 'Description=Workflow Scheduler (Web and Scheduler)',
                  'Conflicts=wfs-scheduler.service', 'After=wfs-scheduler.service network-online.target',
                  'Wants=network-online.target', 'StartLimitIntervalSec=120', 'StartLimitBurst=10', '',
-                 '[Service]', 'Type=exec', 'User=' + user, 'Group=' + group,
+                 '[Service]', 'Type=exec', 'User=root', 'Group=root',
                  'WorkingDirectory=' + unit_path(project), 'EnvironmentFile=' + unit_path(environment_file),
-                 'Environment=PYTHONDONTWRITEBYTECODE=1',
+                 'Environment=PYTHONDONTWRITEBYTECODE=1', 'Environment=WFS_STATE_BACKEND=gauss',
                  'Environment=WFS_COOKIE_SECURE=' + ('true' if https_proxy else 'false'),
-                 'Environment=' + quote('ODBCSYSINI=' + project + '/app/config/driver/dws_odbc/etc'),
-                 'Environment=' + quote('ODBCINI=' + project + '/app/config/driver/dws_odbc/etc/odbc.ini'),
                  'UnsetEnvironment=' + ' '.join(sorted(removed)),
+                 'ExecStartPre=' + ' '.join(map(quote, [python, project + '/scripts/check_gauss_platform.py'])),
                  'ExecStart=' + ' '.join(map(quote, command)),
                  'ExecStartPost=' + ' '.join(map(quote, [python, helper, '--url', f'http://127.0.0.1:{web_port}/api/user/ready', '--timeout', '190'])),
                  'UMask=0077', 'NoNewPrivileges=true', 'KillMode=mixed', 'KillSignal=SIGTERM',
@@ -79,26 +77,16 @@ def render(*, scope='system', project='/data/workflow_scheduler', python=None, e
         lines = [MARKER, '[Unit]', 'Description=Workflow Scheduler ' + role.title()]
         if role == 'web':
             lines += ['Requires=' + scheduler, 'After=' + scheduler]
-        if scope == 'system':
-            lines += ['After=network-online.target', 'Wants=network-online.target']
         lines += ['StartLimitIntervalSec=120', 'StartLimitBurst=10', '', '[Service]', 'Type=exec']
-        if scope == 'system':
-            lines += ['User=' + user, 'Group=' + group]
         lines += ['EnvironmentFile=' + unit_path(environment_file), 'Environment=PYTHONDONTWRITEBYTECODE=1',
                   'WorkingDirectory=' + unit_path(project)]
         removed = {'GUNICORN_CMD_ARGS', 'GUNICORN_FD', *unset}
-        if scope == 'system':
-            removed.update(('WFS_LOCAL_DB_PATH', 'WFS_POSTGRES_TEST', 'WFS_DEV_RUN_ALL'))
-            lines += ['Environment=' + quote('ODBCSYSINI=' + project + '/app/config/driver/dws_odbc/etc'),
-                      'Environment=' + quote('ODBCINI=' + project + '/app/config/driver/dws_odbc/etc/odbc.ini')]
         # Gunicorn raw_env is applied before importing the app. EnvironmentFile
         # cannot accidentally turn a Web worker into a second Scheduler.
-        pinned = dict(WFS_ENV='production' if scope == 'system' else 'development',
+        pinned = dict(WFS_ENV='development',
                       WFS_ENABLE_SCHEDULER='true' if role == 'scheduler' else 'false',
                       WFS_SCHEDULER_CONTROL_URL='' if role == 'scheduler' else 'http://127.0.0.1:' + str(control_port),
                       WFS_DATA_DIR=data, WFS_LOG_DIR=logs, PYTHONPATH=project)
-        if scope == 'system':
-            pinned['WFS_COOKIE_SECURE'] = 'true' if https_proxy else 'false'
         command = [python, '-m', 'gunicorn', '-c', project + '/gunicorn.conf.py', '--workers',
                    '1' if role == 'scheduler' else '2', '--worker-class', 'gthread', '--threads', '8',
                    '--timeout', '120', '--graceful-timeout', '60', '--keep-alive', '75', '--bind',
@@ -111,7 +99,7 @@ def render(*, scope='system', project='/data/workflow_scheduler', python=None, e
                   'UMask=0077', 'NoNewPrivileges=true', 'KillMode=mixed', 'KillSignal=SIGTERM',
                   'TimeoutStartSec=100', 'TimeoutStopSec=90', 'Restart=on-failure', 'RestartSec=5',
                   'StandardOutput=journal', 'StandardError=journal', 'SyslogIdentifier=' + base + '-' + role,
-                  '', '[Install]', 'WantedBy=' + ('multi-user.target' if scope == 'system' else 'default.target'), '']
+                  '', '[Install]', 'WantedBy=default.target', '']
         units[name] = '\n'.join(lines)
     return units
 
@@ -151,8 +139,6 @@ def main():
     parser.add_argument('--python')
     parser.add_argument('--data')
     parser.add_argument('--logs')
-    parser.add_argument('--user', default='wfs')
-    parser.add_argument('--group', default='wfs')
     parser.add_argument('--web-port', type=int)
     parser.add_argument('--control-port', type=int)
     parser.add_argument('--output', type=Path, help='Render reviewable units without changing systemd')
@@ -185,7 +171,7 @@ def main():
         environment_file, helper = source_env, project/'scripts/wait_ready.py'
         unit_dir = Path('/etc/systemd/system')
     units = render(scope=args.scope, project=str(project), python=python, environment_file=str(environment_file),
-                   helper=str(helper), data=data, logs=logs, user=args.user, group=args.group,
+                   helper=str(helper), data=data, logs=logs,
                    web_port=args.web_port or int(values.get('WFS_PORT', 18008 if local else 8008)),
                    control_port=args.control_port or int(values.get('WFS_CONTROL_PORT', 18009 if local else 8009)), unset=unset,
                    https_proxy=args.https_proxy or values.get('WFS_COOKIE_SECURE', '').lower() in ('1', 'true', 'yes', 'on'))
@@ -204,12 +190,10 @@ def main():
             raise ValueError('Refusing to overwrite an unmanaged service file: ' + str(existing))
     if not local:
         assert_legacy_scheduler_retired()
-        import pwd
-        account = pwd.getpwnam(args.user)
         for directory in (data, logs):
             path = Path(directory)
-            path.mkdir(parents=True, exist_ok=True, mode=0o750)
-            os.chown(path, account.pw_uid, account.pw_gid)
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chown(path, 0, 0)
     else:
         configuration.mkdir(parents=True, exist_ok=True, mode=0o700)
         for directory in (data, logs):

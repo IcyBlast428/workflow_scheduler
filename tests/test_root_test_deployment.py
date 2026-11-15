@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import sys
 from pathlib import Path
 import shlex
 import tempfile
@@ -40,7 +42,8 @@ class RootTestDeploymentTests(unittest.TestCase):
             self.assertFalse((Path(temporary)/'deploy/root-test/runtime.env').exists())
 
     def test_service_supervises_both_roles_with_existing_paths_and_listener(self):
-        text = (ROOT/'deploy/root-test/wfs.service').read_text()
+        text = (ROOT/'wfs.service').read_text()
+        self.assertFalse((ROOT/'deploy/root-test/wfs.service').exists())
         self.assertIn('User=root\nGroup=root', text)
         self.assertIn('WorkingDirectory=/data/workflow_scheduler\n', text)
         self.assertIn('EnvironmentFile=/data/workflow_scheduler/deploy/root-test/runtime.env', text)
@@ -54,6 +57,33 @@ class RootTestDeploymentTests(unittest.TestCase):
         self.assertFalse((ROOT/'deploy/root-test/wfs-scheduler.service').exists())
         self.assertIn('ExecStartPost=', text)
         self.assertIn('scripts/check_gauss_platform.py', text)
+
+    @unittest.skipIf(os.name=='nt','Linux installation path')
+    def test_installer_copies_only_root_template_and_preserves_runtime_configuration(self):
+        from scripts import install_systemd, service_config
+        with tempfile.TemporaryDirectory() as temporary:
+            project=Path(temporary);units=project/'system-units';units.mkdir()
+            python=project/'.venv/bin/python';python.parent.mkdir(parents=True);python.touch()
+            expected=(ROOT/'wfs.service').read_bytes();(project/'wfs.service').write_bytes(expected)
+            config,_=setup.initialize(project,'a-strong-test-password')
+            config.write_text(config.read_text().replace('CHANGE_ME','configured-test-value'))
+            before=config.read_bytes()
+            # An older unpacked archive must not become another installation source.
+            (project/'deploy/root-test/wfs.service').write_text('User=wfs\nGroup=wfs\n')
+            with patch.object(setup,'PROJECT',project), patch.object(setup,'UNIT_DIR',units), \
+                 patch.object(setup,'__file__',str(project/'scripts/setup_root_test.py')), \
+                 patch.object(os,'geteuid',return_value=0), \
+                 patch.dict(sys.modules,{'install_systemd':install_systemd,'service_config':service_config}), \
+                 patch.object(install_systemd,'assert_legacy_scheduler_retired'), \
+                 patch.object(setup.subprocess,'run') as run, \
+                 patch.object(sys,'argv',['setup_root_test.py','--install']):
+                setup.main()
+            self.assertEqual((units/'wfs.service').read_bytes(),expected)
+            self.assertEqual([p.name for p in units.iterdir()],['wfs.service'])
+            self.assertEqual(config.read_bytes(),before)
+            commands=[call.args[0] for call in run.call_args_list]
+            self.assertIn('check_gauss_platform.py',commands[0][-1])
+            self.assertEqual(commands[1:],[['systemctl','daemon-reload'],['systemctl','enable','wfs.service'],['systemctl','restart','wfs.service']])
 
     def test_gauss_check_is_read_only_and_rejects_other_platforms(self):
         class Database:

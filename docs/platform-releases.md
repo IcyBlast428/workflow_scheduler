@@ -1,6 +1,6 @@
 # 平台版本与任务版本
 
-平台代码由管理员通过 GitLab 管理，正式应用在 `/data/workflow_scheduler` 使用一个 `wfs.service`。全新安装使用 `deploy.sh`；已有安装按 [systemd 部署手册](systemd-deployment.md) 维护排空、停服备份并更新代码与构建资源。全新基线通过 `scripts/init_database.py` 建立，后续发布只检查基线，不执行旧库升级。
+平台代码由管理员通过 GitLab 管理，正式应用在 `/data/workflow_scheduler` 使用根目录唯一的 `wfs.service`，运行账户统一为 root。全新安装使用 `deploy.sh`；已有安装按 [systemd 部署手册](systemd-deployment.md) 维护排空、停服备份并更新代码与构建资源。全新基线通过 `scripts/init_database.py` 建立，后续发布只检查基线，不执行旧库升级。
 
 任务版本独立发布。新任务从 GitLab 审查进入，依赖准备成功后显式发布；自动调度默认关闭。任务代码不允许直接从源码工作目录执行，也不支持 ZIP 上传。
 

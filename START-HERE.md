@@ -20,13 +20,13 @@ bash deploy.sh
 2. 提示设置 admin 登录密码（至少 12 位），自动生成并保存两份独立密钥。
 3. 提示输入 Nacos 地址、用户名、密码和平台数据库标识，默认 `wfsscheduler_wfs`。
 4. 检查 DWS 驱动与数据库，给空 schema 初始化 32 张平台表。已有本版表只检查，不清空、不迁移。
-5. 安装并启动唯一的 `wfs.service`；它内部管理 Web 与单实例 Scheduler，检查就绪后输出访问地址。
+5. 从项目根目录唯一的 `wfs.service` 模板安装并启动服务（`User=root`、`Group=root`，无需创建 `wfs` 用户）；它内部管理 Web 与单实例 Scheduler，检查就绪后输出访问地址。
 
 完成后访问 **`http://服务器IP:8008/`**，用户名 **admin**，密码是刚才设置的密码。8009 只供本机 Web 与 Scheduler 通信。外部访问需要服务器网络允许 8008；脚本不会修改防火墙。
 
 生产目录、Python、数据、日志和驱动路径均统一到 `/data/workflow_scheduler`。普通 HTTP 下也支持手动执行、补跑和试运行；保持 `runtime.env` 中的 `WFS_COOKIE_SECURE=false`。原本使用另一套 service 的安装，请先按 [已有安装更新说明](docs/systemd-deployment.md#4-从双服务迁移及更新已有安装) 核对原配置与数据位置。
 
-生产只需要安装一个 `wfs.service`，无需再安装 `wfs-scheduler.service`。新版本不会打包旧调度 service；从双服务升级时，请先按 [迁移步骤](docs/systemd-deployment.md#4-从双服务迁移及更新已有安装) 停用旧服务，避免它重新启动。
+生产只使用根目录的一份 `wfs.service` 模板，运行用户和组统一为 root。`deploy/root-test/` 仅保留原有运行配置和驱动配置，不再提供另一份 service。生产只需要安装一个 `wfs.service`，无需再安装 `wfs-scheduler.service`。新版本不会打包旧调度 service；从双服务升级时，请先按 [迁移步骤](docs/systemd-deployment.md#4-从双服务迁移及更新已有安装) 停用旧服务，避免它重新启动。
 
 IE、IE 兼容模式和 Edge 的 IE 模式会显示浏览器更换提示。已知 IE 标识会被服务端直接拒绝，提示页无需 JavaScript；前端同时检测兼容模式。请使用 Google Chrome 或新版 Microsoft Edge。
 

@@ -17,7 +17,7 @@ SOURCE_FILES = {'README.md', 'START-HERE.md', 'DATABASE.md', 'deploy.sh', 'run.p
                 '.gitlab-ci.yml', 'wfs.service'}
 BLOCKED = {'node_modules', '__pycache__', '.git', '.venv', 'test-results', 'playwright-report', '.pytest_cache'}
 # Older checkout leftovers must not restore retired release tooling or JDBC binaries.
-RETIRED_FILES = {'scripts/deploy_release.sh', 'app/config/driver/gsjdbc4.jar'}
+RETIRED_FILES = {'scripts/deploy_release.sh', 'app/config/driver/gsjdbc4.jar', 'deploy/root-test/wfs.service'}
 
 
 def permitted(name):

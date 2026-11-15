@@ -4,7 +4,7 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 
 ## 快速部署
 
-内网 root 固定目录安装请先阅读 [START-HERE.md](START-HERE.md)。解压到 `/data/workflow_scheduler` 后运行 `bash deploy.sh`，自动完成环境准备、配置引导、建表和服务启动。
+内网 root 固定目录安装请先阅读 [START-HERE.md](START-HERE.md)。解压到 `/data/workflow_scheduler` 后运行 `bash deploy.sh`，自动完成环境准备、配置引导、建表和服务启动。生产只使用根目录 `wfs.service`，统一以 root 用户和组运行，无需创建 wfs 系统账户。
 
 ## 当前架构
 

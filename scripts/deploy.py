@@ -39,7 +39,7 @@ def assert_units_compatible(project=ROOT, unit_dir=Path('/etc/systemd/system')):
     assert_legacy_scheduler_retired()
     for name in UNITS:
         target = unit_dir/name
-        if target.is_symlink() or target.exists() and target.read_bytes() != (project/'deploy/root-test'/name).read_bytes():
+        if target.is_symlink() or target.exists() and target.read_bytes() != (project/name).read_bytes():
             raise ValueError(f'发现另一套或不同版本的服务定义，请先备份并核对：{target}')
 
 

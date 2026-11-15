@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts.install_systemd import render, assert_legacy_scheduler_retired
+from scripts import install_systemd
 from scripts.service_config import read_environment, serialize_environment
 from scripts.wait_ready import wait
 
@@ -32,6 +33,9 @@ class SystemdTests(unittest.TestCase):
                 self.assertIn('Restart=on-failure', content)
                 self.assertIn('ExecStartPost=', content)
                 self.assertIn('GUNICORN_CMD_ARGS', content)
+                self.assertNotIn('User=',content)
+                self.assertNotIn('Group=',content)
+                self.assertNotIn('ExecStartPre=',content)
                 self.assertIn('WorkingDirectory=/data/workflow_scheduler\n', content)
                 self.assertIn('EnvironmentFile=/data/workflow_scheduler/deploy/root-test/runtime.env\n', content)
             self.assertIn('Requires=', web)
@@ -43,6 +47,12 @@ class SystemdTests(unittest.TestCase):
             command = shlex.split(next(line.split('=', 1)[1] for line in content.splitlines() if line.startswith('ExecStart=')))
             self.assertEqual(command[command.index('--data') + 1], '/data/workflow_scheduler/data')
             self.assertEqual(command[command.index('--logs') + 1], '/data/workflow_scheduler/logs')
+            self.assertIn('User=root\nGroup=root\n',content)
+            self.assertEqual(command[command.index('--web-host')+1],'0.0.0.0')
+            self.assertIn('Environment=WFS_STATE_BACKEND=gauss',content)
+            preflight=shlex.split(next(line.split('=',1)[1] for line in content.splitlines() if line.startswith('ExecStartPre=')))
+            self.assertEqual(preflight,[command[0],'/data/workflow_scheduler/scripts/check_gauss_platform.py'])
+            self.assertNotIn('Environment="ODBC',content)
             self.assertIn('Environment=WFS_COOKIE_SECURE=false', content)
             self.assertIn('scripts/serve.py', command[1])
             self.assertIn('Conflicts=wfs-scheduler.service', content)
@@ -68,6 +78,13 @@ class SystemdTests(unittest.TestCase):
                     with self.assertRaises(ValueError): assert_legacy_scheduler_retired()
                 else:
                     assert_legacy_scheduler_retired()
+
+    def test_service_account_cannot_select_the_retired_profile(self):
+        for option in ('--user','--group'):
+            with self.subTest(option=option), patch('sys.argv',['install_systemd.py',option,'wfs','--output','unused']), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as result:
+                    install_systemd.main()
+                self.assertEqual(result.exception.code,2)
 
     def test_literal_environment_roundtrip_and_no_shell_execution(self):
         with tempfile.TemporaryDirectory() as directory:
