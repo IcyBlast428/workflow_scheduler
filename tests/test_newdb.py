@@ -145,9 +145,9 @@ class NewDBTests(unittest.TestCase):
         self.assertEqual(settings.validate(dict(mysql,dialect='postgresql'))['port'],5432)
         from app.common.db.catalog import capabilities
         catalog = {item['dialect']: item['label'] for item in capabilities()}
-        self.assertEqual(set(catalog), {'mysql', 'postgresql', 'gaussdb', 'sqlserver', 'oracle', 'clickhouse'})
+        self.assertEqual(set(catalog), {'mysql', 'postgresql', 'gaussdb', 'clickhouse'})
         self.assertEqual(catalog['postgresql'], 'PostgreSQL')
-        for family in ('oracle', 'mssql', 'sqlserver', 'gaussdb', 'dws'):
+        for family in ('gaussdb', 'dws', 'mysql', 'polardb', 'mariadb', 'postgres', 'clickhouse'):
             with self.subTest(dialect=family):
                 self.assertIn(settings.validate(dict(mysql, dialect=family))['dialect'], catalog)
         with self.assertRaises(ValueError):

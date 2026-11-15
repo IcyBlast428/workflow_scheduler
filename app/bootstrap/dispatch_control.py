@@ -41,6 +41,7 @@ def sample():
         cpu,memory=_measure()
         with _lock:
             _cpu,_memory,_sample_at,_error=cpu,memory,time.monotonic(),''
+            # 连续样本加恢复余量形成滞回，避免负载在阈值附近波动时反复开关。
             high=cpu>=policy['cpu_high'] or memory>=policy['memory_high']
             low=cpu<policy['cpu_high']-10 and memory<policy['memory_high']-5
             _high_samples=_high_samples+1 if high else 0
@@ -64,6 +65,7 @@ def reason(policy=None,include_interval=True):
 
 
 def reserve_launch():
+    """在单调时钟上原子占用下一个启动时刻，与执行并发名额分开控制。"""
     global _next_start
     policy=load('dispatch')
     with _lock:
@@ -75,6 +77,7 @@ def reserve_launch():
 
 
 def available_slots(policy=None):
+    """返回单个调度进程的剩余名额；仍受部署环境设置的硬上限约束。"""
     from app.bootstrap.global_vars import runnings
     import os
     policy = policy or load('dispatch')

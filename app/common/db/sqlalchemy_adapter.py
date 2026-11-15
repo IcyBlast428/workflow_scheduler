@@ -40,15 +40,8 @@ def _rewrite(sql, replacement, dialect=None, protect_literals=False):
             end = len(sql) if end < 0 else end + len(marker)
             result.append(literal(sql[index:end]))
             index = end - 1
-        elif dialect == 'oracle' and sql[index:index + 2].lower() == "q'" and index + 2 < len(sql):
-            delimiter = sql[index + 2]
-            closing = {'[': ']', '{': '}', '(': ')', '<': '>'}.get(delimiter, delimiter)
-            end = sql.find(closing + "'", index + 3)
-            end = len(sql) if end < 0 else end + 2
-            result.append(literal(sql[index:end]))
-            index = end - 1
-        elif char in "'\"`" or dialect == 'sqlserver' and char == '[':
-            quote = ']' if char == '[' else char
+        elif char in "'\"`":
+            quote = char
             backslash = dialect in {None, 'mysql', 'clickhouse'} or (
                 dialect in {'postgresql', 'gaussdb'} and char == "'" and index > 0 and sql[index - 1] in 'eE')
             result.append(char)
@@ -67,6 +60,7 @@ def _rewrite(sql, replacement, dialect=None, protect_literals=False):
 
 
 class SQLAlchemyAdapter(DatabaseAdapter):
+    """引擎可在进程内复用，但本适配器句柄只能归创建它的线程/进程使用。"""
     def __init__(self, config):
         self.config = config
         self._engine = self._connection = self._transaction = None
@@ -117,6 +111,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
 
     @contextmanager
     def _borrow(self):
+        # 显式连接/事务持有同一连接；无显式持有时每次操作短暂借用并归还。
         self._check_owner()
         if self._connection is not None and not self._connection.closed:
             try:
@@ -131,6 +126,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
 
     @contextmanager
     def transaction(self):
+        """只关闭本上下文新借的连接；调用者先前显式取得的连接继续由其管理。"""
         if self.config['dialect'] == 'clickhouse':
             raise NotImplementedError('ClickHouse 不支持本接口的事务回滚。')
         had_connection = self._connection is not None and not self._connection.closed
@@ -155,6 +151,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
             result = self._execute(connection, sql, params)
             count = result.rowcount
             result.close()
+            # 默认写入逐次提交；transaction() 内由最外层上下文统一提交或回滚。
             if self._transaction is None:
                 connection.commit()
             return count
@@ -176,6 +173,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
 
     @staticmethod
     def _prepare_statement(sql, params, dialect=None):
+        """只统一绑定参数，不翻译 SQL 方言；值始终由驱动绑定，不拼接进 SQL。"""
         if params is None:
             return sql, None, True
         many = isinstance(params, list) and bool(params) and isinstance(params[0], (dict, tuple, list))

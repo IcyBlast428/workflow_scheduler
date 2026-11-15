@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 def commands(project, python, web_host, web_port, control_port, data, logs):
     project = str(project)
     result = []
+    # 先等待唯一调度器就绪再开放 Web；调度状态仍在进程内，不能增加调度 worker。
     for role in ('scheduler', 'web'):
         scheduler = role == 'scheduler'
         port = control_port if scheduler else web_port
@@ -81,6 +82,7 @@ def ready(port):
 
 
 class Supervisor:
+    """监督两个 Gunicorn 主进程；任一异常退出时停止整组，交由服务管理器重启。"""
     def __init__(self, project, environment, startup_timeout=90, stop_timeout=70):
         self.project = project
         self.environment = environment
@@ -177,6 +179,7 @@ def main():
         with instance_lock(data):
             check_ports(args.web_host, args.web_port, args.control_port)
             from app.bootstrap.platform_config import frozen_service_config
+            # 整次服务启动共享同一连接快照，补生的 worker 也不能提前读到待生效配置。
             with frozen_service_config(data, supervisor.environment) as frozen:
                 supervisor.environment['WFS_PLATFORM_ACTIVE_CONFIG_FILE'] = frozen
                 return supervisor.run(commands(project, args.python, args.web_host, args.web_port, args.control_port, data, logs))

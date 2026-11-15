@@ -160,6 +160,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_o
     identity_error = ''
     manifest = task_dir / '.wfs-task.json'
     pid = pid_override or build_task_pid(group_name, folder_name)
+    # 稳定 task_id 脱离目录名，目录调整后仍能关联原有调度、授权和执行历史。
     if manifest.exists():
         try:
             if manifest.is_symlink() or manifest.stat().st_size > 4096:
@@ -236,6 +237,7 @@ def invalidate_task_cache():
 
 
 def discover_task_specs(task_root=None):
+    """短时缓存任务发现结果；返回深拷贝，隔离 API/调度器对 spec 的临时补充。"""
     task_root = TASK_DIR if task_root is None else task_root
     key = str(task_root)
     with _cache_lock:
@@ -251,6 +253,7 @@ def _discover_task_specs(task_root=TASK_DIR):
     specs = []
     records_by_pid = _record_maps()
     from app.bootstrap.task_packages import discovery
+    # 调度依据版本注册表，不把工作区任意新目录视为已发布任务。
     specs = discovery(records_by_pid)
 
     pid_locations = {}

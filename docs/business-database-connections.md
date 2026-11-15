@@ -2,10 +2,16 @@
 
 平台数据库和业务数据库分别管理。平台数据库保存账户、调度、队列和执行元数据；业务数据库由任务通过连接标识访问。两者即使部署在同一台机器上，也应使用独立账号和权限。
 
+## 平台连接与权限
+
+在「系统管理 → 数据库连接 → 平台数据库」选择「自定义连接」，即可在页面编辑地址、端口、库名、Schema、账号、密码、ODBC 驱动及连接池参数。只有内置管理员（`WFS_ADMIN_USERNAME`，默认 `admin`）可以测试和保存；其他管理员只读，非管理员不能访问。业务连接管理继续沿用原有管理员权限。
+
+平台连接保存前检查目标库结构，成功后加密保存为待生效配置，完整重启平台服务后生效。保存配置不会迁移已有数据，更换目标库前须先完成数据迁移和备份。平台连接不作为任务的业务连接开放。
+
 ## 管理员配置
 
-1. 在「系统管理 → 数据库连接 → 业务数据库」新增连接，选择数据库类型，填写地址、端口、数据库名称（Oracle 填 Service Name）和账号。
-2. 对 SQL Server、GaussDB/DWS 填写 Web 和任务服务器上已经安装的 ODBC 驱动名称。页面分别显示 Python 驱动与系统驱动状态；页面不会自动安装软件或上传运行任意驱动代码。
+1. 在「系统管理 → 数据库连接 → 业务数据库」新增连接，选择数据库类型，填写地址、端口、数据库名称和账号。
+2. 对 GaussDB/DWS 填写 Web 和任务服务器上已经安装的 ODBC 驱动名称。页面分别显示 Python 驱动与系统驱动状态；页面不会自动安装软件或上传运行任意驱动代码。
 3. 测试连接并保存。密码加密存储，读取接口不返回原文；编辑时密码留空表示保留。
 4. 在任务的「连接授权」中选择允许访问的连接标识。保存后下一次任务执行使用新的配置；已经运行的任务使用启动时冻结的配置。
 
@@ -18,15 +24,13 @@
 | MySQL / PolarDB / MariaDB | PyMySQL | 与具体产品兼容的 SQL | 支持 |
 | PostgreSQL | psycopg | PostgreSQL 协议与版本验证 | 支持 |
 | GaussDB / DWS | pyodbc | 厂商 ODBC 驱动，默认名称 DWS | 支持普通文本 SQL 事务；不提供 ORM/模式反射 |
-| SQL Server | pyodbc | Microsoft ODBC Driver，默认名称 ODBC Driver 18 for SQL Server | 支持 |
-| Oracle | python-oracledb | 默认 Thin 模式、Service Name；核对服务端支持版本 | 支持 |
 | ClickHouse | clickhouse-connect | 与服务端兼容的 HTTP/HTTPS 端口 | 不支持本接口事务回滚 |
 
-SQL 方言仍由实际数据库决定。NewDB 统一连接管理、参数传递和事务入口，不会把任意 MySQL SQL 自动转换为 Oracle SQL。
+SQL 方言仍由实际数据库决定。NewDB 统一连接管理、参数传递和事务入口，不会把任意 MySQL SQL 自动转换为 PostgreSQL SQL。
 
 同一种类型的新数据库，只需在页面新增连接。增加当前目录以外的**新数据库引擎类型**，需要先加入经过验证的后端适配器和驱动，再由页面配置实例；不能靠填写任意 Python 模块或 URL 直接执行代码。
 
-TLS 选项随类型显示：MySQL、PostgreSQL、Oracle 和 ClickHouse 的证书校验模式需要各运行环境可读取的 CA 文件；SQL Server 使用系统信任库。DWS ODBC 的主机名校验能力受具体厂商版本限制，当前仅提供关闭 TLS 或仅加密，不能把后者视为已校验证书。
+TLS 选项随类型显示：MySQL、PostgreSQL 和 ClickHouse 的证书校验模式需要各运行环境可读取的 CA 文件。DWS ODBC 的主机名校验能力受具体厂商版本限制，当前仅提供关闭 TLS 或仅加密，不能把后者视为已校验证书。
 
 ## 任务代码
 
@@ -67,6 +71,6 @@ with NewDB("reports") as db:
 
 ## 验证边界
 
-仓库测试覆盖 PostgreSQL 的真实连接复用、并发、超时、参数、事务与授权，以及各驱动的 URL/TLS 参数契约和发布规范。GaussDB/DWS、SQL Server、Oracle、ClickHouse 的真实连接、事务和查询性能仍应使用目标服务端和系统驱动验收，页面「测试连接」也只验证连接与版本查询，不代表业务 SQL 全部兼容。
+仓库测试覆盖 PostgreSQL 的真实连接复用、并发、超时、参数、事务与授权，以及各驱动的 URL/TLS 参数契约和发布规范。GaussDB/DWS、ClickHouse 的真实连接、事务和查询性能仍应使用目标服务端和系统驱动验收，页面「测试连接」也只验证连接与版本查询，不代表业务 SQL 全部兼容。
 
-适配器依据：[SQLAlchemy 连接池](https://docs.sqlalchemy.org/en/20/core/pooling.html)、[SQL Server pyodbc](https://docs.sqlalchemy.org/en/20/dialects/mssql.html#module-sqlalchemy.dialects.mssql.pyodbc)、[Oracle python-oracledb](https://docs.sqlalchemy.org/en/20/dialects/oracle.html#module-sqlalchemy.dialects.oracle.oracledb)、[DWS ODBC 数据源参数](https://support.huaweicloud.com/intl/en-us/devg-dws/dws_04_0119.html)。
+适配器依据：[SQLAlchemy 连接池](https://docs.sqlalchemy.org/en/20/core/pooling.html)、[DWS ODBC 数据源参数](https://support.huaweicloud.com/intl/en-us/devg-dws/dws_04_0119.html)。

@@ -58,6 +58,7 @@ def read_run(run_id):
 
 
 def _write_file(record):
+    """旧函数名保留兼容：journal 正常写平台库，故障时才用 JSON 暂存。"""
     journal.write(_directory, record, TERMINAL)
 
 
@@ -72,6 +73,7 @@ def _persist_record(record):
 
 
 def update_run(run_id, persist=True, **changes):
+    """先保留恢复记录再同步执行索引；索引失败由维护轮次补写。"""
     with _locks[int(run_id[:2], 16)]:
         record = read_run(run_id)
         record.update(changes, heartbeat=now())
@@ -177,6 +179,7 @@ def save_history(record):
         if record.get('log_truncated') or path.exists() and path.stat().st_size >= 63 * 1024:
             output += '\nTask output was truncated at 63 KiB; retained log can be downloaded.'
         from app.bootstrap.storage_policy import history_excerpt
+        # 数据库摘要与告警输入分开：缩小历史占用不应同步削减告警排障内容。
         excerpt = history_excerpt(record, output)
         with GaussDB() as db:
             db.begin_transaction()
@@ -201,6 +204,7 @@ def save_history(record):
             except Exception:
                 db.set_rollback()
                 raise
+        # 事务提交后才标记完成；标记写入失败时仍可按 run_id 幂等补记。
         update_run(record['run_id'], history_saved=True)
         from app.bootstrap.snapshot_cache import invalidate
         invalidate()
@@ -239,6 +243,7 @@ def _recover_record(record):
     if process_id and os.name != 'nt':
         proc = Path(f'/proc/{process_id}')
         try:
+            # PID 可能已被系统重用，启动标识和 worker 命令同时匹配才清理进程组。
             if proc.exists() and record.get('process_identity') == proc.joinpath('stat').read_text().split()[21] and b'worker.py' in proc.joinpath('cmdline').read_bytes():
                 os.killpg(process_id, signal.SIGKILL)
         except (ProcessLookupError, OSError):
@@ -285,6 +290,7 @@ def maintenance(recover=False):
     expired = journal.expire(_directory, (business_now()-dt.timedelta(days=days)).isoformat(' '), batch)
     _service_state['maintenance'] = {'processed':processed, 'expired':expired, 'completed_at':now()}
     from app.bootstrap.run_summary import backfill
+    # 先补算统计，再允许后续归档搬移已汇总记录。
     backfill(batch)
     directory = Path(DATA_DIR) / 'audit-spool'
     import itertools
@@ -322,6 +328,7 @@ def maintenance(recover=False):
 
 
 def start_operations():
+    """调度器独占恢复工作；启动恢复失败时不得转入正常接收任务。"""
     global _started
     with _start_lock:
         if _started:

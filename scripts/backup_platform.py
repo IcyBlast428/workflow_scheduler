@@ -31,6 +31,7 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
     if not data.is_dir() or not tasks.is_dir() or output.exists() or data in output.parents or tasks in output.parents:
         raise ValueError('需要有效数据/任务目录，以及位于这两个目录之外的新备份文件。')
     output.parent.mkdir(parents=True,exist_ok=True)
+    # 与调度器共用租约，拒绝调度仍运行时备份；调用方仍须按流程停止整个服务。
     with (data/'.scheduler.lock').open('a') as lease:
         fcntl.flock(lease,fcntl.LOCK_EX|fcntl.LOCK_NB)
         bootstrap_files, bootstrap_manifest = collect(data)
@@ -66,6 +67,7 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
                 archive.writestr('manifest.json',json.dumps({'format':'wfs-platform-1','database':database,'schema':schema,
                     'dump_tool':tool,'dump_endpoint':({'mode':'container','container':container} if container else {'mode':'network','host':host,'port':port}),'created_at':dt.datetime.now().isoformat(' '),'dump_sha256':digest.hexdigest(),
                     'backup_receipt':receipt,'database_contains_encrypted_business_credentials':True,'platform_configuration':bootstrap_manifest,'encryption_keys_included':False,'restore_target':'new database only'},indent=2))
+    # 归档关闭后才登记回执；只使用已核对导出目标的冻结配置，不重新解析待生效配置。
     from scripts.backup_receipt import record
     if receipt['write_requested']:
         record(data,output, config_override=receipt_config)

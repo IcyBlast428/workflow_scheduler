@@ -10,6 +10,7 @@ NAMES = {'pending': 'bootstrap/platform-connection.enc', 'active': 'bootstrap/pl
 
 
 def collect(data):
+    """分别保存待生效密文与本次启动快照；不把外部路径或解密密钥写入清单。"""
     configured = os.environ.get('WFS_PLATFORM_CONFIG_FILE')
     active = os.environ.get('WFS_PLATFORM_ACTIVE_CONFIG_FILE')
     paths = {'pending': Path(configured) if configured else Path(data) / 'platform-connection.enc',
@@ -33,6 +34,7 @@ def collect(data):
             decoded = base64.b64decode(content, altchars=b'-_', validate=True)
         except (ValueError, TypeError):
             decoded = b''
+        # 这里只检查密文封装格式；实际解密与目标核对属于回执计划，不承诺密钥可用。
         if len(decoded) < 73 or decoded[0] != 0x80:
             raise ValueError('平台连接配置不是有效的密文格式，拒绝把明文配置加入备份。')
         name = NAMES[role]
@@ -79,6 +81,7 @@ def receipt_plan(files, manifest, *, database, schema, host, port, container=Non
     def skipped(reason):
         return {'write_requested': False, 'written': False, 'reason': reason}, None
     active_path = os.environ.get('WFS_PLATFORM_ACTIVE_CONFIG_FILE')
+    # 待生效文件不能证明当前连接目标；缺少生效证据时宁可不写数据库回执。
     if not active_path:
         if manifest['pending']['included']:
             return skipped('pending_configuration_is_not_active_evidence')
@@ -118,6 +121,7 @@ def receipt_plan(files, manifest, *, database, schema, host, port, container=Non
         # Freeze the resolved endpoint for the receipt; do not re-read a staged
         # profile or resolve a changing service address again during the write.
         options = platform_config.validate(options, previous=options)
+        # 清单先于回执写入封装，None 表示将尝试写入，不能伪称数据库已经确认。
         return {'write_requested': True, 'written': None, 'reason': 'active_target_verified' if active_path else 'service_target_verified'}, options
     except Exception:
         return skipped('active_configuration_target_could_not_be_verified')

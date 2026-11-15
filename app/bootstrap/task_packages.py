@@ -247,6 +247,7 @@ def _entry(manifest, selected=''):
     return entry
 
 def _create(record, blob=None, source=None, entry='', actor='admin', note='', archive_layout='auto'):
+    """在临时目录校验代码并建立新版本；不原地覆盖已发布版本的代码或环境。"""
     if archive_layout not in ('auto', 'preserve', 'strip'):
         raise PackageError('请选择有效的目录处理方式。')
     version = uuid.uuid4().hex
@@ -295,6 +296,7 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note='', ar
         requirements = _requirements(code)
         selected = _entry(manifest, entry)
         data = {'pid': record['pid'], 'version': version, 'created_at': str(business_now()), 'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '', 'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest), 'requirements': requirements, 'base_version': record.get('active_version'), 'base_revision': record['revision'], 'archive_layout': archive_layout, 'database_access': database_access}
+        # 目录就绪后才登记版本；登记失败仍清理这个新版本，不触碰旧版本目录。
         temporary.rename(destination)
         _write_release(data, insert=True)
         return data
@@ -438,6 +440,11 @@ def _install_requirements(python, code, root, requirements, repository, timeout)
     return hashlib.sha256(json.dumps(metadata, sort_keys=True).encode()).hexdigest()
 
 def _prepare_worker(pid, version, token):
+    """为指定版本冻结环境和 SDK；准备通过不代表业务逻辑已试跑成功。
+
+    token 标识本次准备请求，写入进度或结果前核对，避免过期线程覆盖新请求。
+    依赖安装可能执行构建脚本，因此独立环境仍只用于可信任务与依赖。
+    """
     try:
         data = release(pid, version)
         if data.get('prepare_token') != token:
@@ -545,6 +552,8 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
                 raise PackageError('公共 SDK 快照校验失败。', 409)
         if _checksum(_manifest(root / 'code')) != data['checksum'] or not (root / data['python']).is_file():
             raise PackageError('版本文件或环境校验失败，请重新准备或上传。', 409)
+        # 数据库指针和内存调度器无法共享事务：先持久化 previous/pending，
+        # 再请调度器确认。确认前进程中断时，启动恢复根据意图回到旧版本。
         previous = {**record}
         record['pending'] = {'previous': previous, 'version': version, 'actor': actor}
         record['active_version'] = version
@@ -556,6 +565,7 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
         record = _write_task(record, expected=revision)
         try:
             aps_start(task_pid=pid, action='refresh')
+            # 只有调度器刷新成功才能清除 pending，清除结果随后也必须持久化。
             record.pop('pending', None)
             record['last_published_at'] = str(business_now())
             record['last_published_by'] = actor
@@ -629,6 +639,7 @@ def recover():
                     _write_release(data)
 
 def discovery(records_by_pid):
+    """只发现注册表中的已激活版本，草稿和准备中的版本不会进入调度列表。"""
     from app.bootstrap.task_loader import load_task_spec
     managed = registry()
     active = [(pid, r['active_version']) for pid, r in managed.items() if r.get('active_version') and (not r.get('deleted_at'))]

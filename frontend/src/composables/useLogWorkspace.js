@@ -11,6 +11,7 @@ export function useLogWorkspace({
 }) {
   let taskLogRequestSerial = 0,
     systemLogRequestSerial = 0;
+  // 输入框中的条件可能还未提交；后台检测只复用已应用查询，不能偷跑未确认的筛选。
   let appliedTaskQuery=null;
   const matrixLogRange = ref([]);
   onScopeDispose(() => {
@@ -93,6 +94,8 @@ export function useLogWorkspace({
     loadTaskLogs(true);
   }
 
+  // 自动更新只提示有新记录，保留用户正在查看的行和分页，避免新任务挤走点击目标。
+  // 手动刷新/搜索才替换列表；查看后续页时仅设置提示，不重新查询第一页覆盖当前页。
   async function loadTaskLogs(resetPage = false, options = {}) {
     const buffering=options.buffer===true;
     if(buffering && (!taskLogs.loaded || taskLogs.newRecords || taskLogs.loading)) return;
@@ -110,6 +113,7 @@ export function useLogWorkspace({
     if(!options.silent)taskLogs.error = '';
     try {
       const data = await api.taskLogs(query);
+      // 同时保护结果、错误和 loading 状态；只判断成功分支会让旧请求清掉新请求的状态。
       if (serial !== taskLogRequestSerial) return;
       markBackendHealthy('后端连接正常');
       taskLogs.refreshError='';
@@ -170,6 +174,7 @@ export function useLogWorkspace({
     loadTaskLogs(true);
   }
 
+  // 翻页使用后端游标而非重新计算偏移量；改变筛选或每页条数时必须重置游标链。
   function setTaskLogPage(page) {
     if (taskLogs.loading) return;
     if (page > taskLogs.params.currentPage) {

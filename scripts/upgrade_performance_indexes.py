@@ -19,6 +19,7 @@ def plan(db):
 
 
 def upgrade(db, apply=False):
+    """默认只预览；应用需安排维护窗口，普通 CREATE INDEX 可能阻塞写入。"""
     pending = plan(db)
     if apply:
         # Serialize repeat invocations using the supported lock for each backend.
@@ -28,6 +29,7 @@ def upgrade(db, apply=False):
                 db.execute_query_sql('SELECT pg_advisory_xact_lock(184762902)')
             else:
                 db.execute_sql('LOCK TABLE wfs_schema_version IN EXCLUSIVE MODE')
+            # 获锁后重新查询，避免两个升级进程按同一旧计划重复创建索引。
             pending = plan(db)
             for _, sql in pending:
                 db.execute_sql(sql)

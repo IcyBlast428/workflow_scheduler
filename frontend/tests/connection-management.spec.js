@@ -12,14 +12,13 @@ test('business connections use a searchable inventory and type-specific NewDB se
   await login(page);
   const pane=page.locator('.connection-panel');
   await expect(pane.locator('.connection-table')).toBeVisible();
-  await expect(pane.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveCount(6);
+  await expect(pane.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveCount(4);
   await pane.getByLabel('查找业务连接').fill('no_such_connection');
   await expect(pane.locator('.connection-table')).toContainText('没有匹配的连接');
   await pane.getByLabel('查找业务连接').clear();
   await pane.getByLabel('连接标识',{exact:true}).fill('future_reporting');
-  await pane.getByLabel('数据库类型',{exact:true}).selectOption('oracle');
-  await expect(pane.getByLabel('服务名（Service Name）')).toBeVisible();
-  await expect(pane.locator('.connection-example')).toContainText('SELECT 1 FROM dual');
+  await expect(pane.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveText(['MySQL / PolarDB / MariaDB','PostgreSQL','GaussDB / DWS（ODBC）','ClickHouse']);
+  await expect(pane.locator('.connection-example')).toContainText('SELECT 1');
   await pane.getByLabel('数据库类型',{exact:true}).selectOption('gaussdb');
   await expect(pane.getByLabel('ODBC 驱动名称',{exact:false})).toHaveValue('DWS');
   const tls=pane.getByLabel('连接加密',{exact:false});
@@ -38,7 +37,7 @@ test('business connections use a searchable inventory and type-specific NewDB se
 test('staged platform settings preserve active identity and hide saved passwords',async({page})=>{
   const initial={revision:0,source:'service',driver:'DWS',db_id:'scheduler_wfs',host:'',port:8000,database:'',schema:'wfs',user:'',password_set:false,web_pool_size:5,web_max_overflow:3,scheduler_pool_size:10,scheduler_max_overflow:5,pool_timeout:10,pool_recycle:600,connect_timeout:10,query_timeout:10};
   let stored={...initial},posted;
-  await page.route('**/api/admin/platform-database',route=>route.fulfill({json:{status:'success',code:20000,data:{active:initial,saved:stored,restart_required:stored.revision>0,drivers:['DWS'],diagnostics:{processes:[],metrics:{}}}}}));
+  await page.route('**/api/admin/platform-database',route=>route.fulfill({json:{status:'success',code:20000,data:{can_edit:true,editor_username:'admin',active:initial,saved:stored,restart_required:stored.revision>0,drivers:['DWS'],diagnostics:{processes:[],metrics:{}}}}}));
   await page.route('**/api/admin/platform-database/save',async route=>{
     posted=route.request().postDataJSON();
     const {password,...safe}=posted;stored={...safe,revision:1,password_set:true};
@@ -46,7 +45,8 @@ test('staged platform settings preserve active identity and hide saved passwords
   });
   await login(page);await page.getByRole('button',{name:'平台数据库',exact:true}).click();
   const pane=page.locator('.platform-database');
-  await pane.getByRole('combobox',{name:'配置来源',exact:true}).selectOption('direct');
+  await pane.getByRole('button',{name:'自定义平台连接',exact:true}).click();
+  await expect(pane.getByLabel('平台数据库地址')).toBeFocused();
   await pane.getByLabel('平台数据库地址').fill('database.example.internal');
   await pane.getByLabel('平台数据库名称').fill('workflow');
   await pane.getByLabel('平台数据库账号').fill('scheduler');
@@ -59,6 +59,42 @@ test('staged platform settings preserve active identity and hide saved passwords
   await expect(pane.getByLabel('平台数据库密码')).toHaveValue('');
   expect(posted.password).toBe('test-only-not-a-real-secret');
   expect(await pane.innerText()).not.toContain('test-only-not-a-real-secret');
+});
+
+
+test('other administrators can inspect platform settings but cannot test or save them',async({page})=>{
+  await login(page);
+  const csrf=await page.evaluate(()=>sessionStorage.getItem('wfs_csrf_token'));
+  const created=await page.request.post('/api/admin/users',{headers:{'X-CSRF-Token':csrf},data:{username:'platform-reader-browser',password:'browser-test-password',role:'admin',enabled:true}});
+  expect(created.status()).toBe(200);
+  await page.context().clearCookies();
+  await page.evaluate(()=>sessionStorage.clear());
+  await page.goto('/admin/#admin?section=connections');
+  await page.reload();
+  await page.getByLabel('用户名',{exact:true}).fill('platform-reader-browser');
+  await page.getByLabel('密码',{exact:true}).fill('browser-test-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  await page.getByRole('button',{name:'平台数据库',exact:true}).click();
+  const pane=page.locator('.platform-database');
+  await expect(pane).toContainText('当前账号仅可查看配置与连接池状态');
+  await expect(pane.getByRole('combobox',{name:'配置来源',exact:true})).toBeDisabled();
+  await expect(pane.getByLabel('平台 ODBC 驱动')).toBeDisabled();
+  await expect(pane.getByRole('button',{name:'自定义平台连接',exact:true})).toHaveCount(0);
+  await expect(pane.getByRole('button',{name:'测试平台连接',exact:true})).toHaveCount(0);
+  await expect(pane.getByRole('button',{name:'测试并保存待重启配置',exact:true})).toHaveCount(0);
+  await pane.getByRole('button',{name:'刷新连接状态',exact:true}).click();
+  const before=(await (await page.request.get('/api/admin/platform-database')).json()).data;
+  expect(before.can_edit).toBe(false);
+  const readerToken=await page.evaluate(()=>sessionStorage.getItem('wfs_csrf_token'));
+  for(const action of ['test','save']){
+    const denied=await page.request.post('/api/admin/platform-database/'+action,{headers:{'X-CSRF-Token':readerToken},data:{...before.saved,username:'admin',can_edit:true}});
+    expect(denied.status()).toBe(403);
+  }
+  const after=(await (await page.request.get('/api/admin/platform-database')).json()).data;
+  expect(after.saved.revision).toBe(before.saved.revision);
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 
 test('history policy persists bounds and makes same-database archival explicit',async({page})=>{

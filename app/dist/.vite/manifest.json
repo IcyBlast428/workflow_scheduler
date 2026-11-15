@@ -1,6 +1,6 @@
 {
   "index.html": {
-    "file": "static/index-BcSk32aR.js",
+    "file": "static/index-Cr7mDJCi.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -19,7 +19,7 @@
     ]
   },
   "src/components/AdminPanel.vue": {
-    "file": "static/AdminPanel-Cvug_YaJ.js",
+    "file": "static/AdminPanel-CmiXa1nA.js",
     "name": "AdminPanel",
     "src": "src/components/AdminPanel.vue",
     "isDynamicEntry": true,
@@ -27,11 +27,11 @@
       "index.html"
     ],
     "css": [
-      "static/AdminPanel-Cl-sJO9v.css"
+      "static/AdminPanel-DxsQCcJk.css"
     ]
   },
   "src/components/ExecutionMatrixWorkspace.vue": {
-    "file": "static/ExecutionMatrixWorkspace-CrKwETNo.js",
+    "file": "static/ExecutionMatrixWorkspace-DMM6vnZX.js",
     "name": "ExecutionMatrixWorkspace",
     "src": "src/components/ExecutionMatrixWorkspace.vue",
     "isDynamicEntry": true,
@@ -43,7 +43,7 @@
     ]
   },
   "src/components/GitlabUpdates.vue": {
-    "file": "static/GitlabUpdates-DApKoAE_.js",
+    "file": "static/GitlabUpdates-BbUfpIx5.js",
     "name": "GitlabUpdates",
     "src": "src/components/GitlabUpdates.vue",
     "isDynamicEntry": true,
@@ -55,7 +55,7 @@
     ]
   },
   "src/components/TaskConnections.vue": {
-    "file": "static/TaskConnections-0qJVvgr0.js",
+    "file": "static/TaskConnections-BW7l7zJj.js",
     "name": "TaskConnections",
     "src": "src/components/TaskConnections.vue",
     "isDynamicEntry": true,
@@ -67,7 +67,7 @@
     ]
   },
   "src/components/TaskExamples.vue": {
-    "file": "static/TaskExamples-aNBTwhEX.js",
+    "file": "static/TaskExamples-DKRAOwv5.js",
     "name": "TaskExamples",
     "src": "src/components/TaskExamples.vue",
     "isDynamicEntry": true,
@@ -79,7 +79,7 @@
     ]
   },
   "src/components/TaskOperations.vue": {
-    "file": "static/TaskOperations-B1vgJaPE.js",
+    "file": "static/TaskOperations-B-Ruvoct.js",
     "name": "TaskOperations",
     "src": "src/components/TaskOperations.vue",
     "isDynamicEntry": true,
@@ -91,7 +91,7 @@
     ]
   },
   "src/components/TaskReleaseDialog.vue": {
-    "file": "static/TaskReleaseDialog-106KYWRl.js",
+    "file": "static/TaskReleaseDialog-DyIQsFv8.js",
     "name": "TaskReleaseDialog",
     "src": "src/components/TaskReleaseDialog.vue",
     "isDynamicEntry": true,

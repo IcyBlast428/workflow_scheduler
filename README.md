@@ -11,7 +11,7 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 - Web 与单实例 Scheduler 分离，由 systemd 管理。
 - 平台数据统一存入 GaussDB：账户、会话、任务配置、执行历史、队列、授权、业务连接、GitLab 配置、发布记录、DDL 修改记录和标签。
 - 共享文件目录保存任务代码版本、独立 Python 环境、业务输出、日志、指标，以及数据库故障时的临时恢复文件。
-- 任务默认无业务库授权，只能使用管理员明确授权的连接。业务库统一通过 `NewDB` 访问，提供 MySQL/PolarDB/MariaDB、PostgreSQL、GaussDB/DWS ODBC、SQL Server、Oracle 和 ClickHouse 适配器；目标服务端仍须实库验收。
+- 任务默认无业务库授权，只能使用管理员明确授权的连接。业务库统一通过 `NewDB` 访问，提供 MySQL/PolarDB/MariaDB、PostgreSQL、GaussDB/DWS ODBC 和 ClickHouse 适配器；目标服务端仍须实库验收。
 - 平台连接支持服务配置/Nacos或加密保存的自定义连接，完整重启后生效；不自动迁移平台数据。全新安装使用唯一基线 `schema/gauss.sql`，现有本版架构可按升级说明补齐性能索引。
 
 ## 功能

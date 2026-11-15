@@ -1,5 +1,6 @@
 import { createRequestId } from './requestId.js';
 
+// 登录身份由会话 Cookie 验证；此令牌只用于 CSRF 校验，不能据此判断角色或权限。
 const TOKEN_KEY = 'wfs_csrf_token';
 
 function createError(message, code = 'REQUEST_ERROR') {
@@ -35,6 +36,7 @@ function appendParams(searchParams, params = {}) {
   });
 }
 
+// 统一请求层只做一次请求。超时不代表服务端未执行，写操作不能在这里自动重试。
 async function request(path, options = {}) {
   const controller = new AbortController();
   const method = options.method || 'GET';
@@ -49,6 +51,7 @@ async function request(path, options = {}) {
   }
 
   let body;
+  // FormData 的 Content-Type/boundary 必须交给浏览器生成，否则上传内容无法解析。
   if (options.formData !== undefined) {
     body = options.formData;
   } else if (options.body !== undefined) {
@@ -98,6 +101,8 @@ export const api = {
   saveOperationalPolicy(kind,body,pid='') { return request(`/api/admin/operational/policy/${kind}`,{method:'POST',params:{pid},body}); },
   cancelExecutionRequest(id) {return request('/api/admin/operational/requests',{method:'POST',body:{action:'cancel',id}});},
   executionRequests(pid='') { return request('/api/admin/operational/requests',{params:{pid}}); },
+  // 同一会话、任务和执行上下文复用请求编号，让结果不确定后的重试取回原回执。
+  // 仅成功或明确拒绝时清除；网络超时保留编号，避免下一次点击启动重复任务。
   async submitExecutionRequest(pid,body) {
     const storageKey='wfs:execution-request:'+getToken()+':'+pid+':'+JSON.stringify({kind:body.kind,context:body.context || {}});
     let identifier=sessionStorage.getItem(storageKey);

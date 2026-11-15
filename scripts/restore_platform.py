@@ -8,6 +8,7 @@ import hashlib
 
 
 def restore(backup, destination):
+    """只校验并解包到新目录；数据库导入与连接配置应用由运维另行确认。"""
     backup,destination=Path(backup).resolve(),Path(destination).resolve()
     if destination.exists():
         raise ValueError('恢复目录必须不存在，不能覆盖运行中的数据。')
@@ -27,6 +28,7 @@ def restore(backup, destination):
         else:
             from backup_bootstrap import verify
         verify(archive, manifest)
+        # 写任何文件前统一检查路径，防止归档条目越出目标目录。
         for item in archive.infolist():
             name=PurePosixPath(item.filename)
             if name.is_absolute() or '..' in name.parts or '\\' in item.filename or ':' in item.filename:
@@ -53,6 +55,7 @@ def restore(backup, destination):
         except Exception:
             # Preserve failed material for inspection; never remove a computed tree.
             raise
+    # 解包和摘要校验成功不等于数据库恢复成功，回执明确区分两者。
     receipt={'scope':'archive paths, dump and platform bootstrap checksums','database_restore_verified':False,
              'platform_configuration_applied':False,
              'platform_configuration':manifest.get('platform_configuration', {})}

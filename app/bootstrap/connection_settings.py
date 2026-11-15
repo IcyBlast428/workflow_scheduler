@@ -1,6 +1,7 @@
-"""Encrypted connection profiles, independent of the platform database.
+"""业务连接目录，与平台自身的启动连接配置分开管理。
 
-Business profiles are read when tasks open a connection. GaussDB transactions protect concurrent edits.
+目录密文保存在平台库；任务子进程使用启动时下发的授权快照，不直接读取目录。
+保存通过数据库事务和版本比较防止覆盖其他管理员刚提交的修改。
 """
 
 import base64
@@ -67,8 +68,10 @@ def profiles():
 
 
 def business_profile(identifier):
+    """任务优先且只读自身授权快照；平台管理进程才从目录解析业务连接。"""
     scoped = os.environ.get("WFS_TASK_CONNECTIONS_JSON")
     if scoped is not None:
+        # 空快照同样表示没有授权，不能因缺少某个连接而回退查询平台目录。
         profile = json.loads(scoped).get(identifier)
         if identifier == "platform" or not profile:
             raise PermissionError("此任务未获授权使用业务连接：" + str(identifier))
@@ -110,8 +113,10 @@ def validate(form):
     from app.common.db.catalog import DATABASES, normalize
 
     dialect = normalize(form.get("dialect", previous.get("dialect", "mysql")))
-    if dialect not in DATABASES or identifier == "platform":
-        raise ValueError("平台连接固定由服务配置管理；这里只保存任务业务连接。")
+    if identifier == "platform":
+        raise ValueError("平台连接请到“平台数据库”页面管理；这里只保存任务业务连接。")
+    if dialect not in DATABASES:
+        raise ValueError("不支持的业务数据库类型：" + dialect)
     spec = DATABASES[dialect]
     result = {"id": identifier, "dialect": dialect, "charset": "utf8mb4"}
     for key, maximum in [("host", 253), ("database", 64), ("user", 100)]:
@@ -235,6 +240,7 @@ def probe(profile, initialize=False):
 
 
 def probe_business(profile):
+    """使用独立临时标识探测候选连接，结果不替换已保存连接或污染其池。"""
     import uuid
     from app.common.db.factory import adapter_for
     from app.common.db.engine_pool import dispose
@@ -248,13 +254,8 @@ def probe_business(profile):
             "postgresql": "SELECT version()",
             "clickhouse": "SELECT version()",
             "gaussdb": "SELECT version()",
-            "sqlserver": "SELECT @@VERSION",
-            "oracle": "SELECT 1 FROM DUAL",
         }[profile["dialect"]]
         version = adapter.execute_query_sql(sql)[0][0]
-        if profile["dialect"] == "oracle":
-            # Basic read-only health must not require access to v$version.
-            version = "Oracle（只读连通性检查通过）"
         return {
             "connected": True,
             "ready": True,

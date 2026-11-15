@@ -39,6 +39,7 @@ def invalidate_policy():
 
 
 def load():
+    """短缓存降低每次完成记账的开销；本进程保存后用代次立即失效。"""
     return cached(('history-storage-policy', _policy_generation), 5,
                   lambda: {**DEFAULT, **_read(_KEY, DEFAULT)}, mutable=False)
 
@@ -79,6 +80,7 @@ def history_excerpt(record, output, policy=None):
     """Keep bounded UTF-8 text in SQL; the retained file and alert payload are unchanged."""
     policy = policy or load()
     kib = policy['success_excerpt_kib'] if record.get('state') == 0 else policy['failure_excerpt_kib']
+    # 按字节限制存储量，截断时丢弃不完整码点；提示文字在限额之外追加。
     raw = output.encode('utf-8')
     budget = kib * 1024
     if len(raw) <= budget:
@@ -105,6 +107,7 @@ def run_cycle():
     state = dict(last_run=str(business_now()), moved=0, batches=0, duration_ms=0,
                  has_more=False, budget_exhausted=False, error='')
     try:
+        # 预算只在批次之间检查；不强行打断已开始的事务，单批可能超时。
         for _ in range(policy['archive_batches_per_cycle']):
             if _clock() - began >= policy['archive_budget_seconds']:
                 state['budget_exhausted'] = True
@@ -122,6 +125,7 @@ def run_cycle():
         state['has_more'] = True
         logger.exception('bounded history archival failed')
     finally:
+        # 即使本轮部分失败，也记录已提交的进度；下一轮继续处理剩余在线记录。
         state['duration_ms'] = round((_clock() - began) * 1000, 2)
         try:
             with _store() as db:

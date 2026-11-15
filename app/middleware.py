@@ -18,11 +18,7 @@ PUBLIC_API_PATHS = {
 
 
 def init_middleware(app):
-    '''
-    中间件或拦截器
-    :param app: 实例化对象
-    :return:
-    '''
+    """统一执行会话、角色和 CSRF 检查，并记录 API 耗时与操作审计。"""
 
     @app.before_request
     def print_request_info():
@@ -33,6 +29,8 @@ def init_middleware(app):
         if request.method != 'OPTIONS' and request.path.startswith('/api') and 'favicon.ico' not in request.full_path:
             if request.path in PUBLIC_API_PATHS:
                 return None
+            # 先验证共享会话，再读取当前账户角色；数据库不可用时关闭受保护入口，
+            # 不能退回仅相信 Cookie 的旧身份或默认管理员。
             try:
                 active = is_session_active(session.get('sid'))
             except Exception:
@@ -51,6 +49,7 @@ def init_middleware(app):
                 return message, 401
             if not allowed(request.path, request.method, g.identity['role']):
                 return error_msg('当前账户没有此操作权限。'), 403
+            # 角色权限与 CSRF 分别约束“谁能做”和“请求是否来自当前会话”，两者都要检查。
             if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
                 supplied = request.headers.get('X-CSRF-Token', '')
                 expected = session.get('csrf_token', '')
@@ -58,21 +57,10 @@ def init_middleware(app):
                     return error_msg('invalid CSRF token'), 403
                 if request.is_json and not isinstance(request.get_json(silent=True), dict):
                     return error_msg('请求内容必须为对象。'), 400
-        # print("拦截器：" + str(request.method) + str(request.path))
-        # print("请求方法：" + str(request.method))
-        # print("---请求headers--start--")
-        # print(str(request.headers).rstrip())
-        # print("---请求headers--end----")
-        # print("GET参数：" + str(request.args))
-        # print("POST参数：" + str(request.form))
 
     @app.after_request
     def af_request(resp):
-        """
-         #请求钩子，跨域调用
-        :param resp:
-        :return:
-        """
+        """补充缓存/安全响应头，并审计有副作用的请求；不把请求正文整体写入日志。"""
         resp = make_response(resp)
         if request.path.startswith('/api'):
             from app.bootstrap.runtime_metrics import record
@@ -80,6 +68,7 @@ def init_middleware(app):
             record('api:'+endpoint,1000*(time.monotonic()-getattr(g,'request_started',time.monotonic())))
         if request.path.startswith('/api'):
             resp.headers['Cache-Control'] = 'no-store'
+            # 转发给调度服务的写操作由实际处理方审计，避免 Web 再记一次。
             if request.method in {'POST','PUT','PATCH','DELETE'} and request.path not in PUBLIC_API_PATHS and request.path != '/api/user/logout' and getattr(g, 'identity', None) and not getattr(g, 'audit_forwarded', False):
                 payload = resp.get_json(silent=True) or {}
                 body = request.get_json(silent=True) or {}

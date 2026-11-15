@@ -9,6 +9,8 @@ from app.bootstrap import admission
 CAPABILITIES = {'run', 'schedule', 'publish', 'view_code'}
 
 def configuration(username):
+    # 授权只在一次 HTTP 请求内复用，不能沿用调度策略的跨请求缓存，
+    # 否则撤销权限后还可能短暂允许新的操作。
     from flask import has_request_context, g
     if has_request_context():
         cache = getattr(g, 'task_access_cache', None)
@@ -49,6 +51,7 @@ def for_task(user, pid, group=None):
     if user['role'] != 'maintainer':
         return []
     value = configuration(user['username'])
+    # 显式任务授权与分类授权取并集；没有命中授权时，默认无操作权限。
     if pid in value['tasks']:
         return value['capabilities']
     if group is None:
@@ -76,6 +79,7 @@ def request_allowed(user):
     elif path in ('/api/taskinfo/schedule', '/api/taskinfo/editTask', '/api/taskinfo/restore'):
         capability = 'schedule'
     elif path == '/api/taskinfo/batch':
+        # 批量操作逐项检查，不能用首项/任一项已获授权来放行整个请求。
         ids = body.get('ids')
         return isinstance(ids, list) and bool(ids) and all(('schedule' in for_task(user, i) for i in ids if isinstance(i, str))) and all((isinstance(i, str) for i in ids))
     elif path in ('/api/taskinfo/source', '/api/taskinfo/flow'):

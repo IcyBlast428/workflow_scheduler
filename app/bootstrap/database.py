@@ -104,12 +104,14 @@ class GaussDB:
         )
 
     def __init__(self, db_id=None, *, config_override=None, pooled=True):
+        # 常规请求使用本次启动配置；管理页探测显式传入候选配置且禁用复用池。
         from app.bootstrap import platform_config
         options = dict(config_override) if config_override is not None else platform_config.active()
         self._in_transaction = False
         self._lease = None
         self.conn = self.cursor = None
         self.current_env = get_runtime_env()
+        # 本机协议测试不能把真实候选连接误测成本机测试库，因此 override 不走替身。
         native_test = os.environ.get("WFS_POSTGRES_TEST") == "true" and config_override is None
         direct = options['source'] == 'direct' and not native_test and db_id is None
         if direct:
@@ -156,6 +158,7 @@ class GaussDB:
         try:
             self.conn.autocommit = True
             self.cursor = self.conn.cursor()
+            # 会话设置可能被上一次借用改变；每次借出都恢复 schema 和查询超时。
             self.cursor.execute(f'SET statement_timeout = {timeout * 1000}')
             self.cursor.execute(f'SET search_path TO {schema}')
         except BaseException:
@@ -191,6 +194,7 @@ class GaussDB:
         return self.cursor
 
     def close(self, broken=False):
+        """释放句柄前回滚未提交事务；清理失败的物理连接不得再次进入池中。"""
         connection, cursor, lease = self.conn, self.cursor, self._lease
         self.conn = self.cursor = self._lease = None
         if connection is None:

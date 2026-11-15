@@ -254,6 +254,52 @@ class PlatformDatabaseIntegrationTests(unittest.TestCase):
         self.assertEqual(result.status_code,200,result.json)
         self.assertNotIn('secret-in-form',result.get_data(as_text=True))
         self.assertTrue(result.json['data']['restart_required'])
+        self.assertTrue(result.json['data']['can_edit'])
+        self.assertEqual(result.json['data']['editor_username'], 'admin')
+
+
+    def test_only_builtin_admin_can_test_or_save_platform_connection(self):
+        from app import create_app
+        from app.api import platform_database as api
+        from app.settings import AUTH_ADMIN_PASSWORD_HASH
+        app = create_app()
+        endpoint = '/api/admin/platform-database'
+        roles = ('admin', 'viewer', 'operator', 'maintainer')
+        with GaussDB() as db:
+            for role in roles:
+                db.execute_sql('INSERT INTO wfs_users(username,password_hash,role,enabled) VALUES(?,?,?,1)',
+                               params=('platform-' + role, AUTH_ADMIN_PASSWORD_HASH, role))
+        with patch.object(api, 'probe') as probe, patch.object(config, 'save') as save:
+            for role in roles:
+                with self.subTest(role=role):
+                    client = app.test_client()
+                    login = client.post('/api/user/login', json={'username': 'platform-' + role, 'password': 'test-password'})
+                    self.assertEqual(login.status_code, 200)
+                    headers = {'X-CSRF-Token': login.json['data']['csrf_token']}
+                    listing = client.get(endpoint)
+                    self.assertEqual(listing.status_code, 200 if role == 'admin' else 403)
+                    if role == 'admin':
+                        self.assertFalse(listing.json['data']['can_edit'])
+                        self.assertEqual(listing.json['data']['editor_username'], 'admin')
+                    for action in ('test', 'save'):
+                        response = client.post(endpoint + '/' + action, headers=headers,
+                                               json={**config.defaults(), 'username': 'admin', 'can_edit': True})
+                        self.assertEqual(response.status_code, 403, response.json)
+            probe.assert_not_called()
+            save.assert_not_called()
+        self.assertFalse(config.path().exists())
+
+    def test_builtin_admin_permission_follows_configured_account_name(self):
+        from app import create_app
+        from app.api import platform_database as api
+        from flask import g
+        with create_app().test_request_context(), patch.object(api, 'AUTH_ADMIN_USERNAME', 'platform-owner'):
+            g.identity = {'username': 'admin', 'role': 'admin'}
+            self.assertFalse(api.can_edit())
+            g.identity = {'username': 'platform-owner', 'role': 'viewer'}
+            self.assertFalse(api.can_edit())
+            g.identity = {'username': 'platform-owner', 'role': 'admin'}
+            self.assertTrue(api.can_edit())
 
 
 if __name__=='__main__':unittest.main()

@@ -1,4 +1,7 @@
-"""Bounded process-local DBAPI pools with secret-free shared diagnostic snapshots."""
+"""平台 DBAPI 连接池：每个进程单独限额，通过无密钥的文件快照汇总状态。
+
+跨进程共享的只有观测数据，连接和事务不能共享；等待与查询耗时分别统计。
+"""
 from collections import OrderedDict
 import atexit
 import hashlib
@@ -23,7 +26,7 @@ _identity = uuid.uuid4().hex[:12]
 
 def _after_fork():
     global _entries, _guard, _flush_guard, _last_flush, _identity
-    # Never close inherited connections: their sockets belong to the parent.
+    # fork 后只丢弃本进程继承的池引用并重建锁，不关闭父进程仍在用的连接。
     _entries = OrderedDict()
     _guard = threading.RLock()
     _flush_guard = threading.Lock()
@@ -54,6 +57,7 @@ def _payload():
 
 
 def _flush(force=False):
+    """常规借还每秒至多写一次快照；强制清理可刷新，监测失败不阻断业务。"""
     global _last_flush
     if not _flush_guard.acquire(blocking=False):
         return
@@ -87,6 +91,7 @@ def _flush(force=False):
 
 
 def _safe_snapshot(value, now):
+    """只接受近期、有限大小且字段已知的观测数据，不回显任意文件内容。"""
     if not isinstance(value, dict) or type(value.get('pid')) is not int or value['pid'] <= 0:
         return None
     at = value.get('at')
@@ -106,6 +111,7 @@ def _safe_snapshot(value, now):
 
 
 def diagnostics():
+    """汇总活跃进程的连接计数；耗时指标仍来自当前响应进程，不是全局分位数。"""
     current = _payload()
     result = [current]
     try:
@@ -127,6 +133,7 @@ def diagnostics():
 
 
 class Lease:
+    """句柄拥有一次独占借用；broken 时淘汰连接，而不是归还给下一个请求。"""
     def __init__(self, connection):
         self.connection, self.raw = connection, connection.dbapi_connection
     def close(self, broken=False):
@@ -140,6 +147,7 @@ class Lease:
 
 
 def acquire(identity, creator, settings):
+    """在进程预算内借连接；只对借出前的失效连接重建一次，不重放业务语句。"""
     role = 'scheduler' if os.environ.get('WFS_ENABLE_SCHEDULER') == 'true' else 'web'
     size, overflow = settings[role + '_pool_size'], settings[role + '_max_overflow']
     key = hashlib.sha256(json.dumps([identity, size, overflow, settings['pool_timeout'], settings['pool_recycle']], sort_keys=True, default=str).encode()).hexdigest()
@@ -164,6 +172,7 @@ def acquire(identity, creator, settings):
             if candidate != key and old['pool'].checkedout() == 0 and old['waiting'] == 0 and (len(_entries) > 16 or time.monotonic()-old['used'] > 300):
                 _entries.pop(candidate)['pool'].dispose()
         entry['waiting'] += 1
+    # 池等待必须在注册表锁之外；归还连接及建连回调都可能需要这把锁。
     try:
         from app.bootstrap.runtime_metrics import measure
         with measure('database:pool_wait'):
@@ -172,7 +181,7 @@ def acquire(identity, creator, settings):
                 raw_lease = entry['pool'].connect()
                 lease = Lease(raw_lease)
                 try:
-                    # Validate only the checkout; never retry a user's SQL/transaction.
+                    # 健康检查发生在业务 SQL 之前；业务事务一旦开始，不能假定失败就未执行。
                     if not lease.raw.autocommit:
                         lease.raw.rollback()
                         lease.raw.autocommit = True

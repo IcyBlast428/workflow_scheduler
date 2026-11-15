@@ -14,7 +14,9 @@ import {useUnsavedChanges} from '../composables/useUnsavedChanges';
 import LoadingStatus from './LoadingStatus.vue';
 const form=ref({}),status=ref({}),loading=ref(false),busy=ref(false),error=ref(''),message=ref('');
 const {saved}=useUnsavedChanges(()=>form.value,()=>form.value.revision!=null);let generation=0;
+// 状态查询与策略草稿分离：刷新归档进度不覆盖表单，revision 随草稿提交供后端防覆盖。
 async function load(assign=true){const seq=++generation;loading.value=true;error.value='';try{const result=await api.historyStorage();if(seq!==generation)return;status.value=result.status;if(assign){form.value=result.policy;saved();}}catch(e){if(seq===generation)error.value=e.message;}finally{if(seq===generation)loading.value=false;}}
+// 只在成功保存后清除未保存标记；归档实际执行由调度服务完成，页面不搬移历史记录。
 async function save(){if(busy.value)return;busy.value=true;error.value='';message.value='';try{const result=await api.saveHistoryStorage(form.value);form.value=result.policy;status.value=result.status;saved();message.value='历史存储策略已保存；后续执行和归档轮次使用新设置。';}catch(e){error.value=e.message;}finally{busy.value=false;}}
 onMounted(load);onBeforeUnmount(()=>generation++);
 </script>

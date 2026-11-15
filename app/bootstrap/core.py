@@ -31,6 +31,8 @@ if FLASK_ENV == 'development':
     dev_run_all = dev_run_job.get('run_all')
 
 
+# 手动任务提交后、真正进入 execute_py 前，名额由此表托管；
+# 进入执行器后由执行器收尾，启动前错过窗口则由监听器释放，不能两边重复释放。
 _manual_reservations = {}
 _manual_lock = threading.Lock()
 _configuration_lock = threading.RLock()
@@ -209,6 +211,11 @@ def _sync_job_stats(job_list, prune_missing=True):
 
 @serialized_configuration
 def call_task_once(pid, actor='admin', context=None):
+    """统一提交手动、补跑和队列派发；先占名额并记账，再交给实际执行器。
+
+    调度上下文携带触发时快照，派发前仍检查当前启停与配置版本，
+    避免管理员停用或修改计划后，排队的旧计划继续启动。
+    """
     from app.bootstrap.admission import ensure_open
     ensure_open()
     context=context or {}
@@ -252,6 +259,7 @@ def call_task_once(pid, actor='admin', context=None):
                 raise ValueError('指定任务版本尚未检查通过。')
             spec=dict(spec,main_file_path=str(release_dir(pid,data['version'])/'code'/data['main_file']),
                       python_executable=str(release_dir(pid,data['version'])/data['python']))
+        # claim 必须先于 create_run / add_job；每个后续失败分支都负责归还已占名额。
         reservation = runnings.claim(pid, spec.get('max_instances') or 1, spec.get('group_name',''))
         if reservation is None:
             from app.bootstrap.admission import CapacityUnavailable
@@ -331,6 +339,7 @@ def aps_start(task_pid=None, action='refresh'):
     :param action: refresh/start/reload 等任务控制动作
     """
     if task_pid is None:
+        # 全量启动先恢复中断的发布，再据注册表重建调度；单任务刷新不能执行全局恢复。
         from app.bootstrap.task_packages import recover
         recover()
         start_operations()
@@ -424,6 +433,8 @@ def aps_start(task_pid=None, action='refresh'):
                 # Refresh/restart must never replay a completed single-run plan.
                 record_application(pid, version, 'applied')
                 continue
+            # execute_py 负责子进程与资源限制；此处只注册触发与当次限制，
+            # _schedule_revision 留给派发时核对，不能在派发时用新版本覆盖旧计划的版本。
             scheduler.add_job(
                 func=execute_py,
                 trigger=trigger,

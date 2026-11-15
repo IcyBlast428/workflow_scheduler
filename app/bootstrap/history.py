@@ -26,9 +26,11 @@ def date_range(values):
     return [start, end]
 
 def page(clauses, params, size, scope, cursor, binding):
+    """按结束时间和唯一编号续查，避免新记录插入导致 OFFSET 分页漂移。"""
     tables = {'online': ['wfs_run_history'], 'archive': ['wfs_run_history_archive'], 'all': ['wfs_run_history', 'wfs_run_history_archive']}.get(scope)
     if not tables:
         raise ValueError('日志查询范围无效。')
+    # 绑定筛选条件，防止旧游标串到新搜索；此指纹不是访问授权或签名。
     signature = hashlib.sha256(json.dumps(binding, ensure_ascii=False, default=str).encode()).hexdigest()
     if cursor:
         try:
@@ -58,6 +60,7 @@ def page(clauses, params, size, scope, cursor, binding):
     return (rows, has_more, next_cursor)
 
 def archive_pending(cutoff):
+    """积压包含尚未汇总的旧行，避免归档状态误报为已清空。"""
     with GaussDB() as db:
         return bool(db.execute_query_sql('SELECT 1 FROM wfs_run_history WHERE end_time < ? ORDER BY end_time,id LIMIT 1', params=(cutoff,)))
 
@@ -87,6 +90,7 @@ def archive_batch(cutoff, size=200):
             copies = db.execute_query_sql(f'SELECT {columns} FROM wfs_run_history_archive h WHERE {predicate}', params=keys)
             expected = {(row[0], str(row[9])): tuple(row) for row in rows}
             actual = {(row[0], str(row[9])): tuple(row) for row in copies}
+            # 已有归档副本也必须与在线业务字段一致，不能仅凭 ID 存在就删源行。
             if actual != expected:
                 raise RuntimeError('archive verification failed; source history retained')
             failures = Counter(row[1] for row in rows if is_failure(row[6]))
@@ -99,6 +103,7 @@ def archive_batch(cutoff, size=200):
                     db.execute_sql('UPDATE wfs_history_rollup SET archived_failures=archived_failures+? WHERE pid=?', params=(count, pid))
                 else:
                     db.execute_sql('INSERT INTO wfs_history_rollup(pid,archived_failures) VALUES(?,?)', params=(pid, count))
+            # 副本校验、失败统计转移和源行删除同事务提交，任一步失败保留在线记录。
             db.execute_sql('DELETE FROM wfs_run_history WHERE ' + predicate.replace('h.', ''), params=keys)
             db.set_commit()
             return len(rows)

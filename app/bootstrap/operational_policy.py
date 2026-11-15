@@ -11,6 +11,7 @@ DISPATCH_DEFAULT = dict(revision=0, max_active=4, start_interval_ms=1000, max_pe
 
 def load(kind, identifier=''):
     default = TASK_DEFAULT if kind == 'task' else RELEASE_DEFAULT if kind == 'release' else DISPATCH_DEFAULT if kind == 'dispatch' else {'revision': 0, 'quotas': {}}
+    # 默认策略含嵌套字典/列表，必须复制后返回，防止表单修改污染后续请求。
     baseline = json.loads(json.dumps(default))
     return {**baseline, **admission.policy(kind + ':' + identifier, baseline)}
 
@@ -36,6 +37,7 @@ def save(kind, identifier, form, actor):
         with admission.store() as db:
             db.execute('BEGIN')
             row = db.execute('SELECT payload FROM settings WHERE key=?', (kind + ':' + identifier,)).fetchone()
+            # 表单读到的版本可能已过时，必须在写事务内再次比较实际版本。
             revision = json.loads(row[0])['revision'] if row else 0
             if revision != previous['revision']:
                 raise RuntimeError('策略已被修改，请刷新。')
@@ -115,6 +117,7 @@ def in_window(policy):
     start, end = (policy['window_start'], policy['window_end'])
     if not start:
         return True
+    # 开始时间晚于结束时间表示跨午夜窗口，不能直接按同一天区间比较。
     current = business_now().strftime('%H:%M')
     return start <= current <= end if start <= end else current >= start or current <= end
 

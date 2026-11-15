@@ -90,6 +90,7 @@ def _read_policy(key):
 
 
 def policy(key, default, *, fresh=False):
+    """读取运行策略；fresh 用于启动边界，绕过缓存与同键合并读取。"""
     # Authorization grants, notification delivery and other mutable receipts
     # always go straight to the database. Only operational settings are cached.
     cached_key = key == 'maintenance' or key.startswith(('dispatch:', 'task:', 'groups:', 'release:'))
@@ -106,6 +107,7 @@ def policy(key, default, *, fresh=False):
             if not fresh and version is not None and entry and entry[0] == version and entry[1] > time.monotonic():
                 _policy_cache.move_to_end(cache_key)
                 return deepcopy(default if entry[2] is None else entry[2])
+            # 进程内代次防止 clear/save 与慢查询交错后重新填入过期值。
             generation = _policy_generation
             if fresh:
                 break
@@ -169,9 +171,11 @@ def ensure_open(*, fresh=False):
         raise MaintenanceClosed('平台处于维护模式，暂不接受新的执行。')
 
 def manual_request(actor, pid, key, submit):
+    """用调用者提供的请求号防重复提交，不承诺业务副作用恰好一次。"""
     if not isinstance(key, str) or not re.fullmatch('[A-Za-z0-9_-]{16,100}', key):
         raise ValueError('执行请求编号无效，请刷新后重试。')
     with lock:
+        # 先取策略再打开回执事务，避免持有一个连接时嵌套借取另一个连接。
         closed = maintenance()['enabled']
         with store() as db:
             db.execute('BEGIN')
@@ -187,6 +191,7 @@ def manual_request(actor, pid, key, submit):
             db.execute('INSERT INTO receipts VALUES(?,?,?,?,?,?,?)', (actor, key, pid, 'pending', '', '', str(business_now())))
         try:
             run_id = submit()
+        # 只有明确尚未接收的拒绝才释放请求号；结果不明确时必须保留证据。
         except (CapacityUnavailable, MaintenanceClosed, PlanCancelled):
             with store() as db:
                 db.execute('DELETE FROM receipts WHERE actor=? AND key=?', (actor, key))
@@ -222,6 +227,7 @@ def save_grant(pid, form, actor):
     return value
 
 def connection_environment(pid):
+    """只导出获授权连接的运行快照；返回值含凭据，不应记录到日志。"""
     access = grant(pid)
     from app.bootstrap.connection_settings import business_profile
     selected = {}

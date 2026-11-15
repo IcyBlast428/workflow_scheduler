@@ -15,6 +15,7 @@ VIEWER_GETS.update({'/api/taskinfo/artifacts', '/api/taskinfo/artifact-download'
 VIEWER_POSTS = {'/api/user/logout', '/api/taskinfo/taskLogs', '/api/taskinfo/taskLogDetail', '/api/taskinfo/taskids', '/api/taskinfo/groups', '/api/taskinfo/logview'}
 
 def user_record(username):
+    # 内置管理员由服务环境定义，不依赖用户表中的同名记录；页面不能覆盖其身份。
     if username == AUTH_ADMIN_USERNAME:
         return {'username': username, 'password_hash': AUTH_ADMIN_PASSWORD_HASH, 'role': 'admin', 'enabled': 1}
     with GaussDB() as db:
@@ -22,12 +23,15 @@ def user_record(username):
     return rows[0] if rows else None
 
 def identity():
+    """根据当前账户记录重建身份，让停用和角色变更对后续请求立即生效。"""
     record = user_record(session.get('username', AUTH_ADMIN_USERNAME))
     if not record or not record['enabled'] or record['role'] not in ROLES:
         return None
     return {'username': record['username'], 'role': record['role']}
 
 def allowed(path, method, role):
+    # 这是通用角色门禁；平台连接等敏感接口还需额外核对内置管理员身份，
+    # 不能把这里的 admin 放行理解成所有管理操作都无需细粒度检查。
     if role == 'admin':
         return True
     if role == 'maintainer':

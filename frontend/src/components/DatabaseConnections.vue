@@ -33,7 +33,7 @@
       <section class="surface-card"><h3>任务中的统一用法</h3><pre class="connection-example">from app.common.database import NewDB
 
 with NewDB("{{ form.id || '连接标识' }}") as db:
-    rows = db.query("{{ form.dialect==='oracle'?'SELECT 1 FROM dual':'SELECT 1' }}")</pre><p class="hint">先在任务详情中授权此连接。新数据库连接可直接在本页添加；新的数据库类型需要先接入对应适配器和驱动。页面不保存任务内的连接密码。</p></section>
+    rows = db.query("SELECT 1")</pre><p class="hint">先在任务详情中授权此连接。新数据库连接可直接在本页添加；新的数据库类型需要先接入对应适配器和驱动。页面不保存任务内的连接密码。</p></section>
     </div>
   </section>
 </template>
@@ -44,6 +44,7 @@ import {useUnsavedChanges} from '../composables/useUnsavedChanges';
 import LoadingStatus from './LoadingStatus.vue';
 import PlatformDatabase from './PlatformDatabase.vue';
 const props=defineProps({confirm:Function});
+// 两个分栏通过 v-show 保持挂载，切换平台/业务连接时保留各自未保存的编辑内容。
 const tab=ref('business'),query=ref('');
 const tlsLabels={disabled:'不使用 TLS',require:'TLS（仅加密）',verify_identity:'TLS（校验证书和主机名）'};
 const state=ref({}),profiles=ref([]),types=ref([]),usages=ref([]),error=ref(''),message=ref(''),busy=ref(''),loading=ref(false),confirmation=ref('');
@@ -54,8 +55,11 @@ const selectedType=computed(()=>types.value.find(p=>p.dialect===form.value.diale
 const typeLabel=dialect=>types.value.find(t=>t.dialect===dialect)?.label || dialect;
 const filteredProfiles=computed(()=>profiles.value.filter(p=>[p.id,p.name,p.environment,typeLabel(p.dialect)].join(' ').toLowerCase().includes(query.value.toLowerCase())));
 let generation=0;
+// 接口只返回 password_set；空密码表示沿用已存密文，不能把掩码当成真实密码回传。
 function assign(item){form.value={...empty(),...item,password:''};confirmation.value='';saved();}
+// 端口、驱动与 TLS 能力来自后端类型目录，换类型时清空不适用的旧驱动/证书设置。
 function changeDialect(){form.value.port=selectedType.value?.port || 5432;form.value.driver=selectedType.value?.default_driver || '';form.value.tls='disabled';form.value.ssl_ca='';}
+// 列表与使用情况一起刷新，但不改 form；后台返回不能覆盖用户正在编辑的字段。
 async function load(){const seq=++generation;loading.value=true;error.value='';try{const [s,u]=await Promise.all([api.databaseConnections(),api.connectionUsage()]);if(seq!==generation)return;state.value=s;profiles.value=s.profiles;types.value=s.supported_databases;usages.value=u;}catch(e){if(seq===generation)error.value=e.message;}finally{if(seq===generation)loading.value=false;}}
 async function choose(item){if(dirty.value&&!await props.confirm({title:'放弃未保存的修改？',message:'切换连接会丢失未保存内容。',confirmText:'切换',cancelText:'继续编辑'}))return;assign(item);message.value='';error.value='';}
 async function run(action){if(busy.value)return;busy.value=action;error.value='';message.value='';try{const result=await api.changeDatabaseConnection(action,form.value);if(action==='save')assign(result.profile);await load();message.value=action==='save'?'业务连接已保存，下次任务执行生效，运行中任务保留原配置。':'连接测试通过。';}catch(e){error.value=e.message;}finally{busy.value='';}}

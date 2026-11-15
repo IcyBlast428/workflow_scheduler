@@ -7,12 +7,12 @@ import sqlite3
 import unittest
 from unittest.mock import patch, Mock
 from types import SimpleNamespace
-from sqlalchemy.dialects.mssql.pyodbc import MSDialect_pyodbc
-from sqlalchemy.dialects.oracle.oracledb import OracleDialect_oracledb
+from sqlalchemy.dialects.mysql.pymysql import MySQLDialect_pymysql
+from sqlalchemy.dialects.postgresql.psycopg import PGDialect_psycopg
 from app.common.db.sqlalchemy_adapter import SQLAlchemyAdapter
 from sqlalchemy import create_engine
 from sqlalchemy.dialects import registry
-from app.common.db.adapters import GaussDBAdapter, SQLServerAdapter, OracleAdapter
+from app.common.db.adapters import GaussDBAdapter
 from app.common.db.dws_dialect import DWSDialect
 from app.common.db.catalog import capabilities
 
@@ -50,63 +50,6 @@ class BusinessDatabaseAdapterTests(unittest.TestCase):
             self.assertEqual(adapter.execute_query_sql('SELECT * FROM sample', return_json=True),
                              [{'id': 1, 'value': '中文;50%'}])
 
-    def test_sqlserver_and_oracle_keep_password_outside_url_rendering(self):
-        ms = SQLServerAdapter(dict(self.config, port=1433, tls='verify_identity')).build_url()
-        self.assertEqual(ms.query['Encrypt'], 'yes')
-        self.assertEqual(ms.query['TrustServerCertificate'], 'no')
-        self.assertNotIn(self.config['password'], str(ms))
-        ora = OracleAdapter(dict(self.config, port=1521))
-        self.assertEqual(ora.build_url().query['service_name'], 'reports')
-        self.assertIsNone(ora.build_url().database)
-        self.assertEqual(ora.connection_options()['service_name'], 'reports')
-        self.assertIsNone(ora.connection_options()['dsn'])
-        with patch('ssl.create_default_context', return_value='test-context') as tls:
-            options = OracleAdapter(dict(self.config, tls='verify_identity', ssl_ca='/ca.pem')).connection_options()
-        tls.assert_called_once_with(cafile='/ca.pem')
-        self.assertEqual(options['protocol'], 'tcps')
-        self.assertTrue(options['ssl_server_dn_match'])
-
-    def test_sqlserver_qmark_pipeline_preserves_brackets_temp_tables_and_values(self):
-        dialect = MSDialect_pyodbc(paramstyle='qmark')
-        connection = Mock()
-        adapter = SQLServerAdapter(dict(self.config, dialect='sqlserver'))
-        payload = "quote'; DROP TABLE harmless -- 中文"
-        adapter._execute(connection,
-                         "SELECT '?' AS literal, [question?] FROM #jobs WHERE id=? AND note=?",
-                         (17, payload))
-        statement, parameters = connection.execute.call_args.args
-        compiled = statement.compile(dialect=dialect)
-        self.assertEqual(str(compiled), "SELECT '?' AS literal, [question?] FROM #jobs WHERE id=? AND note=?")
-        self.assertEqual([parameters[key] for key in compiled.positiontup], [17, payload])
-        self.assertNotIn(payload, str(compiled))
-        connection.exec_driver_sql.assert_not_called()
-        adapter._execute(connection, 'INSERT INTO #jobs(id,note) VALUES (?,?)', [(1, 'one'), (2, 'two')])
-        statement, parameters = connection.execute.call_args.args
-        self.assertEqual(len(parameters), 2)
-        self.assertEqual(parameters[1], {'wfs_bind_0': 2, 'wfs_bind_1': 'two'})
-
-    def test_oracle_pipeline_keeps_alternative_quotes_and_named_bindings(self):
-        connection = Mock()
-        adapter = OracleAdapter(dict(self.config, dialect='oracle', port=1521))
-        adapter._execute(connection, "SELECT q'[it's ?]' AS label, ? FROM DUAL", ('中文 50%',))
-        statement, parameters = connection.execute.call_args.args
-        compiled = statement.compile(dialect=OracleDialect_oracledb(paramstyle='named'))
-        self.assertEqual(str(compiled), "SELECT q'[it's ?]' AS label, :wfs_bind_0 FROM DUAL")
-        self.assertEqual(parameters, {'wfs_bind_0': '中文 50%'})
-        # SQLAlchemy's dialect supplies credentials; structured connect args
-        # override its default TCP DSN for TLS without dropping service_name.
-        fake_dbapi = SimpleNamespace(makedsn=lambda host, port, **kwargs: 'generated-tcp-descriptor')
-        dialect = OracleDialect_oracledb()
-        dialect.dbapi = fake_dbapi
-        _, generated = dialect.create_connect_args(adapter.build_url())
-        with patch('ssl.create_default_context', return_value='verified-test-context'):
-            secure = OracleAdapter(dict(self.config, dialect='oracle', port=1521, tls='verify_identity', ssl_ca='/ca.pem'))
-            generated.update(secure.connection_options())
-        self.assertIsNone(generated['dsn'])
-        self.assertEqual(generated['user'], self.config['user'])
-        self.assertEqual(generated['password'], self.config['password'])
-        self.assertEqual((generated['protocol'], generated['service_name']), ('tcps', 'reports'))
-
     def test_postgresql_dollar_quotes_and_mysql_comments_do_not_consume_parameters(self):
         sql, params, native = SQLAlchemyAdapter._prepare_statement(
             "SELECT $$literal ? ' quote$$, $tag$?$tag$, ?", (5,), 'postgresql')
@@ -120,8 +63,9 @@ class BusinessDatabaseAdapterTests(unittest.TestCase):
     def test_colon_text_in_literals_and_comments_is_not_a_bound_parameter(self):
         from sqlalchemy import text
         for dialect_name, dialect, sql in (
-            ('sqlserver', MSDialect_pyodbc(paramstyle='qmark'), "SELECT ' :literal' AS x, ? AS y -- :comment"),
-            ('oracle', OracleDialect_oracledb(paramstyle='named'), "SELECT q'[ :literal]' AS x, ? AS y FROM DUAL /* :comment */"),
+            ('postgresql', PGDialect_psycopg(), "SELECT ' :literal' AS x, ? AS y -- :comment"),
+            ('mysql', MySQLDialect_pymysql(), "SELECT ' :literal' AS x, ? AS y /* :comment */"),
+            ('gaussdb', DWSDialect(), "SELECT ' :literal' AS x, ? AS y /* :comment */"),
         ):
             with self.subTest(dialect=dialect_name):
                 statement, values, native = SQLAlchemyAdapter._prepare_statement(sql, (7,), dialect_name)
@@ -154,11 +98,9 @@ class BusinessDatabaseAdapterTests(unittest.TestCase):
         fake_driver = SimpleNamespace(pooling=True)
         with patch.dict('sys.modules', {'pyodbc': fake_driver}), \
                 patch('importlib.util.find_spec', return_value=object()):
-            for family in ('gaussdb', 'sqlserver'):
-                fake_driver.pooling = True
-                adapter = adapter_for(dict(self.config, dialect=family))
-                self.assertFalse(fake_driver.pooling)
-                self.assertIsNone(adapter._engine)
+            adapter = adapter_for(dict(self.config, dialect='gaussdb'))
+            self.assertFalse(fake_driver.pooling)
+            self.assertIsNone(adapter._engine)
             fake_driver.pooling = True
             self.assertIs(DWSDialect.import_dbapi(), fake_driver)
             self.assertFalse(fake_driver.pooling)
@@ -171,7 +113,20 @@ class BusinessDatabaseAdapterTests(unittest.TestCase):
         with patch('app.common.db.catalog.installed_odbc_drivers', return_value=['DWS']):
             catalog = {item['dialect']: item for item in capabilities()}
         self.assertNotIn('verify_identity', catalog['gaussdb']['tls_modes'])
-        self.assertFalse(catalog['sqlserver']['ca_file'])
+        self.assertFalse(catalog['gaussdb']['ca_file'])
         self.assertFalse(catalog['clickhouse']['transactions'])
-        self.assertEqual(catalog['oracle']['database_label'], '服务名（Service Name）')
-        self.assertFalse(catalog['sqlserver']['driver_ready'])
+        self.assertEqual(catalog['gaussdb']['database_label'], '数据库名称')
+        self.assertNotIn('oracle', catalog)
+        self.assertNotIn('sqlserver', catalog)
+
+    def test_removed_database_types_cannot_construct_newdb_or_load_a_driver(self):
+        from app.common.db.factory import NewDB, adapter_for
+        for family in ('oracle', 'sqlserver', 'mssql'):
+            with self.subTest(dialect=family), patch('importlib.util.find_spec') as find_driver:
+                profile = dict(self.config, dialect=family)
+                with self.assertRaisesRegex(ValueError, '暂不支持数据库类型'):
+                    adapter_for(profile)
+                with patch('app.common.db.factory.load_database_config', return_value=profile):
+                    with self.assertRaisesRegex(ValueError, '暂不支持数据库类型'):
+                        NewDB('removed-connection')
+                find_driver.assert_not_called()

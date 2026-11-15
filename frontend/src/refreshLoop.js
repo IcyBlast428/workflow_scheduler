@@ -3,6 +3,7 @@ export function createRefreshLoop({load, canRun = () => true, interval = 5000,
   maxInterval = 60000, onError = () => {}, clock = globalThis}) {
   let timer = null, pending = null, active = false, disposed = false, failures = 0;
   function clear() { if (timer !== null) clock.clearTimeout(timer); timer = null; }
+  // 从请求结束后开始计时，而非固定 setInterval，慢请求不会累积成并发轮询。
   function schedule() {
     clear();
     const delay = typeof interval === 'function' ? interval() : interval;
@@ -29,6 +30,7 @@ export function createRefreshLoop({load, canRun = () => true, interval = 5000,
     start(immediate = false) { if (disposed) return; active = true; if (immediate) return refresh(); schedule(); },
     sync() { schedule(); },
     stop() { active = false; clear(); },
+    // 销毁只撤销后续调度，已经发出的请求仍可能完成；调用方需用序号防止旧结果回写。
     dispose() { disposed = true; active = false; clear(); },
   };
 }

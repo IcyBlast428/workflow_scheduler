@@ -1,4 +1,8 @@
-"""Bounded process-local engine cache; DBAPI connections never cross a fork."""
+"""业务引擎缓存，每个任务进程独立持有自己的连接池。
+
+同一进程内重复创建 NewDB 可复用引擎；不同执行进程之间不会复用连接。
+缓存的是引擎和池，不是可由多个线程同时使用的单个连接/事务。
+"""
 from collections import OrderedDict
 import atexit
 import hashlib
@@ -18,6 +22,7 @@ IDLE_SECONDS = 300
 
 
 def engine_for(config, url, connect_args, options=None):
+    """按类型与连接标识复用引擎；配置或证书变化时为后续借用换用新池。"""
     global _pid
     options = options or {}
     if config.get('pool_enabled', True):
@@ -37,6 +42,7 @@ def engine_for(config, url, connect_args, options=None):
             certificate = (stat.st_mtime_ns, stat.st_size)
         except OSError:
             pass
+    # 指纹包含完整配置（含密码）及证书元信息；不可把原始输入输出到监测接口。
     signature = hashlib.sha256(json.dumps([config, str(url), options, certificate], sort_keys=True, default=str).encode()).hexdigest()
     now = time.monotonic()
     with _lock:
@@ -45,6 +51,7 @@ def engine_for(config, url, connect_args, options=None):
                 entry['engine'].dispose(close=False)
             _engines.clear()
             _pid = os.getpid()
+        # dispose 关闭池内空闲连接，不强行关闭已经借出的连接；旧句柄仍自行归还。
         for candidate, entry in list(_engines.items()):
             if now - entry['used'] > IDLE_SECONDS or candidate == key and entry['signature'] != signature:
                 _engines.pop(candidate)['engine'].dispose()
@@ -90,6 +97,7 @@ def engine_for(config, url, connect_args, options=None):
 
 
 def dispose(db_id=None):
+    """淘汰指定或全部引擎缓存；普通 NewDB.close() 不应调用此操作。"""
     with _lock:
         for key in list(_engines):
             if db_id is None or key[1] == db_id:
@@ -97,6 +105,7 @@ def dispose(db_id=None):
 
 
 def _after_fork():
+    # 子进程重建锁并丢弃继承的池；close=False 避免干扰父进程的连接。
     global _lock, _pid
     _lock = threading.RLock()
     for entry in _engines.values():

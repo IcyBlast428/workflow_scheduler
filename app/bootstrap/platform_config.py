@@ -1,4 +1,8 @@
-"""Encrypted bootstrap settings, staged on disk and pinned for the process lifetime."""
+"""平台连接的启动配置：磁盘保存待生效版本，运行进程持有启动时快照。
+
+这里不把配置存入平台数据库，避免切换连接时反过来依赖旧库或新库。
+保存只更新待生效文件；完整服务启动时才向所有子进程分发同一份快照。
+"""
 import base64
 from contextlib import contextmanager
 from copy import deepcopy
@@ -49,6 +53,7 @@ def _cipher(environment=None):
 
 
 def saved(target=None, environment=None):
+    """读取待生效文件或指定快照；存在但无法解密时失败，不能静默改连默认库。"""
     target = path() if target is None else Path(target)
     if not target.exists():
         return defaults(environment)
@@ -65,7 +70,8 @@ def saved(target=None, environment=None):
 
 
 def active():
-    # A staged edit must never split live workers between two databases.
+    """返回本进程固定的启动选项副本，调用方修改副本不会污染后续连接。"""
+    # 同一服务的替补 worker 也读取启动快照，不能直接读取刚保存的待生效文件。
     frozen = os.environ.get('WFS_PLATFORM_ACTIVE_CONFIG_FILE')
     key = (os.getpid(), str(path()), frozen)
     with _guard:
@@ -85,6 +91,7 @@ def public(value):
 
 
 def validate(form, previous=None):
+    """合并已保存值并校验输入；密码留空表示保留，revision 防止覆盖并发编辑。"""
     if not isinstance(form, dict):
         raise ValueError('平台连接配置必须为对象。')
     previous = saved() if previous is None else previous
@@ -132,6 +139,7 @@ def validate(form, previous=None):
 
 @contextmanager
 def _file_lock():
+    """线程锁保护进程内编辑，文件锁串行化多个 Web worker 的保存操作。"""
     target = path()
     target.parent.mkdir(parents=True, exist_ok=True)
     lock_path = target.with_suffix('.lock')
@@ -157,7 +165,8 @@ def _file_lock():
 
 
 def save(value):
-    active()  # Pin the old target even if this is the process's first operation.
+    """在锁内重新比对版本并原子替换密文文件，不改变本次服务的生效配置。"""
+    active()  # 即使本进程首次操作就是保存，也先固定原启动选项。
     with _file_lock():
         previous = saved()
         if value['revision'] != previous['revision']:
@@ -169,6 +178,7 @@ def save(value):
             with temporary.open('xb') as stream:
                 if os.name != 'nt': os.chmod(temporary, 0o600)
                 stream.write(_cipher().encrypt(json.dumps(updated, ensure_ascii=False).encode()))
+                # 先落盘完整密文，再替换正式文件，避免读取到写了一半的配置。
                 stream.flush(); os.fsync(stream.fileno())
             from app.bootstrap.recovery_files import replace_recovery
             replace_recovery(temporary, target)
@@ -196,7 +206,11 @@ if hasattr(os, 'register_at_fork'):
 
 @contextmanager
 def frozen_service_config(data, environment):
-    """Keep every Web/Scheduler worker, including replacements, on one target."""
+    """由服务主进程创建启动快照，所有 Web/Scheduler 及替补进程继承其路径。
+
+    快照随本次服务生命周期清理，不回写待生效文件。service 来源仍按既有
+    Nacos/本地配置规则解析；这里冻结的是页面保存的连接选项。
+    """
     directory = Path(data) / 'platform-runtime'
     source = environment.get('WFS_PLATFORM_CONFIG_FILE', str(Path(data) / 'platform-connection.enc'))
     value = saved(source, environment)

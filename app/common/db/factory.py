@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
+"""任务代码的统一业务数据库入口；类型扩展必须同时注册目录与受审适配器。"""
 
 from app.common.db.config import load_database_config
 from app.common.db.mysql import MySQLAdapter
 from app.common.db.clickhouse import ClickHouseAdapter
-from app.common.db.adapters import PostgreSQLAdapter, GaussDBAdapter, SQLServerAdapter, OracleAdapter
+from app.common.db.adapters import PostgreSQLAdapter, GaussDBAdapter
 from app.common.db.catalog import DATABASES, normalize
 from contextlib import contextmanager
 
@@ -13,12 +14,11 @@ ADAPTERS = {
     'clickhouse': ClickHouseAdapter,
     'postgresql': PostgreSQLAdapter,
     'gaussdb': GaussDBAdapter,
-    'sqlserver': SQLServerAdapter,
-    'oracle': OracleAdapter,
 }
 
 
 def adapter_for(config):
+    """仅实例化固定注册表中的四类适配器，不从页面配置导入任意驱动代码。"""
     import importlib.util
     dialect = normalize(config.get('dialect'))
     if dialect not in ADAPTERS:
@@ -43,6 +43,7 @@ class NewDB:
     """
 
     def __init__(self, db_id):
+        # 授权解析在建引擎之前完成；任务仅使用连接标识，不接受直传账号密码。
         if db_id == 'platform':
             raise ValueError('platform 是平台内部连接，请为任务配置独立的业务连接标识。')
         self.db_id = db_id
@@ -55,6 +56,7 @@ class NewDB:
         return adapter_for(self.config)
 
     def __enter__(self):
+        # with NewDB(...) 管理句柄生命周期，不隐式开启跨多条 SQL 的事务。
         self.get_engine()
         return self
 
@@ -88,6 +90,7 @@ class NewDB:
 
     @contextmanager
     def transaction(self):
+        """显式将多次写入归为同一事务；支持能力由具体适配器决定。"""
         with self._adapter.transaction():
             yield self
 

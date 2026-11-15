@@ -33,6 +33,7 @@ export function useTaskWorkspace(
     onlyFavorites = ref(false),
     selectedTasks = ref([]),
     batchBusy = ref(false);
+  // 收藏、筛选与勾选状态按用户隔离；切换账号时也会使旧请求序号失效。
   const key = () => `wfs:tasks:${identity() || 'anonymous'}`;
   watch(
     identity,
@@ -83,6 +84,7 @@ export function useTaskWorkspace(
     }
   }
 
+  // 静默读取保留当前列表，不切换整页加载状态；序号保证旧响应不能覆盖新筛选。
   async function loadTasks(resetPage = false, options = {}) {
     const serial = ++taskRequestSerial;
     if (resetPage) {

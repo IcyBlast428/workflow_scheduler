@@ -68,26 +68,22 @@ class ConnectionSettingsTests(unittest.TestCase):
         config = settings.validate(dict(self.form, dialect='dws', port=''))
         self.assertEqual((config['dialect'], config['port'], config['driver']), ('gaussdb', 8000, 'DWS'))
         self.assertEqual((config['pool_size'], config['max_overflow']), (1, 1))
-        self.assertEqual(settings.validate(dict(self.form, dialect='oracle', port=''))['port'], 1521)
-        server = settings.validate(dict(self.form, dialect='sqlserver', port='', tls='verify_identity'))
-        self.assertEqual(server['driver'], 'ODBC Driver 18 for SQL Server')
-        self.assertEqual(server['ssl_ca'], '')
         self.assertEqual(settings.validate(dict(self.form, dialect='gaussdb', tls='require'))['tls'], 'require')
         for change in ({'dialect': 'gaussdb', 'tls': 'verify_identity'},
-                       {'dialect': 'sqlserver', 'driver': '/tmp/arbitrary.so'},
-                       {'dialect': 'sqlserver', 'driver': 'Driver;PWD=hidden'},
+                       {'dialect': 'gaussdb', 'driver': '/tmp/arbitrary.so'},
+                       {'dialect': 'gaussdb', 'driver': 'Driver;PWD=hidden'},
                        {'dialect': 'mysql', 'tls': 'require'}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 settings.validate(dict(self.form, **change))
 
-    def test_oracle_probe_needs_only_read_only_select_and_always_closes(self):
-        profile = settings.validate(dict(self.form, dialect='oracle', port=1521))
+    def test_dws_probe_is_read_only_and_always_closes(self):
+        profile = settings.validate(dict(self.form, dialect='gaussdb', port=8000))
         adapter = MagicMock()
         adapter.execute_query_sql.return_value = [(1,)]
         with patch('app.common.db.factory.adapter_for', return_value=adapter), \
                 patch('app.common.db.engine_pool.dispose') as dispose:
             result = settings.probe_business(profile)
-        adapter.execute_query_sql.assert_called_once_with('SELECT 1 FROM DUAL')
+        adapter.execute_query_sql.assert_called_once_with('SELECT version()')
         self.assertTrue(result['ready'])
         adapter.close.assert_called_once()
         dispose.assert_called_once()
@@ -100,6 +96,24 @@ class ConnectionSettingsTests(unittest.TestCase):
         self.assertNotIn('private-host-secret', str(error.exception))
         adapter.close.assert_called_once()
         dispose.assert_called_once()
+
+    def test_removed_types_rejected_by_validation_and_admin_api_before_probe(self):
+        app = create_app()
+        client = app.test_client()
+        login = client.post('/api/user/login', json={'username': 'admin', 'password': 'test-password'})
+        headers = {'X-CSRF-Token': login.json['data']['csrf_token']}
+        with patch.object(settings, 'probe_business') as probe:
+            for family in ('oracle', 'sqlserver', 'mssql'):
+                form = dict(self.form, dialect=family)
+                with self.subTest(dialect=family):
+                    with self.assertRaisesRegex(ValueError, '不支持'):
+                        settings.validate(form)
+                    for action in ('test', 'save'):
+                        response = client.post('/api/admin/database-connections/' + action,
+                                               json=form, headers=headers)
+                        self.assertEqual(response.status_code, 400, response.json)
+            probe.assert_not_called()
+        self.assertEqual(settings.profiles(), {})
 
     def test_admin_only_connection_api_csrf_and_failed_save(self):
         app = create_app()

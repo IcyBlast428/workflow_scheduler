@@ -8,6 +8,7 @@ import ast
 from pathlib import Path
 
 POLICY_VERSION = 1
+# 这是禁止绕过 NewDB 的驱动名单，不是支持类型目录；移除适配器时不要同步放行。
 DRIVERS = frozenset({'pymysql', 'psycopg', 'psycopg2', 'pyodbc', 'pymssql', 'oracledb',
                      'cx_Oracle', 'clickhouse_connect', 'clickhouse_driver', 'asyncpg',
                      'aiomysql', 'aiosqlite', 'sqlite3', 'pg8000', 'mariadb', 'duckdb'})
@@ -23,6 +24,7 @@ def _forbidden_module(name):
 
 def inspect_source(source, path='main.py'):
     tree = ast.parse(source, filename=path)
+    # 解析常见 import 别名，供后续调用检查定位；不执行源码或导入任务依赖。
     aliases, findings = {}, {}
 
     def report(node, name):
@@ -83,6 +85,7 @@ def inspect_tree(root):
 
 
 def enforce(root):
+    """发布阶段调用的规范门禁；静态检查不能替代任意 Python 代码的安全隔离。"""
     report = inspect_tree(root)
     if report['violations']:
         locations = '；'.join(f"{item['path']}:{item['line']}（{item['symbol']}）" for item in report['violations'][:6])

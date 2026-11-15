@@ -63,7 +63,7 @@ test('business profile failures preserve masked passwords',async({page})=>{
 });
 test('supported types and real PostgreSQL pool settings persist',async({page})=>{
  await login(page,'admin','/admin/#connections');await page.getByRole('button',{name:/pg_browser/}).click();
- await expect(page.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveText(['MySQL / PolarDB / MariaDB','PostgreSQL','GaussDB / DWS（ODBC）','SQL Server','Oracle','ClickHouse']);
+ await expect(page.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveText(['MySQL / PolarDB / MariaDB','PostgreSQL','GaussDB / DWS（ODBC）','ClickHouse']);
  await expect(page.getByLabel('数据库类型',{exact:true})).toHaveValue('postgresql');await page.getByText('连接池设置',{exact:true}).click();
  await expect(page.getByLabel('常驻连接上限',{exact:true})).toHaveValue('2');await page.getByRole('button',{name:'测试并保存',exact:true}).click();
  await expect(page.locator('.connection-panel').getByRole('status')).toContainText('业务连接已保存');await page.reload();await page.getByRole('button',{name:/pg_browser/}).click();

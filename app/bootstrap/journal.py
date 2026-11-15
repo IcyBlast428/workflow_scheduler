@@ -65,6 +65,7 @@ def _records(directory, sql, params=()):
     except Exception:
         logger.warning('GaussDB journal unavailable; retained recovery files remain pending', exc_info=True)
         rows = []
+    # 未补写的恢复文件可能比数据库行更新；合并时必须让同 run_id 的文件覆盖旧行。
     by_id = {row['run_id']: row for row in rows}
     by_id.update({row['run_id']: row for row in _spooled(directory)})
     rows = list(by_id.values())
@@ -92,10 +93,16 @@ def read(directory, run_id):
     return json.loads(row[0]) if row else None
 
 def write(directory, record, terminal):
+    """先落可恢复文件，再写平台索引；索引写入失败时保留文件供后台重试。
+
+    pending 同时涵盖执行状态未同步和终态历史未保存，
+    不能仅因进程结束就把记录标为可清理。
+    """
     pending = not record.get('db_synced') or (record['status'] in terminal and (not record.get('history_saved')))
     run_id = record['run_id']
     path = record.get('log_path') or f"logs/{record['created_at'][:10]}/{run_id[:2]}/{run_id}.log"
     record['log_path'] = path
+    # _spool 会刷新文件并替换目录项；顺序不可与数据库写入/文件删除对调。
     _spool(directory, record)
     try:
         with connection(directory) as db:
@@ -120,6 +127,7 @@ def active(directory):
     return [row for row in _records(directory, "SELECT payload FROM journal WHERE status IN ('running','queued')") if row['status'] in ('running', 'queued')]
 
 def expire(directory, cutoff, limit):
+    # 仅清理已完成同步的旧终态记录；正在运行或仍待补写的内容不受年龄阈值淘汰。
     with connection(directory) as db:
         rows = db.execute("SELECT run_id,log_path FROM journal WHERE created_at<? AND pending=0 AND status NOT IN ('running','queued') ORDER BY created_at LIMIT ?", (cutoff, limit)).fetchall()
         for run_id, relative in rows:

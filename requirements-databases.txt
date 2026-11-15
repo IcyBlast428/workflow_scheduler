@@ -2,7 +2,4 @@
 -r requirements.txt
 psycopg[binary]==3.3.6
 clickhouse-connect[sqlalchemy]==1.11.0
-
-# Optional Oracle Thin driver; install in Web tester and task environment when used.
-oracledb>=3.0,<4
-# SQL Server / GaussDB use pyodbc from requirements.txt plus a system ODBC driver.
+# GaussDB / DWS uses pyodbc from requirements.txt plus the vendor ODBC driver.

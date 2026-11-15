@@ -19,6 +19,7 @@ def snapshot(pid=None):
     return [dict(zip(('id', 'pid', 'kind', 'status', 'context', 'created_at', 'due_at', 'run_id', 'message', 'expires_at'), r)) for r in rows]
 
 def enqueue(pid, kind, context, actor, identifier=None, delay=0):
+    """先持久化请求及到期时间；入队成功不等同于业务进程已经启动。"""
     policy = load('task', pid)
     if kind not in ('trial', 'backfill', 'manual', 'retry'):
         raise ValueError('执行类型无效。')
@@ -62,6 +63,7 @@ def retry_result(record):
     attempt = int(record.get('retry_attempt', 0))
     if record['status'] != 'failed' or record.get('source') == 'trial' or (not policy['idempotent']) or (not policy['retry_enabled']) or (attempt >= policy['retry_limit']) or (not record.get('code_version', {}).get('task_release')):
         return
+    # 同一次失败只能生成一个后继重试；指数延迟避免持续失败的任务挤占队列。
     key = 'retry_' + record['run_id']
     with admission.store() as db:
         if db.execute('SELECT 1 FROM work_requests WHERE id=?', (key,)).fetchone():
@@ -80,6 +82,7 @@ def enqueue_scheduled(job, planned):
     from pathlib import Path
     pid = job.args[1]
     planned = business_time(planned)
+    # 任务与计划时刻共同确定身份，重收同一次计划不会产生第二个请求。
     identifier = 'schedule_' + hashlib.sha256((pid + '|' + str(planned)).encode()).hexdigest()
     policy = load('dispatch')
     task_policy = load('task', pid)
@@ -88,6 +91,7 @@ def enqueue_scheduled(job, planned):
         window = min(window, job.misfire_grace_time)
     expiry = planned + dt.timedelta(seconds=window)
     stagger = task_policy['stagger_seconds']
+    # 稳定偏移让任务跨重启保持错峰；不使用每次变化的随机数。
     offset = int(hashlib.sha256(pid.encode()).hexdigest(), 16) % (stagger + 1) if stagger else 0
     due = planned + dt.timedelta(seconds=offset)
     now = business_now()
@@ -132,6 +136,7 @@ def _dispatch(recover=False):
     now = business_now()
     with admission.store() as db:
         if recover:
+            # dispatching 可能已经启动业务，重启后只能标为待核对，不能重放。
             db.execute("UPDATE work_requests SET status='unknown',message='重启前派发未确认；请核对执行记录，不会自动重放。' WHERE status='dispatching'")
         db.execute("UPDATE work_requests SET status='expired',message='已超过允许启动的时间，未派发；请核对业务是否需要补跑。' WHERE status='pending' AND expires_at<>'' AND expires_at<=?", (str(now),))
         db.execute("DELETE FROM work_requests WHERE id IN (SELECT id FROM work_requests WHERE status IN ('accepted','expired','rejected','cancelled') AND created_at<? LIMIT 1000)", (str(now - dt.timedelta(days=7)),))
@@ -152,6 +157,7 @@ def _dispatch(recover=False):
         if expiry and str(business_now()) >= expiry:
             continue
         with admission.store() as db:
+            # 条件更新是领取请求的边界；状态已被取消或领取时跳过。
             cursor = db.execute("UPDATE work_requests SET status='dispatching',message='' WHERE id=? AND status='pending'", (identifier,))
             if not cursor.rowcount:
                 continue
@@ -167,6 +173,7 @@ def _dispatch(recover=False):
             from app.bootstrap.runtime_metrics import record_delay
             record_delay('queue:dispatch_wait', created, business_now())
         except (admission.CapacityUnavailable, admission.MaintenanceClosed) as exc:
+            # 明确未获准启动才退回 pending；稍后重试并继续寻找未受组配额阻挡的任务。
             with admission.store() as db:
                 db.execute("UPDATE work_requests SET status='pending',due_at=?,message=? WHERE id=?", (str(business_now() + dt.timedelta(seconds=1)), str(exc).replace('本次调度跳过', '等待名额').replace('本次计划跳过', '等待名额'), identifier))
             if isinstance(exc, admission.MaintenanceClosed) or not dispatch_control.available_slots():
