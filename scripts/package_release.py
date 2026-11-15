@@ -14,7 +14,7 @@ SOURCE_DIRS = {'app', 'frontend', 'scripts', 'deploy', 'docs', 'schema', 'exampl
 SOURCE_FILES = {'README.md', 'START-HERE.md', 'DATABASE.md', 'deploy.sh', 'run.py', 'run.sh', 'run.bat',
                 'gunicorn.conf.py', 'backend_dev_runner.py', 'requirements.txt', 'requirements-test.txt',
                 'requirements-databases.txt', 'requirements-linux-py312.lock', '.gitattributes', '.gitignore',
-                '.gitlab-ci.yml', 'wfs.service', 'wfs-scheduler.service'}
+                '.gitlab-ci.yml', 'wfs.service'}
 BLOCKED = {'node_modules', '__pycache__', '.git', '.venv', 'test-results', 'playwright-report', '.pytest_cache'}
 
 
@@ -23,6 +23,7 @@ def permitted(name):
     return (not path.is_absolute() and '..' not in path.parts and '\\' not in name
             and not BLOCKED.intersection(path.parts)
             and not path.name.startswith('.env') and path.name != 'runtime.env'
+            and path.name != 'wfs-scheduler.service'
             and path.suffix not in ('.pyc', '.pyo', '.log', '.zip')
             and (path.parts[0] in SOURCE_DIRS or name in SOURCE_FILES)
             and not name.startswith('app/jobs/'))
@@ -65,7 +66,8 @@ def collect(root=ROOT):
             blob = blob.replace(b'\r\n', b'\n')
         payload[name] = blob
     for required in ('START-HERE.md', 'deploy.sh', 'scripts/deploy.py', 'schema/gauss.sql',
-                     'app/dist/index.html', 'app/dist/.vite/manifest.json', 'requirements-linux-py312.lock'):
+                     'app/dist/index.html', 'app/dist/.vite/manifest.json', 'app/dist/unsupported-browser.html',
+                     'scripts/serve.py', 'wfs.service', 'requirements-linux-py312.lock'):
         if required not in payload:
             raise ValueError('Missing required file: ' + required)
     # Catch a mismatched HTML/manifest/chunk bundle before handing off the ZIP.

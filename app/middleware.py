@@ -6,6 +6,7 @@ from app.bootstrap.global_vars import error_msg
 from app.bootstrap.auth_sessions import is_session_active
 from app.bootstrap.permissions import identity, allowed
 from app.bootstrap.operations import audit
+from app.browser_support import reject_unsupported_browser
 
 
 PUBLIC_API_PATHS = {
@@ -26,6 +27,9 @@ def init_middleware(app):
     @app.before_request
     def print_request_info():
         g.request_started = time.monotonic()
+        unsupported = reject_unsupported_browser(app)
+        if unsupported is not None:
+            return unsupported
         if request.method != 'OPTIONS' and request.path.startswith('/api') and 'favicon.ico' not in request.full_path:
             if request.path in PUBLIC_API_PATHS:
                 return None
@@ -92,6 +96,7 @@ def init_middleware(app):
                         app.logger.exception('runtime read model refresh deferred')
         if request.path.startswith('/static/') and resp.status_code >= 400:
             resp.headers['Cache-Control'] = 'no-store'
+        resp.vary.add('User-Agent')
         resp.headers['X-Content-Type-Options'] = 'nosniff'
         resp.headers['Referrer-Policy'] = 'same-origin'
         return resp

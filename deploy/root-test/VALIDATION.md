@@ -4,4 +4,4 @@
 
 后端运行 python scripts/test_backend.py，浏览器运行 python scripts/run_browser_tests.py。测试每次建立独立 schema，无文件数据库模拟。当前结果见 docs/fresh-gauss-audit.md。
 
-现场验收：核对产品和驱动版本；用空 schema 初始化 32 表；检查两项 systemd 服务与单调度实例；配置业务库、GitLab、私有 PyPI；审查发布低风险任务并验证日志与输出；测试事务、锁等待、断库恢复、超时和重启；在新库演练原生备份恢复并核对外部业务结果。结果不确定的任务不自动重放。
+现场验收：核对产品和驱动版本；用空 schema 初始化 32 表；检查 wfs.service 与单调度实例；配置业务库、GitLab、私有 PyPI；审查发布低风险任务并验证日志与输出；测试事务、锁等待、断库恢复、超时和重启；在新库演练原生备份恢复并核对外部业务结果。结果不确定的任务不自动重放。

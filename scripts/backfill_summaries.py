@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from app.bootstrap.run_summary import backfill
-from app.bootstrap import journal, operations
 
 
 if __name__=='__main__':

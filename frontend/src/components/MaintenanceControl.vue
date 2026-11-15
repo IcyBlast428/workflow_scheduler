@@ -12,7 +12,7 @@
 </section>
 </template>
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, onBeforeUnmount } from 'vue';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 const props=defineProps({compact:Boolean,confirm:{type:Function,required:true}});

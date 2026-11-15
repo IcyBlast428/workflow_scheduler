@@ -3,12 +3,12 @@
 set -euo pipefail
 MODE=deploy
 if [[ "${1:-}" == --prepare || "${1:-}" == --activate ]]; then MODE="${1#--}"; shift; fi
-REF="${1:?Usage: sudo bash scripts/deploy_release.sh [--prepare|--activate] <commit-or-ref> [deployment-root]}"
+REF="${1:?Usage: sudo bash scripts/deploy_release.sh [--prepare|--activate] <commit-or-ref> <deployment-root>}"
 SOURCE_ROOT="$(git rev-parse --show-toplevel)"
-BASE="$(realpath -m "${2:-/data/wfs}")"
+BASE="$(realpath -m "${2:?Immutable release deployment requires an explicit separate root; fixed-directory installs use deploy.sh.}")"
 [[ "$BASE" != / && "$BASE" != "$SOURCE_ROOT" && "$BASE" != "$SOURCE_ROOT/"* && "$SOURCE_ROOT" != "$BASE/"* ]] || { echo 'Deployment root must be separate from the source checkout.' >&2; exit 2; }
 [[ $EUID == 0 ]] || { echo 'Run as root to switch and restart systemd services.' >&2; exit 2; }
-CONFIG="${WFS_DEPLOY_CONFIG:-/etc/wfs/wfs.env}"
+CONFIG="${WFS_DEPLOY_CONFIG:?Set the absolute configuration path for this separate immutable-release installation.}"
 PYTHON="${WFS_DEPLOY_PYTHON:-python3.12}"
 WEB_PORT="${WFS_DEPLOY_WEB_PORT:-8008}"
 CONTROL_PORT="${WFS_DEPLOY_CONTROL_PORT:-8009}"
@@ -44,7 +44,7 @@ if [[ "$MODE" != activate ]]; then
   npm --prefix frontend test
   npm --prefix frontend run build
   # Driver configuration is release-local and remains valid after a rollback.
-  .venv/bin/python -c 'from pathlib import Path; import sys; p=Path("app/config/driver/dws_odbc/etc/odbcinst.ini"); p.write_text(p.read_text().replace("/data/wfs/current",sys.argv[1]))' "$RELEASE"
+  .venv/bin/python -c 'from pathlib import Path; import sys; p=Path("app/config/driver/dws_odbc/etc/odbcinst.ini"); p.write_text("[DWS]\nDriver64="+sys.argv[1]+"/app/config/driver/dws_odbc/lib/odbc/psqlodbcw.so\nsetup="+sys.argv[1]+"/app/config/driver/dws_odbc/lib/odbc/psqlodbcw.la\n")' "$RELEASE"
   printf '%s\n' "$SHA" > "$RELEASE/.release-ready.pending"
   chown -R root:wfs "$RELEASE"
   chmod -R g-w,o-rwx "$RELEASE"
@@ -55,14 +55,18 @@ if [[ "$MODE" != activate ]]; then
   fi
 fi
 [[ -f "$RELEASE/.release-ready" && "$(cat "$RELEASE/.release-ready")" == "$SHA" && "$(cat "$RELEASE/.release-revision")" == "$SHA" ]] || { echo 'Release is not a completed, matching prepared build.' >&2; exit 2; }
-for unit in wfs.service wfs-scheduler.service; do
-  [[ "$(systemctl show --property=LoadState --value "$unit")" == loaded ]] || { echo 'Install both systemd units before activation.' >&2; exit 2; }
+for unit in wfs.service; do
+  [[ "$(systemctl show --property=LoadState --value "$unit")" == loaded ]] || { echo 'Install wfs.service before activation.' >&2; exit 2; }
   active_state="$(systemctl show --property=ActiveState --value "$unit")"
   if [[ "$active_state" != inactive && "$active_state" != failed ]]; then
-    echo 'Activation requires a stopped maintenance window: drain tasks, stop both services, and back up database/shared data first.' >&2
+    echo 'Activation requires a stopped maintenance window: drain tasks, stop wfs.service, and back up database/shared data first.' >&2
     exit 2
   fi
 done
+legacy_state="$(systemctl show --property=ActiveState --value wfs-scheduler.service)"
+legacy_enabled="$(systemctl show --property=UnitFileState --value wfs-scheduler.service)"
+[[ "$legacy_state" == inactive || "$legacy_state" == failed || -z "$legacy_state" ]] || { echo 'Stop the legacy scheduler before activation.' >&2; exit 2; }
+[[ "$legacy_enabled" == disabled || "$legacy_enabled" == masked || "$legacy_enabled" == static || -z "$legacy_enabled" ]] || { echo 'Disable the legacy scheduler before activation.' >&2; exit 2; }
 mkdir -p "$BASE/shared/logs" "$BASE/shared/data"
 if [[ -L "$BASE/current" && -d "$BASE/current/data" && -n "$(find "$BASE/current/data" -mindepth 1 -print -quit)" && -z "$(find "$BASE/shared/data" -mindepth 1 -print -quit)" ]]; then
   echo 'Existing current/data needs an offline backup and migration to shared/data.' >&2
@@ -81,10 +85,10 @@ activate() {
 }
 recover() {
   trap - ERR
-  systemctl stop wfs.service wfs-scheduler.service || true
+  systemctl stop wfs.service || true
   if [[ -n "$previous" ]]; then
     activate "$previous"
-    systemctl start wfs-scheduler.service wfs.service || true
+    systemctl start wfs.service || true
     echo "Activation failed; restored previous code $previous. Database changes were not undone; verify recovery." >&2
   else
     echo 'First activation failed; services stopped, release and data retained for diagnosis.' >&2
@@ -92,7 +96,7 @@ recover() {
 }
 trap recover ERR
 activate "$RELEASE"
-systemctl start wfs-scheduler.service wfs.service
+systemctl start wfs.service
 ready=false
 for _ in {1..30}; do
   if curl --max-time 6 --fail --silent "http://127.0.0.1:$CONTROL_PORT/api/user/ready" >/dev/null &&

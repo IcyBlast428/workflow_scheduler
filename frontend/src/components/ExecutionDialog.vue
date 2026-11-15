@@ -49,7 +49,7 @@ import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 import LoadingStatus from './LoadingStatus.vue';
 import { statusLabel, statusClass, emptyExecutionLog } from '../executionLabels';
-const props = defineProps({ embedded: Boolean, runId: { type: String, default: '' }, canOperate:Boolean, retrying:Boolean });
+const props = defineProps({ embedded: Boolean, runId: { type: String, default: '' }, initialExecution: { type: Object, default: null }, canOperate:Boolean, retrying:Boolean });
 defineEmits(['close','retry']);
 const record = ref({}), content = ref(''), error = ref(''), search = ref(''), follow = ref(true), logElement = ref(null);
 const reason = computed(() => String(record.value.reason || '').trim());
@@ -60,33 +60,44 @@ const pageStart=ref(0), logSize=ref(0), logUnavailable=ref(false), historical=re
 let generation = 0;
 const complete=ref(false);
 const filtered = computed(() => search.value ? content.value.split('\n').filter(line => line.toLowerCase().includes(search.value.toLowerCase())).join('\n') : content.value);
+async function applyResult(result, seq) {
+  if (seq !== generation) return;
+  record.value = result.record;
+  if (!content.value) pageStart.value=result.start_offset;
+  logSize.value=result.log_size; logUnavailable.value=result.log_unavailable;
+  content.value += result.content;
+  offset.value = result.next_offset;
+  const encoded=new TextEncoder().encode(content.value);
+  if (encoded.length > 256 * 1024) { let start=encoded.length-256*1024;while((encoded[start]&0xc0)===0x80)start++;content.value=new TextDecoder().decode(encoded.slice(start));pageStart.value=offset.value-(encoded.length-start); }
+  error.value = '';
+  complete.value=!['queued','running'].includes(record.value.status) && !result.has_more;
+  await nextTick();
+  if (seq === generation && follow.value && logElement.value) logElement.value.scrollTop = logElement.value.scrollHeight;
+}
 async function refresh(manual=false) {
   if (!props.runId || inFlight.value || historical.value && manual!==true || document.visibilityState === 'hidden') return;
   inFlight.value = true;
   const seq = generation;
   try {
     const result = await api.execution(props.runId, offset.value);
-    if (seq !== generation) return;
-    record.value = result.record;
-    if (!content.value) pageStart.value=result.start_offset;
-    logSize.value=result.log_size; logUnavailable.value=result.log_unavailable;
-    content.value += result.content;
-    offset.value = result.next_offset;
-    const encoded=new TextEncoder().encode(content.value);
-    if (encoded.length > 256 * 1024) { let start=encoded.length-256*1024;while((encoded[start]&0xc0)===0x80)start++;content.value=new TextDecoder().decode(encoded.slice(start));pageStart.value=offset.value-(encoded.length-start); }
-    error.value = '';
-    await nextTick();
-    if (follow.value && logElement.value) logElement.value.scrollTop = logElement.value.scrollHeight;
-    complete.value=!['queued','running'].includes(record.value.status) && !result.has_more;
+    await applyResult(result, seq);
   } catch (err) { if (seq === generation) error.value = err.message; return false; }
   finally { if (seq === generation) {inFlight.value = false;initialLoading.value = false;} }
 }
 function showPage(position){generation++;inFlight.value=false;complete.value=false;historical.value=position!=='tail';offset.value=position;content.value='';initialLoading.value=true;refresh(true);}
-watch(() => props.runId, () => {
+watch(() => props.runId, async () => {
   contentView.value='logs';outputsVisited.value=false;search.value='';
   generation++; inFlight.value=false;complete.value=false; offset.value = 'tail'; historical.value=false; pageStart.value=0;logSize.value=0;logUnavailable.value=false; content.value = ''; record.value = {}; error.value = '';
   initialLoading.value = Boolean(props.runId);
-  if (props.runId) refresh();
+  if (!props.runId) return;
+  const initial=props.initialExecution;
+  if (initial?.runId === props.runId && initial.data) {
+    // Consume only this opening's response; live polling continues at the next interval.
+    const seq=generation;
+    inFlight.value=true;
+    try { await applyResult(initial.data,seq); }
+    finally { if(seq===generation){inFlight.value=false;initialLoading.value=false;} }
+  } else refresh();
 }, { immediate: true });
 useRefreshLoop({load:refresh,enabled:()=>Boolean(props.runId && !historical.value && !complete.value),interval:1500,immediate:false});
 onUnmounted(() => { generation++; });

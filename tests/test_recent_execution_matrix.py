@@ -26,10 +26,10 @@ class RecentMatrixTests(unittest.TestCase):
                 when=end+dt.timedelta(seconds=index)
                 db.execute_sql('INSERT INTO wfs_run_history(id,pid,state,start_time,end_time) VALUES(?,?,?,?,?)',params=(uuid.uuid4().hex,pids[1],state,when,when))
         with patch.object(recent,'discover_task_specs',return_value=specs):
-            data=recent.cached_snapshot()
+            data=recent.cached_snapshot('10')
             for limit in (25,):
                 with self.subTest(limit=limit):
-                    expanded=recent.cached_snapshot(str(limit))
+                    expanded=recent.cached_snapshot()
                     records=expanded['tasks'][0]['records']
                     self.assertEqual(expanded['limit'],limit)
                     self.assertEqual(len({r['key'] for r in records}),limit)

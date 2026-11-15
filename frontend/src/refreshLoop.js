@@ -5,9 +5,10 @@ export function createRefreshLoop({load, canRun = () => true, interval = 5000,
   function clear() { if (timer !== null) clock.clearTimeout(timer); timer = null; }
   function schedule() {
     clear();
-    if (!disposed && active && canRun())
+    const delay = typeof interval === 'function' ? interval() : interval;
+    if (!disposed && active && canRun() && delay > 0)
       timer = clock.setTimeout(() => { timer = null; refresh(); },
-        Math.min(maxInterval, interval * 2 ** Math.min(failures, 6)));
+        Math.min(maxInterval, delay * 2 ** Math.min(failures, 6)));
   }
   function refresh({manual = false} = {}) {
     if (disposed || (!manual && !canRun())) return Promise.resolve(false);

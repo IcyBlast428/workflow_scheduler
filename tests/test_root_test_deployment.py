@@ -39,20 +39,21 @@ class RootTestDeploymentTests(unittest.TestCase):
                 setup.initialize(Path(temporary), '')
             self.assertFalse((Path(temporary)/'deploy/root-test/runtime.env').exists())
 
-    def test_services_pin_roles_and_share_environment_and_data(self):
-        for role, name in [('web','wfs.service'), ('scheduler','wfs-scheduler.service')]:
-            text = (ROOT/'deploy/root-test'/name).read_text()
-            self.assertIn('User=root\nGroup=root',text)
-            self.assertIn('WorkingDirectory=/data/workflow_scheduler\n',text)
-            self.assertIn('EnvironmentFile=/data/workflow_scheduler/deploy/root-test/runtime.env',text)
-            command = shlex.split(next(line.split('=',1)[1] for line in text.splitlines() if line.startswith('ExecStart=')))
-            self.assertEqual(command[0], '/data/workflow_scheduler/.venv/bin/python')
-            self.assertEqual(command[command.index('--workers')+1], '1' if role=='scheduler' else '2')
-            self.assertEqual(command[command.index('--bind')+1], '127.0.0.1:8009' if role=='scheduler' else '0.0.0.0:8008')
-            self.assertIn('WFS_ENABLE_SCHEDULER='+('true' if role=='scheduler' else 'false'), command)
-            self.assertIn('WFS_DATA_DIR=/data/workflow_scheduler/data',command)
-            self.assertIn('ExecStartPost=', text)
-            self.assertIn('scripts/check_gauss_platform.py', text)
+    def test_service_supervises_both_roles_with_existing_paths_and_listener(self):
+        text = (ROOT/'deploy/root-test/wfs.service').read_text()
+        self.assertIn('User=root\nGroup=root', text)
+        self.assertIn('WorkingDirectory=/data/workflow_scheduler\n', text)
+        self.assertIn('EnvironmentFile=/data/workflow_scheduler/deploy/root-test/runtime.env', text)
+        command = shlex.split(next(line.split('=',1)[1] for line in text.splitlines() if line.startswith('ExecStart=')))
+        self.assertEqual(command[0], '/data/workflow_scheduler/.venv/bin/python')
+        self.assertEqual(command[1], '/data/workflow_scheduler/scripts/serve.py')
+        self.assertEqual(command[command.index('--web-host')+1], '0.0.0.0')
+        self.assertEqual(command[command.index('--data')+1], '/data/workflow_scheduler/data')
+        self.assertIn('Conflicts=wfs-scheduler.service', text)
+        self.assertNotIn('Requires=wfs-scheduler.service', text)
+        self.assertFalse((ROOT/'deploy/root-test/wfs-scheduler.service').exists())
+        self.assertIn('ExecStartPost=', text)
+        self.assertIn('scripts/check_gauss_platform.py', text)
 
     def test_gauss_check_is_read_only_and_rejects_other_platforms(self):
         class Database:

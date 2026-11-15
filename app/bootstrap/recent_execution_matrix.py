@@ -6,7 +6,7 @@ from app.bootstrap.execution_matrix import timestamp
 from app.bootstrap.timebase import business_now
 
 
-def snapshot(limit=10):
+def snapshot(limit=25):
     tasks = [{'pid':spec['pid'], 'name':spec.get('task_name') or spec.get('folder_name') or spec['pid'],
               'group':spec.get('group_name') or '未分组', 'records':[]}
              for spec in sorted(discover_task_specs(),key=lambda spec:(spec.get('group_name',''),spec['pid']))]
@@ -32,7 +32,7 @@ def snapshot(limit=10):
     return {'tasks':tasks,'server_time':timestamp(business_now()),'limit':limit}
 
 
-def cached_snapshot(limit='10'):
+def cached_snapshot(limit='25'):
     from app.bootstrap.snapshot_cache import cached
     if limit not in ('10', '25'):
         raise ValueError('最近执行次数可选 10 或 25。')

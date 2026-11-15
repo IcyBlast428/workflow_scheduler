@@ -15,7 +15,7 @@ class ReleaseTests(unittest.TestCase):
         self.source, self.binaries, fixture = self.root/'source', self.root/'bin', self.root/'fixture'
         for directory in (self.source, self.binaries, fixture/'app/config/driver/dws_odbc/etc', fixture/'app/jobs'):
             directory.mkdir(parents=True)
-        (fixture/'app/config/driver/dws_odbc/etc/odbcinst.ini').write_text('/data/wfs/current/driver')
+        (fixture/'app/config/driver/dws_odbc/etc/odbcinst.ini').write_text('/data/workflow_scheduler/driver')
         def stub(name, body):
             path = self.binaries/name
             path.write_text('#!/bin/bash\n' + body + '\n'); path.chmod(0o755)
@@ -25,6 +25,7 @@ class ReleaseTests(unittest.TestCase):
         stub('sleep', 'exit 0'); stub('curl', '[[ "$TEST_FAILURE" != health ]]')
         stub('systemctl', '''if [[ "$1" == show ]]; then
     if [[ "$*" == *LoadState* ]]; then echo loaded
+    elif [[ "$*" == *UnitFileState* ]]; then echo disabled
     elif [[ "$TEST_ACTIVE" == true ]]; then echo active
     elif [[ "$TEST_ACTIVE" == false ]]; then echo inactive
     else echo "$TEST_ACTIVE"; fi
@@ -76,8 +77,7 @@ SCRIPT
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual((base/'current').resolve(), old)
                 if failure == 'health':
-                    self.assertEqual(self.actions(), ['start wfs-scheduler.service wfs.service',
-                        'stop wfs.service wfs-scheduler.service', 'start wfs-scheduler.service wfs.service'])
+                    self.assertEqual(self.actions(), ['start wfs.service', 'stop wfs.service', 'start wfs.service'])
                 elif failure == 'build':
                     self.assertFalse(self.actions())
 

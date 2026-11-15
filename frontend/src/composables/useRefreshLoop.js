@@ -1,23 +1,23 @@
 import {onMounted, onScopeDispose, watch} from 'vue';
 import {createRefreshLoop} from '../refreshLoop.js';
+import {subscribeRefreshEnvironment} from '../refreshEnvironment.js';
 
 export function useRefreshLoop({load, enabled = () => true, interval = 5000,
-  immediate = true, onError}) {
-  const loop = createRefreshLoop({load, interval, onError,
-    canRun: () => enabled() && !document.hidden && navigator.onLine !== false});
-  const resume = () => { loop.sync(); if (enabled()) loop.refresh(); };
-  watch(enabled, active => { loop.sync(); if (active) loop.refresh(); });
+  immediate = true, onError, onResume, key = () => null}) {
+  const canRun = () => enabled() && !document.hidden && navigator.onLine !== false;
+  const loop = createRefreshLoop({load, interval, onError, canRun});
+  const resume = () => {
+    if (!canRun()) { loop.sync(); return; }
+    onResume?.();
+    return loop.start(true);
+  };
+  watch([enabled, key], ([active]) => { if (active) resume(); else loop.stop(); });
+  if (typeof interval === 'function') watch(interval, () => loop.sync());
+  let unsubscribe;
   onMounted(() => {
-    loop.start(immediate);
-    document.addEventListener('visibilitychange', resume);
-    window.addEventListener('online', resume);
-    window.addEventListener('offline', loop.sync);
+    unsubscribe = subscribeRefreshEnvironment(available => { if (available) resume(); else loop.sync(); });
+    if (enabled()) loop.start(immediate);
   });
-  onScopeDispose(() => {
-    loop.dispose();
-    document.removeEventListener('visibilitychange', resume);
-    window.removeEventListener('online', resume);
-    window.removeEventListener('offline', loop.sync);
-  });
+  onScopeDispose(() => { loop.dispose(); unsubscribe?.(); });
   return loop;
 }

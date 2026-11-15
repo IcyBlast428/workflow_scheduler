@@ -56,7 +56,7 @@ class SimpleDeploymentTests(unittest.TestCase):
                 (root/'units').mkdir(exist_ok=True)
                 (root/'deploy/root-test'/unit).write_text('expected')
                 (root/'units'/unit).write_text('other installation')
-            with self.assertRaises(ValueError):
+            with patch('scripts.install_systemd.assert_legacy_scheduler_retired'), self.assertRaises(ValueError):
                 deploy.assert_units_compatible(root, root/'units')
 
     def test_package_corruption_and_path_escape_fail_before_deployment(self):

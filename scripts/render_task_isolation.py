@@ -1,6 +1,5 @@
 """Render a production Scheduler drop-in. Does not change services or permissions."""
 import argparse
-from pathlib import Path
 import pwd
 
 def render(user):

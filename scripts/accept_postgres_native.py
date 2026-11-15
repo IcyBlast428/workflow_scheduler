@@ -1,6 +1,5 @@
 """Real local PostgreSQL state checks and two safe, disabled-schedule demos."""
 from concurrent.futures import ThreadPoolExecutor
-import json
 from pathlib import Path
 import sys
 import time

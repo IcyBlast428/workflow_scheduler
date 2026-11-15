@@ -5,9 +5,9 @@ import datetime
 import os
 import threading
 import time
-import json
 from pathlib import Path
 from app.bootstrap.global_vars import DATA_DIR
+from app.bootstrap.resource_history import ResourceHistory
 
 
 CPU_SAMPLE_INTERVAL_SECONDS = 5
@@ -27,16 +27,19 @@ class _CpuMonitor:
         self._last_times = None
         self._warning = ''
         self._path = Path(DATA_DIR) / 'metrics.json'
+        self._history = None
+        self._sample_lock = threading.Lock()
+
+    def _history_store(self):
+        if self._history is None or self._history.legacy_path != self._path:
+            self._history = ResourceHistory(self._path, self.retention)
+        return self._history
 
     def start(self):
         with self._lock:
             if self._started:
                 return
-            if self._path.exists():
-                try:
-                    self._samples = [dict(item, time_obj=datetime.datetime.fromisoformat(item['time'])) for item in json.loads(self._path.read_text())]
-                except (OSError, ValueError, TypeError, KeyError):
-                    self._warning = 'Historical resource metrics could not be loaded'
+            self._samples, self._warning = self._history_store().load()
             self._started = True
         # daemon 线程随进程退出，不阻塞 Web/Scheduler 停止。
         thread = threading.Thread(target=self._run, name='wfs-cpu-monitor', daemon=True)
@@ -77,6 +80,11 @@ class _CpuMonitor:
             time.sleep(self.interval)
 
     def _append_sample(self):
+        # A sampling run and its append/compaction are one serialized operation.
+        with self._sample_lock:
+            self._capture_sample()
+
+    def _capture_sample(self):
         current = _read_cpu_times()
         if not current:
             with self._lock:
@@ -110,11 +118,8 @@ class _CpuMonitor:
             self._samples.append(sample)
             self._samples = [item for item in self._samples if item['time_obj'] >= cutoff]
             self._warning = ''
-            retained = [{key:value for key,value in item.items() if key != 'time_obj'} for item in self._samples]
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self._path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(retained), encoding='utf-8')
-        temporary.replace(self._path)
+            retained = self._samples
+        self._history_store().append(sample, retained)
 
 
 def _read_cpu_times():
@@ -278,19 +283,18 @@ def cpu_monitor_snapshot(hours=6, after=''):
     from app.settings import WFS_ENABLE_SCHEDULER, WFS_SCHEDULER_CONTROL_URL
     if not WFS_ENABLE_SCHEDULER and WFS_SCHEDULER_CONTROL_URL:
         from app.bootstrap.snapshot_cache import cached
+        path = Path(DATA_DIR) / 'metrics.json'
         def read():
-            try:
-                return json.loads((Path(DATA_DIR)/'metrics.json').read_text(encoding='utf-8'))
-            except (OSError, ValueError):
-                return []
-        retained = cached('persisted-resource-samples', 2, read, mutable=False)
+            samples, warning = ResourceHistory(path, CPU_RETENTION_SECONDS).load()
+            return [{key: value for key, value in item.items() if key != 'time_obj'} for item in samples], warning
+        retained, warning = cached(('persisted-resource-samples', str(path)), 2, read, mutable=False)
         since = (business_now()-datetime.timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
         latest = retained[-1] if retained else {}
         return {'samples': [item for item in retained if item['time'] >= since and (not after or item['time'] > after)],
                 'current': latest.get('cpu'), 'current_memory': latest.get('memory'),
                 'cursor': latest.get('time', ''), 'incremental': bool(after),
                 'sample_interval_seconds': CPU_SAMPLE_INTERVAL_SECONDS, 'retention_hours': hours,
-                'warning': '' if retained else '等待调度器发布资源采样'}
+                'warning': warning or ('' if retained else '等待调度器发布资源采样')}
     return _cpu_monitor.snapshot(hours=hours, after=after)
 
 

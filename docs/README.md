@@ -16,3 +16,4 @@
 - [执行矩阵](execution-matrix.md)
 - [任务流程分析](task-flow.md)
 - [全新架构检查](fresh-gauss-audit.md)
+- [代码清理与性能优化](repository-cleanup.md)

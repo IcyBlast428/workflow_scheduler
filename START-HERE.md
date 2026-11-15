@@ -20,9 +20,15 @@ bash deploy.sh
 2. 提示设置 admin 登录密码（至少 12 位），自动生成并保存两份独立密钥。
 3. 提示输入 Nacos 地址、用户名、密码和平台数据库标识，默认 `wfsscheduler_wfs`。
 4. 检查 DWS 驱动与数据库，给空 schema 初始化 32 张平台表。已有本版表只检查，不清空、不迁移。
-5. 安装并启动两个服务，检查两项服务就绪，输出访问地址。
+5. 安装并启动唯一的 `wfs.service`；它内部管理 Web 与单实例 Scheduler，检查就绪后输出访问地址。
 
 完成后访问 **`http://服务器IP:8008/`**，用户名 **admin**，密码是刚才设置的密码。8009 只供本机 Web 与 Scheduler 通信。外部访问需要服务器网络允许 8008；脚本不会修改防火墙。
+
+生产目录、Python、数据、日志和驱动路径均统一到 `/data/workflow_scheduler`。普通 HTTP 下也支持手动执行、补跑和试运行；保持 `runtime.env` 中的 `WFS_COOKIE_SECURE=false`。原本使用另一套 service 的安装，请先按 [已有安装更新说明](docs/systemd-deployment.md#4-从双服务迁移及更新已有安装) 核对原配置与数据位置。
+
+生产只需要安装一个 `wfs.service`，无需再安装 `wfs-scheduler.service`。新版本不会打包旧调度 service；从双服务升级时，请先按 [迁移步骤](docs/systemd-deployment.md#4-从双服务迁移及更新已有安装) 停用旧服务，避免它重新启动。
+
+IE、IE 兼容模式和 Edge 的 IE 模式会显示浏览器更换提示。已知 IE 标识会被服务端直接拒绝，提示页无需 JavaScript；前端同时检测兼容模式。请使用 Google Chrome 或新版 Microsoft Edge。
 
 ## 依赖仓库与离线安装
 
@@ -47,7 +53,7 @@ bash deploy.sh install --skip-dependencies
 
 | 命令 | 用途 |
 | --- | --- |
-| `bash deploy.sh status` | 查看两个服务状态 |
+| `bash deploy.sh status` | 查看 wfs.service 状态 |
 | `bash deploy.sh logs` | 查看最近 100 条服务日志 |
 | `bash deploy.sh check` | 只读检查依赖、配置、DWS 驱动和表结构 |
 | `bash deploy.sh stop` | 停止 Web 和 Scheduler；先在页面维护并排空任务 |
@@ -68,7 +74,7 @@ bash deploy.sh install --skip-dependencies
 
 ## 更新与备份
 
-这是全新安装入口。已有安装不要直接用 ZIP 覆盖运行目录：先进入维护、排空执行、停止两个服务，备份数据库、`data/`、`logs/` 和 `deploy/root-test/runtime.env`，再按运维方案更新代码。固定密钥必须保留。脚本不会自动进行数据库版本升级或回滚。
+这是全新安装入口。已有安装不要直接用 ZIP 覆盖运行目录：先进入维护、排空执行、停止 wfs.service（旧版迁移时同时停用旧调度服务），备份数据库、`data/`、`logs/` 和 `deploy/root-test/runtime.env`，再按运维方案更新代码。固定密钥必须保留。脚本不会自动进行数据库版本升级或回滚。
 
 ZIP 不包含本机任务、账号、密钥、日志、输出、虚拟环境或 Git 历史；旧集成配置中的账号信息已替换为空模板。`PACKAGE-MANIFEST.json` 记录每个文件摘要以及本包是否包含未提交的工作区修改。本次前端与架构改动均随包包含，不只打包上次 Git 提交。
 

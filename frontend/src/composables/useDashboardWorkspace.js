@@ -9,7 +9,7 @@ export function useDashboardWorkspace({
   handleRequestFailure,
 }) {
   let serial = 0, pending = null;
-  const dashboard = reactive({
+  const initialState = () => ({
     loading: false,
     loaded: false,
     error: '',
@@ -22,8 +22,6 @@ export function useDashboardWorkspace({
       invalid: 0,
       failed_jobs: 0,
     },
-    scheduler: { enabled: false, control_url: '', job_count: 0 },
-    trend: [],
     failure_rank: [],
     recent_runs: [],
     cpu_timeline: {
@@ -35,8 +33,8 @@ export function useDashboardWorkspace({
       retention_hours: 6,
       warning: '',
     },
-    warning: '',
   });
+  const dashboard = reactive(initialState());
   function loadDashboard(options = {}) {
     if (!options.silent) dashboard.loading=true;
     if (pending) return pending;
@@ -48,9 +46,6 @@ export function useDashboardWorkspace({
   }
   async function fetchDashboard(options = {}) {
     const current = ++serial;
-    if (!options.silent) {
-      dashboard.loading = true;
-    }
     dashboard.error = '';
     try {
       const data = await api.dashboard(
@@ -60,8 +55,6 @@ export function useDashboardWorkspace({
       dashboard.loaded = true;
       markBackendHealthy('后端连接正常');
       Object.assign(dashboard.summary, data.summary || {});
-      Object.assign(dashboard.scheduler, data.scheduler || {});
-      dashboard.trend = data.trend || [];
       dashboard.failure_rank = data.failure_rank || [];
       dashboard.recent_runs = data.recent_runs || [];
       const incoming = data.cpu_timeline || {};
@@ -89,7 +82,6 @@ export function useDashboardWorkspace({
         },
         incoming,
       );
-      dashboard.warning = data.warning || '';
       return true;
     } catch (error) {
       if (current !== serial) return;
@@ -105,10 +97,9 @@ export function useDashboardWorkspace({
     }
   }
 
-  const polling=useRefreshLoop({load:()=>loadDashboard({silent:true}),
+  useRefreshLoop({load:()=>loadDashboard({silent:dashboard.loaded}),
     enabled:()=>Boolean(token.value && view.value==='dashboard'),immediate:false});
-  function syncDashboardPolling(){polling.sync();}
-  watch(token,()=>{serial++;pending=null;dashboard.loading=false;});
+  watch(token,()=>{serial++;pending=null;Object.assign(dashboard,initialState());});
   onScopeDispose(()=>{serial++;});
-  return {dashboard,loadDashboard,syncDashboardPolling};
+  return {dashboard,loadDashboard};
 }

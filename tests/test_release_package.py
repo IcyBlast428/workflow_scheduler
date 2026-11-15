@@ -13,7 +13,7 @@ class ReleasePackageTests(unittest.TestCase):
     def test_local_secrets_and_runtime_files_are_excluded(self):
         for name in ('data/environment.json', '.env.local', 'deploy/root-test/runtime.env',
                      'frontend/node_modules/dep.js', 'app/__pycache__/test.pyc',
-                     'frontend/test-results/output.png', '../app/run.py', 'app/jobs/private/main.py'):
+                     'frontend/test-results/output.png', 'wfs-scheduler.service', 'deploy/root-test/wfs-scheduler.service', '../app/run.py', 'app/jobs/private/main.py'):
             self.assertFalse(package.permitted(name), name)
         self.assertTrue(package.permitted('app/dist/static/index-new.js'))
         self.assertTrue(package.permitted('scripts/deploy.py'))

@@ -11,7 +11,7 @@
 .venv/bin/python scripts/service_config.py --environment-file deploy/root-test/runtime.env --data /data/workflow_scheduler/data --logs /data/workflow_scheduler/logs -- .venv/bin/python scripts/check_gauss_platform.py
 ```
 
-空 schema 可由初始化工具创建；非空且没有本版标记的 schema 会被拒绝，无旧数据迁移、兼容建表或自动升级。初始化前停止两项应用服务。目标 GaussDB/DWS 产品和驱动须独立验收事务、主键、表锁、索引与权限。
+空 schema 可由初始化工具创建；非空且没有本版标记的 schema 会被拒绝，无旧数据迁移、兼容建表或自动升级。初始化前停止 wfs.service，旧版迁移还须停用原 wfs-scheduler.service。目标 GaussDB/DWS 产品和驱动须独立验收事务、主键、表锁、索引与权限。
 
 ## DBA 需要提前准备什么
 

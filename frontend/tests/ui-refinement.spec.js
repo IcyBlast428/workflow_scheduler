@@ -18,12 +18,31 @@ test('grouped workbench restores source URL, back navigation and unsaved edits',
  await dialog.getByRole('navigation',{name:'任务工作区'}).getByRole('button',{name:'概览',exact:true}).click();await expect(page).toHaveURL(/detail=description/);await page.goBack();await expect(dialog.getByRole('tab',{name:'查看代码',exact:true})).toHaveAttribute('aria-selected','true');
  await dialog.getByRole('tab',{name:'DDL 与标签',exact:true}).click();await dialog.getByLabel('DDL 内容',{exact:true}).fill('unsaved example');await dialog.getByRole('navigation',{name:'任务工作区'}).getByRole('button',{name:'概览',exact:true}).click();await expect(page.locator('.confirm-modal')).toContainText('未保存');await page.getByRole('button',{name:'继续编辑',exact:true}).click();await expect(dialog.getByLabel('DDL 内容',{exact:true})).toHaveValue('unsaved example');await page.screenshot({path:'test-results/ui-task-workbench.png',fullPage:true});
 });
-test('matrix only renders real rows and keeps labels sticky and columns aligned',async({page})=>{
+test('recent matrix keeps 25 slots, newest results at the bottom and vertical names below them',async({page})=>{
+ await page.setViewportSize({width:1440,height:1200});
  const records=Array.from({length:2},(_,i)=>({key:'r'+i,pid:'task-a',run_id:(''+i).repeat(32),status:i?'failed':'success',time:'2026-11-06 10:00:00'}));
- await page.route('**/api/taskinfo/matrix-recent*',route=>route.fulfill({json:{code:20000,data:{limit:10,tasks:[{pid:'task-a',name:'多层目录任务',group:'第一组',records},{pid:'task-b',name:'输出报告',group:'第一组',records:[]},{pid:'task-c',name:'不同组任务',group:'第二组',records}]}}}));await login(page,'matrix');
- await expect(page.locator('.recent-task')).toHaveCount(3);await expect(page.locator('.recent-task').first().locator('.recent-cell')).toHaveCount(2);await expect(page.locator('.recent-ranks>span')).toHaveText(['1','2']);
- const names=await page.locator('.recent-task-name').evaluateAll(nodes=>nodes.map(n=>({x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y,position:getComputedStyle(n).position})));expect(names[1].x-names[0].x).toBe(42);expect(names[2].x-names[1].x).toBeGreaterThan(42);expect(names.every(n=>n.position==='sticky')).toBe(true);
- await page.getByLabel('仅显示已有行').uncheck();await expect(page.locator('.recent-task').first().locator('.recent-cell')).toHaveCount(10);await page.screenshot({path:'test-results/ui-recent-matrix.png',fullPage:true});
+ const longName='多层目录中的每日业务数据同步任务';
+ await page.route('**/api/taskinfo/matrix-recent*',route=>route.fulfill({json:{code:20000,data:{limit:25,tasks:[{pid:'task-a',name:longName,group:'第一组',records},{pid:'task-b',name:'输出报告',group:'第一组',records:[]},{pid:'task-c',name:'不同组任务',group:'第二组',records}]}}}));await login(page,'matrix');
+ const tasks=page.locator('.recent-task'),cells=tasks.first().locator('.recent-cell'),scroll=page.locator('.recent-scroll');
+ await expect(tasks).toHaveCount(3);await expect(cells).toHaveCount(25);
+ await expect(page.locator('.recent-ranks>span')).toHaveText(Array.from({length:25},(_,i)=>String(25-i)));
+ await expect(tasks.first().locator('.recent-cell:disabled')).toHaveCount(23);
+ await expect(cells.nth(22)).toBeDisabled();await expect(cells.nth(23)).toHaveClass(/failed/);await expect(cells.last()).toHaveClass(/success/);
+ await expect(cells.last()).toHaveAttribute('aria-label',/最近第 1 次/);await expect(cells.nth(23)).toHaveAttribute('aria-label',/最近第 2 次/);
+ await expect(tasks.nth(1).locator('.recent-cell:disabled')).toHaveCount(25);
+ await expect(page.getByLabel('仅显示已有行')).toHaveCount(0);
+ await expect(tasks.first().locator('.recent-task-name')).toHaveAttribute('title',longName+' · task-a');
+ await expect.poll(()=>scroll.evaluate(el=>Math.abs(el.scrollHeight-el.clientHeight-el.scrollTop))).toBeLessThan(2);
+ const names=await page.locator('.recent-task-name').evaluateAll(nodes=>nodes.map(n=>({x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y,position:getComputedStyle(n).position,writing:getComputedStyle(n.firstElementChild).writingMode,previous:n.previousElementSibling?.classList.contains('recent-cell')})));
+ expect(names[1].x-names[0].x).toBe(42);expect(names[2].x-names[1].x).toBeGreaterThan(42);
+ expect(names.every(n=>n.position==='sticky' && n.writing==='vertical-rl' && n.previous)).toBe(true);
+ const glyphHeight=await tasks.first().locator('.recent-task-name span').evaluate(el=>{const range=document.createRange();range.setStart(el.firstChild,0);range.setEnd(el.firstChild,1);return range.getBoundingClientRect().height;});
+ expect(glyphHeight).toBeGreaterThanOrEqual(10);
+ const latest=await cells.last().boundingBox(),rank=await page.locator('.recent-ranks>span').last().boundingBox();
+ expect(names[0].y).toBeGreaterThanOrEqual(latest.y+latest.height);expect(Math.abs(rank.y-latest.y)).toBeLessThan(1);
+ await page.getByLabel('最近执行分类').selectOption('第二组');await expect(tasks).toHaveCount(1);await expect(tasks.locator('.recent-cell')).toHaveCount(25);
+ await page.getByLabel('最近执行分类').selectOption('');
+ await page.screenshot({path:'test-results/ui-recent-matrix.png',fullPage:true});
 });
 test('schedule explains ownership and shows edited values before saving',async({page})=>{
  await login(page);await slow(page).getByRole('button',{name:'更多',exact:true}).click();await page.locator('.action-menu').getByRole('button',{name:'配置',exact:true}).click();const dialog=page.locator('.schedule-modal');await expect(dialog.locator('.configuration-guide')).toContainText('依赖环境');await expect(dialog.locator('#main-file')).not.toBeVisible();await dialog.locator('#task-name').fill('新的展示名称');await expect(dialog.getByLabel('保存前变更摘要')).toContainText('新的展示名称');await expect(dialog.getByLabel('保存前变更摘要')).toContainText('任务名称');await dialog.locator('.entry-override summary').click();await expect(dialog.locator('#main-file')).toBeVisible();await page.screenshot({path:'test-results/ui-schedule-review.png',fullPage:true});

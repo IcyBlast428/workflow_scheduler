@@ -1,4 +1,4 @@
-import { reactive, watch, onScopeDispose } from 'vue';
+import { watch, onScopeDispose } from 'vue';
 import {useRefreshLoop} from './useRefreshLoop.js';
 import { api } from '../api.js';
 import { recentLogDates } from './useLogWorkspace.js';
@@ -12,7 +12,6 @@ export function useLiveUpdates({
   markBackendHealthy,
   handleRequestFailure,
 }) {
-  const liveState = reactive({ connected: false, lastEvent: '' });
   let livePollInFlight = false,
     liveRefreshInFlight = false,
     liveTaskSignature = '',
@@ -35,11 +34,9 @@ export function useLiveUpdates({
     try {
       const payload = await api.events();
       if (stopped || generation !== epoch) return;
-      return await handleLiveSnapshot({ data: JSON.stringify(payload) });
+      return await handleLiveSnapshot(payload);
     } catch (error) {
       if (stopped || generation !== epoch) return;
-      liveState.connected = false;
-      liveState.lastEvent = '正在重连';
       await handleRequestFailure(error);
       return false;
     } finally {
@@ -47,15 +44,13 @@ export function useLiveUpdates({
     }
   }
 
-  const polling=useRefreshLoop({load:pollLiveEvents,enabled:()=>Boolean(token.value && ['tasks','taskLogs','systemLogs'].includes(view.value)),immediate:false});
+  const polling=useRefreshLoop({load:pollLiveEvents,enabled:()=>Boolean(token.value && ['tasks','taskLogs'].includes(view.value)),key:()=>view.value,onResume:()=>{if(view.value==='tasks')tasksDirty=true;if(view.value==='taskLogs')logsDirty=true;}});
   function startLiveEvents(){polling.start(true);}
 
   function stopLiveEvents() {
     epoch++;
     livePollInFlight = false;
     polling.stop();
-    liveState.connected = false;
-    liveState.lastEvent = '';
     liveTaskSignature = '';
     liveLogSignature = '';
     logsDirty = false;
@@ -88,9 +83,9 @@ export function useLiveUpdates({
     try {
       const jobs = [];
 
-      if (view.value === 'tasks' && tasksDirty) {
+      if (view.value === 'tasks' && tasksDirty && !tasks.loading) {
         tasksDirty=false;
-        jobs.push(loadTasks(false, { silent: true }));
+        jobs.push(loadTasks(false, { silent: tasks.loaded === true }));
       }
       if (
         view.value === 'taskLogs' &&
@@ -114,17 +109,7 @@ export function useLiveUpdates({
     }
   }
 
-  function handleLiveSnapshot(event) {
-    let payload = {};
-    try {
-      payload = JSON.parse(event.data || '{}');
-    } catch (error) {
-      return;
-    }
-    liveState.connected = true;
-    liveState.lastEvent =
-      payload.server_time ||
-      new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  function handleLiveSnapshot(payload) {
     markBackendHealthy('后端连接正常');
 
     const nextTaskSignature = JSON.stringify(payload.tasks || []);
@@ -137,10 +122,10 @@ export function useLiveUpdates({
     applyTaskSnapshot(payload.tasks || []);
     return refreshFromLiveSnapshot({ taskChanged, logsChanged });
   }
-  watch(token, (value) => (value ? startLiveEvents() : stopLiveEvents()));
+  watch(token, value => { if (!value) stopLiveEvents(); });
   onScopeDispose(() => {
     stopped = true;
     stopLiveEvents();
   });
-  return { liveState, startLiveEvents, stopLiveEvents };
+  return { startLiveEvents, stopLiveEvents };
 }

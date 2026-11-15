@@ -5,22 +5,36 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def connection_options():
+    """CI may name its disposable service; local runs stay on the isolated loopback DB."""
+    if os.environ.get("WFS_CI_POSTGRES") == "true":
+        if os.environ.get("PGDATABASE") != "wfstest":
+            raise ValueError("Only the disposable CI database wfstest is accepted")
+        host = os.environ.get("PGHOST", "127.0.0.1")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]+", host):
+            raise ValueError("PGHOST must be a single hostname or IP address")
+        password = os.environ["PGPASSWORD"]
+        port = int(os.environ.get("PGPORT", "5432"))
+        if not 1 <= port <= 65535:
+            raise ValueError("PGPORT must be between 1 and 65535")
+    else:
+        config = json.loads((ROOT / "data/gauss-dev/environment.json").read_text())
+        host, port, password = "127.0.0.1", 15433, config["WFS_DB_PASSWORD"]
+    return dict(host=host, port=port, dbname="wfstest", user="wfstest", password=password)
+
+
 def configure(root=None):
     import psycopg
 
-    if os.environ.get("WFS_CI_POSTGRES") == "true":
-        password = os.environ["PGPASSWORD"]
-        port = int(os.environ.get("PGPORT", "5432"))
-    else:
-        config = json.loads((ROOT / "data/gauss-dev/environment.json").read_text())
-        password = config["WFS_DB_PASSWORD"]
-        port = 15433
+    connection = connection_options()
+    password, port, host = connection["password"], connection["port"], connection["host"]
     root = Path(root or tempfile.mkdtemp(prefix="wfs-test-"))
     root.mkdir(parents=True, exist_ok=True)
     schema = "test_" + uuid.uuid4().hex[:16]
@@ -28,7 +42,9 @@ def configure(root=None):
     ini.write_text(
         "[gauss_wfstest_"
         + schema
-        + "]\nuser=wfstest\nhost=127.0.0.1\nport="
+        + "]\nuser=wfstest\nhost="
+        + host
+        + "\nport="
         + str(port)
         + "\npassword=\n"
     )
@@ -53,15 +69,8 @@ def configure(root=None):
     initialize()
 
     def cleanup():
-        with psycopg.connect(
-            host="127.0.0.1",
-            port=port,
-            dbname="wfstest",
-            user="wfstest",
-            password=password,
-            autocommit=True,
-        ) as connection:
-            connection.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
+        with psycopg.connect(**connection, autocommit=True) as database:
+            database.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
 
     atexit.register(cleanup)
     return root
@@ -75,7 +84,7 @@ def business_profile(identifier="pg_reports"):
     return dict(
         id=identifier,
         dialect="postgresql",
-        host="127.0.0.1",
+        host=values["host"],
         port=int(values["port"]),
         database="wfstest",
         user="wfstest",

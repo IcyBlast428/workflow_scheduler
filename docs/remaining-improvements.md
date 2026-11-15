@@ -17,10 +17,10 @@
 | 连接生命周期 | 数据库连接 → 业务库；名称、负责人、用途、环境、引用、测试记录、停用/归档/删除 |
 | 通知核对、问题处理 | 发布与运维设置 → 通知核对；总览 → 填写处理说明 |
 | 版本清理与备份证据 | 账户与操作记录 → 版本占用、备份与恢复记录 |
-| 界面体验 | 关键表单未保存提醒；沿用简化动效开关并减少背景绘制，窄屏布局与发布信息补齐 |
+| 界面体验 | 关键表单未保存提醒；统一深色界面、后台静默刷新，窄屏布局与发布信息补齐 |
 | 持续检查与环境验收 | GitHub CI、临时数据库故障回归、只读目标验收工具 |
 
-上述开关不自动修改已有任务的业务行为，也不自动发布 GitLab 代码。生产数据库仍沿用现有 GaussDB/DWS 配置；应用仍由 Web 与单实例 Scheduler 的 systemd 服务管理。
+上述开关不自动修改已有任务的业务行为，也不自动发布 GitLab 代码。生产数据库仍沿用现有 GaussDB/DWS 配置；应用由一个 `wfs.service` 统一管理 Web 与单实例 Scheduler。
 
 ## 1. 参数、重试与补跑
 
@@ -80,7 +80,7 @@ python scripts/build_task_sdk.py --version 1.0.0 --output /tmp/wfs-sdk-review
 在原 Python **补丁版本**、操作系统和架构下，可从保留制品重建到全新目录：
 
 ```bash
-python scripts/rebuild_task_environment.py   --release /data/wfs/shared/data/task-packages/TASK/releases/VERSION   --destination /data/wfs/rebuilt-envs/TASK-VERSION
+python scripts/rebuild_task_environment.py   --release /data/workflow_scheduler/data/task-packages/TASK/releases/VERSION   --destination /data/workflow_scheduler/rebuilt-envs/TASK-VERSION
 ```
 
 工具先验证 wheels 摘要，再用 `--no-index --require-hashes` 安装并执行依赖一致性检查；目标必须不存在。它不覆盖原环境，也不自动切换调度器。重建成功后仍须做任务业务验收，跨 Python/系统版本应重新准备候选版本。
@@ -133,13 +133,13 @@ GitLab 出站 API 继续只使用 GET。平台代码仍由受控的固定版本 
 
 ```bash
 # 已在页面进入维护模式、活动实例清零，并完成数据库/文件备份
-sudo systemctl stop wfs.service wfs-scheduler.service
-sudo /data/wfs/current/.venv/bin/python scripts/cleanup_versions.py   --environment-file /etc/wfs/wfs.env --data /data/wfs/shared/data   --keep 20 --preview /tmp/wfs-cleanup-review.json
+sudo systemctl stop wfs.service
+sudo /data/workflow_scheduler/.venv/bin/python scripts/cleanup_versions.py   --environment-file /data/workflow_scheduler/deploy/root-test/runtime.env --data /data/workflow_scheduler/data   --keep 20 --preview /tmp/wfs-cleanup-review.json
 # 人工核对候选列表，使用该文件的 fingerprint 和 confirm 原文；不要跳过预览
-sudo /data/wfs/current/.venv/bin/python scripts/cleanup_versions.py   --environment-file /etc/wfs/wfs.env --data /data/wfs/shared/data   --keep 20 --execute --fingerprint '预览指纹' --confirm '预览确认文字'
+sudo /data/workflow_scheduler/.venv/bin/python scripts/cleanup_versions.py   --environment-file /data/workflow_scheduler/deploy/root-test/runtime.env --data /data/workflow_scheduler/data   --keep 20 --execute --fingerprint '预览指纹' --confirm '预览确认文字'
 ```
 
-工具取得 Scheduler 单实例锁，流式检查全部执行引用，发现活动/未恢复执行、容量扫描不完整、指纹变化即拒绝。执行异常时检查 `.cleanup-quarantine`；不得直接清空。核对数据库中的 cleaned 元数据、原目录和备份后再由运维处理残留。完成后统一启动 Scheduler/Web，确认就绪，再由管理员结束维护。
+工具取得 Scheduler 单实例锁，流式检查全部执行引用，发现活动/未恢复执行、容量扫描不完整、指纹变化即拒绝。执行异常时检查 `.cleanup-quarantine`；不得直接清空。核对数据库中的 cleaned 元数据、原目录和备份后再由运维处理残留。完成后启动 `wfs.service`，确认 Web 和 Scheduler 就绪，再由管理员结束维护。
 
 备份工具将策略、授权、执行请求、事件去重、试运行输出与依赖制品纳入现有文件备份。成功生成归档后记录备份时间、位置、大小；恢复校验记录写入目标目录，不改源数据。记录代表工具成功生成/校验文件，**不代表 GaussDB/DWS 数据库导入或业务恢复已验收**。密钥、数据库一致备份和业务核对仍按原恢复流程执行。
 

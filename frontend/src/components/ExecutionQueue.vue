@@ -14,7 +14,7 @@
 </section>
 </template>
 <script setup>
-import { ref,watch,onMounted,onBeforeUnmount } from 'vue';
+import { ref,onMounted,onBeforeUnmount } from 'vue';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 const props=defineProps({confirm:Function,active:{type:Boolean,default:true}});defineEmits(['execution','detail','settings']);

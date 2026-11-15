@@ -121,7 +121,7 @@ watch(displayMode,async()=>{await nextTick();ensureScene();updateScene();});
 watch([category,timeWindow,onlyAbnormal],()=>{updateScene();savePreferences();});
 watch(()=>props.userKey,restorePreferences,{immediate:true});
 watch(selectedPid,()=>{recordLimit.value=200;});
-useRefreshLoop({load,enabled:()=>props.active&&live.value,interval:10000});
+useRefreshLoop({load,enabled:()=>props.active,interval:()=>live.value?10000:0});
 onMounted(()=>{window.addEventListener('wfs:matrix-refresh',refresh);});
 onBeforeUnmount(()=>{disposed=true;++serial;window.removeEventListener('wfs:matrix-refresh',refresh);scene?.dispose();});
 </script>

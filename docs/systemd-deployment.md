@@ -1,80 +1,96 @@
-# systemd + GaussDB/DWS 全新部署
+# systemd + GaussDB/DWS 部署
 
-本手册面向 Linux x86_64、Python 3.12、systemd、unixODBC、目标版本匹配的 DWS ODBC 驱动。应用不需要 Docker；本机 PostgreSQL 测试库可以保留 Docker。
+生产目录统一使用 `/data/workflow_scheduler`，普通 HTTP 访问即可。服务器需具备 Linux x86_64、Python 3.12、systemd、unixODBC，以及与目标版本匹配的 DWS ODBC 驱动。
 
-固定目录 root 部署请使用 [简化部署入口](../START-HERE.md)。下文保留专用账号、版本目录与 HTTPS 代理的运维方案。
-
-## 1. 目录与账号
+## 1. 目录与部署入口
 
 ```text
-/srv/wfs-source/                  源码 checkout，只用于准备发布
-/data/wfs/releases/<SHA>/         平台代码、构建页面、.venv
-/data/wfs/current                当前版本链接
-/data/wfs/shared/data/           任务发布版本、依赖环境、输出、日志和恢复文件
-/data/wfs/shared/logs/           服务文件日志
-/etc/wfs/wfs.env                 固定密钥、管理员密码摘要与 Nacos 配置
+/data/workflow_scheduler/                              平台代码和已构建前端
+/data/workflow_scheduler/.venv/                        Python 环境
+/data/workflow_scheduler/data/                         任务版本、依赖、输出和运行数据
+/data/workflow_scheduler/logs/                         服务文件日志
+/data/workflow_scheduler/deploy/root-test/runtime.env  固定密钥、管理员密码摘要和 Nacos 配置
+/data/workflow_scheduler/scripts/wait_ready.py         服务就绪检查
 ```
 
-首次部署使用全新的数据库/schema 和数据目录。生产使用专用 wfs 系统账号；创建账号、目录，确保 wfs 可写 shared/data 和 shared/logs，可读代码、配置与驱动。不要让任务代码写平台源码。Web 默认 2 worker，Scheduler 固定 1 worker、1 实例。不要开启 reload、preload 或额外调度实例。
+推荐使用 [START-HERE.md](../START-HERE.md) 的 root 引导部署：在项目目录运行 `bash deploy.sh`。它使用 `deploy/root-test/` 下的服务定义，Web 监听 `0.0.0.0:8008`，Scheduler 只监听 `127.0.0.1:8009`。
+
+生产统一安装一个 `wfs.service`。它启动 `scripts/serve.py`，依次拉起单 worker 调度器和双 worker Web，并等待调度器就绪后才开放 Web。任一 Gunicorn 主进程异常退出会清理另一进程，由 systemd 的 `Restart=on-failure` 重启整体；正常停止有超时清理机制。8009 仍作为进程间回环端口，不需要第二份 service。
+
+项目根目录的 `wfs.service` 用于专用 `wfs` 账号和现有反向代理，保持 Web 回环监听；`deploy/root-test/wfs.service` 用于既有 root 直连 HTTP 部署。两套模板使用相同项目、配置、数据与日志路径，请选择与现有账号和监听方式一致的一份。WSL 本机用户服务保持原有方式，不自动迁移或启用自启动。
+
+## 2. GaussDB/DWS 与 HTTP
+
+平台默认连接标识为 `wfsscheduler_wfs`，对应数据库 `wfsscheduler`、schema `wfs`。Nacos 使用 group=`gauss`、dataId=`gauss.wfsscheduler.wfs.json`。数据库由 DBA 提前建立，配置与表结构见 [数据库准备](../deploy/root-test/DATABASE.md)。
+
+根目录服务模板的 ODBC 配置位于 `app/config/driver/dws_odbc/etc/`；引导部署使用 `deploy/root-test/odbc/`。两处 `odbcinst.ini` 都指向 `/data/workflow_scheduler/app/config/driver/dws_odbc/lib/odbc/`。
+
+HTTP 部署使用 `WFS_COOKIE_SECURE=false`，以便浏览器发送登录 Cookie；不要求 HTTPS。前端执行请求编号支持普通 HTTP 环境，不依赖只有安全上下文才提供的 `crypto.randomUUID()`。本机 localhost HTTP 被浏览器视为可信环境，因此不能单凭本机测试判断服务器 HTTP 兼容性。
+
+只有已经配置 HTTPS 代理时，才设置 `WFS_COOKIE_SECURE=true` 或向下述服务生成工具传入 `--https-proxy`。这个选项不会配置证书或代理，也不会改变监听地址。
+
+Nacos 的同进程配置缓存默认 60 秒，可通过 `WFS_NACOS_CONFIG_TTL_SECONDS` 设置为 0–3600 秒。修改连接信息最长需等待缓存有效期，或重启服务立即应用。配置过期且读取失败会报错，不继续使用过期配置。
+
+唯一建表文件是 `schema/gauss.sql`。初始化只对空 schema 建表，已有本版基线只校验，不清空或自动迁移。目标 GaussDB、Nacos 与厂商驱动必须在生产现场验证，本机 PostgreSQL 回归不能替代这一步。
+
+## 3. 专用账号服务与配置预览
+
+root 引导部署无需本节。使用专用账号和现有反向代理的安装，可先生成文件核对：
 
 ```bash
-sudo useradd --system --user-group --create-home --home-dir /var/lib/wfs --shell /usr/sbin/nologin wfs
-sudo install -d -o root -g wfs -m 0750 /etc/wfs /data/wfs/releases
-sudo install -d -o wfs -g wfs -m 0750 /data/wfs/shared/data /data/wfs/shared/logs
-sudo install -o root -g root -m 0600 deploy/wfs.env.example /etc/wfs/wfs.env
-sudoedit /etc/wfs/wfs.env
+cd /data/workflow_scheduler
+.venv/bin/python scripts/install_systemd.py --scope system --output /tmp/wfs-units
 ```
 
-仅首次创建配置文件，后续沿用固定密钥。分别生成 WFS_SECRET_KEY、WFS_CONNECTIONS_KEY，并使用 Werkzeug 的 generate_password_hash 生成管理员摘要。配置仅支持字面量 KEY=value，无 shell 展开。私有 PyPI 使用运维配置的 pip.conf；不要把含凭据的地址写进源码、命令参数或 Git。
+生成文件使用本手册的统一路径和普通 HTTP Cookie 配置，不会安装、启用或重启任何服务。`wfs` 系统账号须已经存在，且能读取代码与驱动、写入 `data/` 和 `logs/`。由系统服务管理器读取的 `runtime.env` 保持 0600，并沿用原有密钥和密码摘要。
 
-## 2. GaussDB/DWS
-
-默认 WFS_DB_ID=wfsscheduler_wfs，表示数据库 wfsscheduler、schema wfs。Nacos 的 group=gauss、data_id=gauss.wfsscheduler.wfs.json，应包含 host、port、db、schema、user、password；生产 password 按现有 Nacos 约定使用 Base64。Base64 是编码，Nacos 访问权限仍须受限。
-
-配置 WFS_NACOS_URL、WFS_NACOS_USERNAME、WFS_NACOS_PASSWORD、WFS_DB_DRIVER=DWS、WFS_STATE_BACKEND=gauss。ODBC 驱动注册名与动态库路径必须匹配；确保服务可读取厂商客户端依赖。本机测试开关 WFS_POSTGRES_TEST 不允许用于生产配置。
-
-Nacos 配置在每个服务进程内默认缓存 60 秒，可通过 `WFS_NACOS_CONFIG_TTL_SECONDS` 调整（0–3600，0 表示每次重新读取配置）。认证令牌按服务返回的有效期提前续期；同进程的并发读取共用缓存，避免重复登录与拉取。收到 401/403 后只重新认证并重试一次；配置过期后若读取失败，会报告错误，不继续使用过期配置。修改连接信息最长需等待缓存有效期；需要立即应用时，重启相关服务进程。已有数据库连接不受缓存刷新直接影响。
-
-唯一建表文件为 schema/gauss.sql。初始化脚本会在事务内检查目标 schema，只对空 schema 建表；已有本版基线只做检查，其他非空 schema 拒绝处理。初始化期间停止 Web 和 Scheduler，使用具有建表权限的部署账户。日常运行账号需具备读写、事务与表锁权限，初始化后可按 DBA 方案收敛建表权限。
-
-从已经准备好依赖的版本目录执行：
+完成配置、数据库校验和文件核对后，安装专用账号服务：
 
 ```bash
-.venv/bin/python scripts/service_config.py --environment-file /etc/wfs/wfs.env   --data /data/wfs/shared/data --logs /data/wfs/shared/logs --   .venv/bin/python scripts/init_database.py
-.venv/bin/python scripts/service_config.py --environment-file /etc/wfs/wfs.env   --data /data/wfs/shared/data --logs /data/wfs/shared/logs --   .venv/bin/python scripts/check_gauss_platform.py
-```
-
-DBA 直接执行 SQL 时需使用一致的 schema，并完整执行 schema/gauss.sql；不要只建部分表。平台采用原生参数化 SQL、数据库事务和命名空间表锁；锁行为参见 [华为 DWS LOCK 文档](https://support.huaweicloud.com/intl/en-us/sqlreference-dws/dws_06_0234.html)。必须在目标 GaussDB 产品、版本和驱动上验证建表、事务、并发与故障恢复；本机协议测试不能替代这一步。
-
-## 3. 准备代码与安装服务
-
-在新版本目录建立 Python 3.12 虚拟环境，通过私有 PyPI 安装 requirements-linux-py312.lock。执行 pip check。前端执行 npm ci、npm test、npm run build，确认 app/dist 随版本完整发布。
-
-```bash
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements-linux-py312.lock
-.venv/bin/python -m pip check
-npm --prefix frontend ci --no-audit --no-fund
-npm --prefix frontend test
-npm --prefix frontend run build
-```
-
-首次安装：把 /data/wfs/current 指向此版本，完成上一节数据库初始化后安装服务。
-
-```bash
-sudo .venv/bin/python scripts/install_systemd.py --scope system   --project /data/wfs/current --environment-file /etc/wfs/wfs.env   --data /data/wfs/shared/data --logs /data/wfs/shared/logs --install --start
-sudo systemctl status wfs.service wfs-scheduler.service
+sudo .venv/bin/python scripts/install_systemd.py --scope system --install --start
+sudo systemctl status wfs.service
 curl --fail http://127.0.0.1:8008/api/user/ready
 curl --fail http://127.0.0.1:8009/api/user/ready
 ```
 
-Scheduler 8009 仅绑定回环。Web 8008 通过现有 HTTPS 代理暴露；生产设置 WFS_COOKIE_SECURE=true。Web 与 Scheduler 必须共用数据库、密钥和持久目录。
+Web 默认 2 个 worker，Scheduler 固定 1 个 worker、1 个实例。两者共用数据库、固定密钥及持久目录，不能开启额外调度实例。
 
-## 4. 平台与任务更新
+## 4. 从双服务迁移及更新已有安装
 
-平台代码由管理员维护。scripts/deploy_release.sh 可准备不可变版本，在维护排空并停止两项服务后检查现有 GaussDB 基线并切换代码；不导入旧数据、不自动升级数据库。部署前 CI 必须完成独立数据库回归。任务使用 GitLab 审查、依赖准备和显式发布，任务新增或修改不需要重新部署平台；删除进入回收流程，输出与已发布代码分离保存。
+先在页面开启维护并排空执行，备份数据库、`data/`、`logs/`、原 `runtime.env`，以及现有 service 和对应 `.service.d/` 覆盖配置。保持原密钥、服务账号与监听范围。停止服务后更新代码与完整 `app/dist/`，包括新增的 `unsupported-browser.html`。
 
-页面入口 HTML 使用 no-store。每个版本须同时部署 HTML、manifest 和全部带摘要资源；前端检测失效模块后给出刷新入口，并保护未保存的表单。
+从旧版双服务切换时，必须先停用旧调度 service：
+
+```bash
+sudo systemctl stop wfs.service wfs-scheduler.service
+sudo systemctl disable wfs-scheduler.service
+```
+
+先检查 `systemctl cat wfs.service wfs-scheduler.service`，将原 service 与 drop-in 文件备份到独立目录。更新代码和配置后，把与当前账号匹配的新 `wfs.service` 安装到 `/etc/systemd/system/wfs.service`。root 直连 HTTP 部署对应命令为：
+
+```bash
+cd /data/workflow_scheduler
+# 先完成上述备份与维护停机，再安装已核对的新定义
+sudo install -m 0644 deploy/root-test/wfs.service /etc/systemd/system/wfs.service
+sudo systemctl daemon-reload
+bash deploy.sh check
+sudo systemctl start wfs.service
+sudo systemctl status wfs.service
+curl --fail http://127.0.0.1:8008/api/user/ready
+curl --fail http://127.0.0.1:8009/api/user/ready
+```
+
+如果使用专用 `wfs` 账号和代理，请采用根目录模板或第 3 节生成的文件，不要更换账号。旧 drop-in 若覆盖 `ExecStart` 等字段，须一并核对调整。旧调度 service 可保留为已禁用文件以便备份对照；新 service 声明冲突以避免同时运行，安装器还会拒绝仍在运行或仍启用自启动的旧调度服务。
+
+以后启动、停止、重启与查日志只操作 `wfs.service`。日常更新无需再重复迁移步骤。首次安装是否随 Linux 服务器开机启动由部署命令决定；这些命令不涉及 Windows/WSL 本机自启动设置。
+
+如果原数据或密钥实际位于旧目录，须停机迁移到统一位置后再修改 service。已有 `.venv` 迁移目录后按锁定依赖重建。部署脚本不会自动搬移或清空运行数据。
+
+页面入口 HTML 使用 no-store；更新后重新载入页面即可获取新资源。前端源代码变更须在构建机运行 `npm --prefix frontend test` 和 `npm --prefix frontend run build` 后打包。
+
+`scripts/deploy_release.sh` 是单独的旧版多版本发布工具，不适用于本手册的固定目录安装。它现在要求明确传入独立发布根目录和 `WFS_DEPLOY_CONFIG`，不会默认使用另一套目录。其 `current/releases/shared` 布局必须与该独立安装的单服务定义匹配，新服务引用的每个版本都必须包含 `scripts/serve.py`。
+
+平台部署与任务发布分开：业务任务依旧按 GitLab 审查、依赖准备、显式发布流程处理，不需要重新部署平台。
 
 ## 5. 运维与备份
 
@@ -87,14 +103,14 @@ Scheduler 8009 仅绑定回环。Web 8008 通过现有 HTTPS 代理暴露；生�
 失败率与耗时采样分开统计：在数据库端按最近 24 小时完成的执行记录聚合，缓存最多 30 秒；失败率为“失败与超时次数 / 成功、失败与超时次数”。取消、中断、跳过、错过和未知结果单列，试运行不计入。没有有效执行时显示“暂无执行”。统计截至时间在页面展示，历史补写会在下一次缓存更新后反映。
 
 ```bash
-sudo journalctl -u wfs.service -u wfs-scheduler.service -n 100
-sudo systemctl stop wfs.service wfs-scheduler.service
+sudo journalctl -u wfs.service -n 100
+sudo systemctl stop wfs.service
 ```
 
-先开启维护模式并排空执行，再停止两项服务。使用目标产品支持的 gs_dump 等工具和同一时间窗口的共享文件备份，示例：
+先开启维护模式并排空执行，再停止 wfs.service。使用目标产品支持的 gs_dump 等工具和同一时间窗口的共享文件备份，示例：
 
 ```bash
-.venv/bin/python scripts/backup_platform.py --data /data/wfs/shared/data  --tasks app/jobs --output /backup/wfs-20261104.zip  --database wfsscheduler --schema wfs --user wfs --host DB_HOST --port 8000 --tool gs_dump
+.venv/bin/python scripts/backup_platform.py --data /data/workflow_scheduler/data  --tasks app/jobs --output /backup/wfs-20261104.zip  --database wfsscheduler --schema wfs --user wfs --host DB_HOST --port 8000 --tool gs_dump
 ```
 
 命令应通过同一生产环境包装器执行，以便备份收据写入 GaussDB。数据库密码使用厂商工具支持的受限认证文件，不放命令行。数据库 dump 含加密业务连接、账户摘要及业务日志，应限制访问；密钥、Nacos、ODBC、pip 配置单独安全保管。

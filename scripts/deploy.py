@@ -18,7 +18,8 @@ sys.path.insert(0, str(ROOT))
 from scripts.service_config import read_environment, serialize_environment
 
 PROJECT = Path('/data/workflow_scheduler')
-UNITS = ('wfs-scheduler.service', 'wfs.service')
+UNITS = ('wfs.service',)
+LEGACY_UNIT = 'wfs-scheduler.service'
 DEFAULT_INDEX = 'http://nexus.immp.icbc/repository/pypi-hosted/simple/'
 
 
@@ -27,13 +28,15 @@ def run(command, **kwargs):
 
 
 def assert_stopped():
-    for unit in UNITS:
+    for unit in (*UNITS, LEGACY_UNIT):
         result = run(['systemctl', 'show', '--property=ActiveState', '--value', unit], capture_output=True, text=True)
         if result.stdout.strip() not in ('', 'inactive', 'failed'):
             raise ValueError('服务仍在运行，请先在页面开启维护并排空任务，再执行 bash deploy.sh stop。')
 
 
 def assert_units_compatible(project=ROOT, unit_dir=Path('/etc/systemd/system')):
+    from scripts.install_systemd import assert_legacy_scheduler_retired
+    assert_legacy_scheduler_retired()
     for name in UNITS:
         target = unit_dir/name
         if target.is_symlink() or target.exists() and target.read_bytes() != (project/'deploy/root-test'/name).read_bytes():
@@ -224,7 +227,7 @@ def install(args):
     environment = production_environment()
     print('[4/5] 检查驱动并初始化空 schema；已有本版表只做校验', flush=True)
     check_database(python, environment, initialize=True)
-    print('[5/5] 安装并启动 Web 与单实例 Scheduler', flush=True)
+    print('[5/5] 安装并启动 wfs.service（Web 与单实例 Scheduler）', flush=True)
     run([python, ROOT/'scripts/setup_root_test.py', '--install'], env=environment)
     ready(python)
     return
@@ -248,14 +251,17 @@ def main():
         parser.error('服务器必须由 systemd 管理服务。')
     if args.action in ('status', 'logs'):
         if args.action == 'logs':
-            run(['journalctl', '-u', UNITS[0], '-u', UNITS[1], '-n', '100', '--no-pager'])
+            run(['journalctl', '-u', UNITS[0], '-n', '100', '--no-pager'])
         else:
             # `status` intentionally preserves systemctl's nonzero exit for stopped services.
             run(['systemctl', 'status', *UNITS, '--no-pager', '--full'])
         return
     with deployment_lock():
         if args.action == 'stop':
-            run(['systemctl', 'stop', 'wfs.service', 'wfs-scheduler.service'])
+            run(['systemctl', 'stop', *UNITS])
+            legacy = run(['systemctl', 'show', '--property=LoadState', '--value', LEGACY_UNIT], capture_output=True, text=True)
+            if legacy.stdout.strip() not in ('', 'not-found'):
+                run(['systemctl', 'stop', LEGACY_UNIT])
             return
         assert_units_compatible()
         if args.action in ('install', 'configure'):
@@ -274,7 +280,7 @@ def main():
             print('依赖、配置、驱动和平台表检查通过；未修改数据库。')
         elif args.action == 'start':
             check_database(python, production_environment())
-            run(['systemctl', 'start', 'wfs-scheduler.service', 'wfs.service'])
+            run(['systemctl', 'start', 'wfs.service'])
             ready(python)
 
 

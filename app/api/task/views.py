@@ -1,20 +1,20 @@
-import os
 from app.bootstrap.timebase import business_now
 import datetime
 import time
 import threading
+from collections import deque
 from urllib.parse import urljoin
 import requests
 from flask import request, g
 from flask_restful import Resource
 from app.bootstrap.core import aps_start, call_task_once, kill_process
 from app.bootstrap.database import GaussDB
-from app.bootstrap.global_vars import BASE_DIR, TASK_DIR, error_msg, ignores, runnings, success_msg
+from app.bootstrap.global_vars import TASK_DIR, error_msg, ignores, runnings, success_msg
 from app.bootstrap.schedule_config import load_schedule, preview_schedule, resolve_task_spec, save_schedule, set_schedule_enabled
 from app.bootstrap.system_metrics import cpu_monitor_snapshot, recent_task_starts
 from app.bootstrap.task_loader import discover_task_specs
 from app.extensions import scheduler
-from app.bootstrap.execution_state import FAILURE_SQL, NON_FAILURE, is_failure
+from app.bootstrap.execution_state import FAILURE_SQL, is_failure
 from app.bootstrap.run_summary import coverage
 from app.bootstrap.snapshot_cache import cached
 from app.settings import WFS_ENABLE_SCHEDULER, WFS_SCHEDULER_CONTROL_URL
@@ -39,8 +39,9 @@ def _approx_total(current_page, pagesize, row_count, has_more):
     return offset + row_count + (1 if has_more else 0)
 
 def _task_id_options():
-    ids = {spec.get('pid') or spec.get('folder_name') for spec in discover_task_specs(TASK_DIR) if spec.get('pid') or spec.get('folder_name')}
-    names = {spec['pid']: spec.get('task_name') or spec.get('folder_name') or spec['pid'] for spec in discover_task_specs(TASK_DIR)}
+    specs = discover_task_specs(TASK_DIR)
+    ids = {spec.get('pid') or spec.get('folder_name') for spec in specs if spec.get('pid') or spec.get('folder_name')}
+    names = {spec['pid']: spec.get('task_name') or spec.get('folder_name') or spec['pid'] for spec in specs}
     return [{'id': pid, 'name': names.get(pid, pid)} for pid in sorted(ids)]
 
 def _build_task_log_filters(pid=None, taskstate=None, datetimeval=None, taskname=None):
@@ -252,6 +253,8 @@ def _merge_task_marker(left, right):
 
 def _dedupe_task_markers(items):
     merged = []
+    candidates = deque()
+    current_pid = None
     for item in sorted(items, key=lambda value: (value.get('id') or '', _parse_datetime_value(value.get('start_time')) or datetime.datetime.min, 0 if value.get('source') == 'history' else 1)):
         start_time = _format_datetime_value(item.get('start_time'))
         if not start_time or not item.get('id'):
@@ -259,11 +262,23 @@ def _dedupe_task_markers(items):
         normalized = dict(item)
         normalized['start_time'] = start_time
         normalized['end_time'] = _format_datetime_value(item.get('end_time'))
-        for index, existing in enumerate(merged):
+        if normalized['id'] != current_pid:
+            candidates.clear()
+            current_pid = normalized['id']
+        parsed_start = _parse_datetime_value(start_time)
+        # Sorted starts only match the same task within two seconds. Once outside
+        # that window, an earlier marker cannot match this or any later item.
+        if parsed_start is not None:
+            while candidates and (parsed_start - candidates[0][1]).total_seconds() > 2:
+                candidates.popleft()
+        for index, _ in candidates:
+            existing = merged[index]
             if _same_task_marker(existing, normalized):
                 merged[index] = _merge_task_marker(existing, normalized)
                 break
         else:
+            if parsed_start is not None:
+                candidates.append((len(merged), parsed_start))
             merged.append(normalized)
     return merged
 

@@ -101,8 +101,9 @@
 </template>
 
 <script setup>
-import { timestamp, BUSINESS_TIMEZONE } from '../timebase';
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import {normalizeSamples,normalizeTasks,timelineRange,layoutTaskLanes,MAX_TASK_LANES,formatFullTime,formatTick,formatDuration,hashText,taskColor} from '../cpuTimelineData.js';
+import {useCpuTimelineViewport} from '../composables/useCpuTimelineViewport.js';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 
 const props = defineProps({
   samples: { type: Array, default: () => [] },
@@ -114,30 +115,11 @@ const MIN_CHART_HEIGHT = 300;
 const TASK_LANE_HEIGHT = 24;
 const TASK_BAR_HEIGHT = 18;
 const TASK_AREA_PADDING = 10;
-const MAX_TASK_LANES = 20;
 const MIN_TASK_BLOCK_WIDTH = 4;
-const palette = [
-  '#a9813c',
-  '#2563eb',
-  '#7c3aed',
-  '#be123c',
-  '#c2410c',
-  '#047857',
-  '#0369a1',
-  '#a21caf',
-  '#b45309',
-  '#4f46e5',
-];
-
 const chartRoot = ref(null);
 const chartWidth = ref(900);
 const chartHeight = ref(640);
 const margin = { top: 22, left: 56, right: 24, bottom: 48 };
-const viewStart = ref(0);
-const viewEnd = ref(0);
-const userNavigated = ref(false);
-const dragging = ref(false);
-const dragLastX = ref(0);
 const hoverSample = ref(null);
 const tooltip = reactive({
   open: false,
@@ -152,72 +134,12 @@ const plotRight = computed(() => chartWidth.value - margin.right);
 const plotWidth = computed(() => Math.max(1, chartWidth.value - margin.left - margin.right));
 const taskBarHeight = TASK_BAR_HEIGHT;
 
-const normalizedSamples = computed(() => props.samples
-  .map((item) => {
-    const time = parseTime(item.time || item.datetime || item.timestamp);
-    const cpu = Number(item.cpu ?? item.value ?? item.usage);
-    const memory = Number(item.memory ?? item.mem ?? item.memory_percent);
-    if (!Number.isFinite(time) || !Number.isFinite(cpu)) {
-      return null;
-    }
-    return {
-      time,
-      cpu: Math.max(0, Math.min(100, cpu)),
-      memory: Number.isFinite(memory) ? Math.max(0, Math.min(100, memory)) : null,
-      raw: item,
-    };
-  })
-  .filter(Boolean)
-  .sort((left, right) => left.time - right.time));
-
-const normalizedTasks = computed(() => {
-  const tasks = props.markers.map((item, index) => {
-    const start = parseTime(item.start_time || item.time || item.datetime);
-    let end = parseTime(item.end_time);
-    if (!Number.isFinite(start)) {
-      return null;
-    }
-    const running = !Number.isFinite(end);
-    if (running) {
-      end = Math.max(Date.now(), start + 1000);
-    }
-    if (end <= start) {
-      end = start + 1000;
-    }
-    return {
-      ...item,
-      index,
-      start,
-      end,
-      running,
-      start_time: item.start_time || formatFullTime(start),
-      end_time: item.end_time || '',
-      label: taskLabel(item),
-      failed: Number(item.state) !== 0 && item.state !== undefined && item.state !== null && item.state !== '',
-    };
-  })
-    .filter(Boolean);
-
-  return mergeTaskBlocks(tasks)
-    .sort((left, right) => left.start - right.start || left.end - right.end);
-});
-
-const fullRange = computed(() => {
-  const retentionMs = Math.max(1, props.retentionHours || 6) * 60 * 60 * 1000;
-  const now = Date.now();
-  const dataTimes = [
-    ...normalizedSamples.value.map((item) => item.time),
-    ...normalizedTasks.value.flatMap((item) => [item.start, item.end]),
-  ].filter(Number.isFinite);
-  const maxDataTime = dataTimes.length ? Math.max(...dataTimes) : now;
-  const minDataTime = dataTimes.length ? Math.min(...dataTimes) : now;
-  const end = Math.max(maxDataTime, now);
-  let start = Math.max(minDataTime, end - retentionMs);
-  const minimumSpan = 5 * 60 * 1000;
-  if (end - start < minimumSpan) {
-    start = end - minimumSpan;
-  }
-  return { start, end };
+const normalizedSamples = computed(() => normalizeSamples(props.samples));
+const normalizedTasks = computed(() => normalizeTasks(props.markers));
+const fullRange = computed(() => timelineRange(normalizedSamples.value, normalizedTasks.value, props.retentionHours));
+const {viewStart,viewEnd,dragging,xForTime,timeForX,pointX,pointY,handleWheel,handleMouseDown} = useCpuTimelineViewport({
+  chartRoot, fullRange, plotLeft:margin.left, plotRight, plotWidth,
+  hasData:computed(() => Boolean(normalizedSamples.value.length || normalizedTasks.value.length)),
 });
 
 const visibleSamples = computed(() => normalizedSamples.value.filter((item) => (
@@ -230,18 +152,7 @@ const visibleTasks = computed(() => normalizedTasks.value.filter((item) => (
   item.end >= viewStart.value && item.start <= viewEnd.value
 )));
 
-const laidOutTasks = computed(() => {
-  const laneEnds = [];
-  const gapMs = ((viewEnd.value - viewStart.value) / plotWidth.value) * 4;
-  return visibleTasks.value.map((task) => {
-    let lane = laneEnds.findIndex((end) => task.start >= end + gapMs);
-    if (lane === -1) {
-      lane = laneEnds.length < MAX_TASK_LANES ? laneEnds.length : leastBusyLane(laneEnds);
-    }
-    laneEnds[lane] = Math.max(laneEnds[lane] || 0, task.end);
-    return { ...task, lane };
-  });
-});
+const laidOutTasks = computed(() => layoutTaskLanes(visibleTasks.value, viewEnd.value-viewStart.value, plotWidth.value));
 
 const taskLaneCount = computed(() => {
   if (!laidOutTasks.value.length) {
@@ -324,22 +235,6 @@ const tooltipStyle = computed(() => {
   };
 });
 
-watch(fullRange, (range, previous) => {
-  if (!viewStart.value || !viewEnd.value || !userNavigated.value) {
-    viewStart.value = range.start;
-    viewEnd.value = range.end;
-    return;
-  }
-
-  const span = viewEnd.value - viewStart.value;
-  const wasAtEnd = previous ? Math.abs(viewEnd.value - previous.end) < 30 * 1000 : false;
-  if (wasAtEnd) {
-    setDomain(range.end - span, range.end);
-  } else {
-    setDomain(viewStart.value, viewEnd.value);
-  }
-}, { immediate: true });
-
 onMounted(() => {
   measure();
   if (window.ResizeObserver && chartRoot.value) {
@@ -355,7 +250,6 @@ onUnmounted(() => {
     resizeObserver.disconnect();
   }
   window.removeEventListener('resize', measure);
-  removeDragListeners();
 });
 
 function measure() {
@@ -366,139 +260,6 @@ function measure() {
   chartWidth.value = Math.max(320, Math.round(rect.width || chartRoot.value.clientWidth || 900));
   const fallbackHeight = window.innerHeight ? window.innerHeight - rect.top - 22 : 640;
   chartHeight.value = Math.max(MIN_CHART_HEIGHT, Math.round(rect.height || chartRoot.value.clientHeight || fallbackHeight));
-}
-
-function parseTime(value) {
-  if (typeof value === 'number') {
-    return value;
-  }
-  const text = String(value || '').trim();
-  if (!text) {
-    return NaN;
-  }
-  return timestamp(text);
-}
-
-function formatFullTime(time) {
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: BUSINESS_TIMEZONE,
-  }).format(new Date(time));
-}
-
-function formatTick(time, span) {
-  const options = span > 12 * 60 * 60 * 1000
-    ? { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
-    : { hour: '2-digit', minute: '2-digit', hour12: false };
-  return new Intl.DateTimeFormat('zh-CN', {...options,timeZone:BUSINESS_TIMEZONE}).format(new Date(time));
-}
-
-function formatDuration(start, end) {
-  const seconds = Math.max(1, Math.round((end - start) / 1000));
-  if (seconds < 60) {
-    return `${seconds} 秒`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  const remain = seconds % 60;
-  if (minutes < 60) {
-    return remain ? `${minutes} 分 ${remain} 秒` : `${minutes} 分`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const minuteRemain = minutes % 60;
-  return minuteRemain ? `${hours} 小时 ${minuteRemain} 分` : `${hours} 小时`;
-}
-
-function taskLabel(task) {
-  const id = task.id || '任务';
-  const name = task.name && task.name !== id ? task.name : '';
-  return name ? `${id} · ${name}` : id;
-}
-
-function hashText(text) {
-  return String(text || '').split('').reduce((total, char) => (
-    ((total << 5) - total) + char.charCodeAt(0)
-  ), 0);
-}
-
-function taskColor(task) {
-  if (task.failed) {
-    return '#dc2626';
-  }
-  if (task.running) {
-    return '#7c3aed';
-  }
-  return '#16a34a';
-}
-
-function shouldMergeTaskBlock(left, right) {
-  if ((left.id || '') !== (right.id || '')) {
-    return false;
-  }
-  const startGap = Math.abs(left.start - right.start);
-  if (startGap > 2000) {
-    return false;
-  }
-  const overlaps = Math.min(left.end, right.end) >= Math.max(left.start, right.start) - 1000;
-  const similarEnd = Math.abs(left.end - right.end) <= 5000;
-  return overlaps || similarEnd;
-}
-
-function mergeTaskBlock(left, right) {
-  const completed = !left.running || !right.running;
-  const preferred = right.source === 'history' ? right : left;
-  return {
-    ...left,
-    ...preferred,
-    start: Math.min(left.start, right.start),
-    end: Math.max(left.end, right.end),
-    running: !completed,
-    failed: left.failed || right.failed,
-    start_time: left.start <= right.start ? left.start_time : right.start_time,
-    end_time: right.end_time || left.end_time || '',
-    label: taskLabel({
-      id: left.id || right.id,
-      name: preferred.name || left.name || right.name,
-    }),
-  };
-}
-
-function mergeTaskBlocks(tasks) {
-  const merged = [];
-  tasks
-    .slice()
-    .sort((left, right) => (left.id || '').localeCompare(right.id || '') || left.start - right.start)
-    .forEach((task) => {
-      const index = merged.findIndex((item) => shouldMergeTaskBlock(item, task));
-      if (index === -1) {
-        merged.push(task);
-        return;
-      }
-      merged[index] = mergeTaskBlock(merged[index], task);
-    });
-  return merged;
-}
-
-function leastBusyLane(laneEnds) {
-  let lane = 0;
-  let value = laneEnds[0] || 0;
-  laneEnds.forEach((item, index) => {
-    if (item < value) {
-      lane = index;
-      value = item;
-    }
-  });
-  return lane;
-}
-
-function xForTime(time) {
-  const span = Math.max(1, viewEnd.value - viewStart.value);
-  return margin.left + ((time - viewStart.value) / span) * plotWidth.value;
 }
 
 function yForCpu(cpu) {
@@ -516,83 +277,6 @@ function laneCenterY(lane) {
   return laneY(lane) + TASK_BAR_HEIGHT / 2;
 }
 
-function timeForX(x) {
-  const ratio = (Math.max(margin.left, Math.min(plotRight.value, x)) - margin.left) / plotWidth.value;
-  return viewStart.value + ratio * (viewEnd.value - viewStart.value);
-}
-
-function setDomain(start, end) {
-  const range = fullRange.value;
-  const minimumSpan = 60 * 1000;
-  const maximumSpan = Math.max(minimumSpan, range.end - range.start);
-  let span = Math.max(minimumSpan, Math.min(maximumSpan, end - start));
-  let nextStart = start;
-  let nextEnd = start + span;
-
-  if (nextStart < range.start) {
-    nextStart = range.start;
-    nextEnd = nextStart + span;
-  }
-  if (nextEnd > range.end) {
-    nextEnd = range.end;
-    nextStart = nextEnd - span;
-  }
-  if (nextStart < range.start) {
-    span = range.end - range.start;
-    nextStart = range.start;
-    nextEnd = range.start + span;
-  }
-
-  viewStart.value = nextStart;
-  viewEnd.value = nextEnd;
-}
-
-function pointX(event) {
-  const rect = chartRoot.value.getBoundingClientRect();
-  return event.clientX - rect.left;
-}
-
-function pointY(event) {
-  const rect = chartRoot.value.getBoundingClientRect();
-  return event.clientY - rect.top;
-}
-
-function handleWheel(event) {
-  if (!normalizedSamples.value.length && !normalizedTasks.value.length) {
-    return;
-  }
-  event.preventDefault();
-  userNavigated.value = true;
-  const x = Math.max(margin.left, Math.min(plotRight.value, pointX(event)));
-  const span = viewEnd.value - viewStart.value;
-  const nextSpan = span * (event.deltaY > 0 ? 1.25 : 0.8);
-  const rightZoomZoneStart = margin.left + plotWidth.value * 0.8;
-  const center = x >= rightZoomZoneStart ? viewEnd.value : timeForX(x);
-  const ratio = x >= rightZoomZoneStart ? 1 : (center - viewStart.value) / span;
-  setDomain(center - nextSpan * ratio, center + nextSpan * (1 - ratio));
-}
-
-function handleMouseDown(event) {
-  if (event.button !== 1) {
-    return;
-  }
-  event.preventDefault();
-  dragging.value = true;
-  userNavigated.value = true;
-  dragLastX.value = event.clientX;
-  window.addEventListener('mousemove', handleWindowDrag);
-  window.addEventListener('mouseup', handleMouseUp);
-}
-
-function handleWindowDrag(event) {
-  if (!dragging.value) {
-    return;
-  }
-  event.preventDefault();
-  panByPixels(event.clientX - dragLastX.value);
-  dragLastX.value = event.clientX;
-}
-
 function handleMouseMove(event) {
   if (dragging.value) {
     return;
@@ -604,22 +288,6 @@ function handleMouseLeave() {
   if (!dragging.value) {
     clearTooltip();
   }
-}
-
-function handleMouseUp() {
-  dragging.value = false;
-  removeDragListeners();
-}
-
-function removeDragListeners() {
-  window.removeEventListener('mousemove', handleWindowDrag);
-  window.removeEventListener('mouseup', handleMouseUp);
-}
-
-function panByPixels(deltaX) {
-  const span = viewEnd.value - viewStart.value;
-  const deltaTime = -(deltaX / plotWidth.value) * span;
-  setDomain(viewStart.value + deltaTime, viewEnd.value + deltaTime);
 }
 
 function showSampleTooltip(event) {

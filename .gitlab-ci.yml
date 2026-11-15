@@ -1,12 +1,27 @@
 stages:
   - test
 
+.postgres-test:
+  services:
+    - name: postgres:18.1
+      alias: postgres
+  variables:
+    POSTGRES_DB: wfstest
+    POSTGRES_USER: wfstest
+    POSTGRES_PASSWORD: disposable-ci-database-password
+    PGHOST: postgres
+    PGDATABASE: wfstest
+    PGPASSWORD: disposable-ci-database-password
+    WFS_CI_POSTGRES: 'true'
+
 backend-tests:
+  extends: .postgres-test
   stage: test
   image: python:3.12
   script:
-    - python -m pip install -r requirements-linux-py312.lock
-    - python -m unittest discover -s tests -v
+    - apt-get update && apt-get install -y --no-install-recommends unixodbc
+    - python -m pip install -r requirements-linux-py312.lock -r requirements-test.txt
+    - python scripts/ci_postgres_acceptance.py
 
 frontend-build:
   stage: test
@@ -16,35 +31,24 @@ frontend-build:
     - npm ci --no-audit --no-fund
     - npm test
     - npm run build
-
-postgres-acceptance:
-  stage: test
-  image: python:3.12
-  services:
-    - name: postgres:18.1
-      alias: postgres
-  variables:
-    POSTGRES_DB: wfstest
-    POSTGRES_USER: wfstest
-    POSTGRES_PASSWORD: disposable-ci-database-password
-    PGDATABASE: wfstest
-    PGPASSWORD: disposable-ci-database-password
-    WFS_CI_POSTGRES: 'true'
-  script:
-    - apt-get update && apt-get install -y --no-install-recommends odbc-postgresql unixodbc
-    - python -m pip install -r requirements-linux-py312.lock
-    - python scripts/ci_postgres_acceptance.py
+  artifacts:
+    paths:
+      - app/dist/
+    expire_in: 1 day
 
 browser-regression:
+  extends: .postgres-test
   stage: test
   image: mcr.microsoft.com/playwright:v1.63.0-noble
+  needs:
+    - job: frontend-build
+      artifacts: true
   script:
+    - apt-get update && apt-get install -y --no-install-recommends unixodbc python3-venv
     - python3 -m venv .ci-venv
-    - .ci-venv/bin/python -m pip install -r requirements-linux-py312.lock
+    - .ci-venv/bin/python -m pip install -r requirements-linux-py312.lock -r requirements-test.txt
     - cd frontend
     - npm ci --no-audit --no-fund
-    - npm test
-    - npm run build
     - WFS_BROWSER_PYTHON=../.ci-venv/bin/python npm run test:e2e
     - WFS_BROWSER_PYTHON=../.ci-venv/bin/python npm run test:e2e:gitlab
   artifacts:

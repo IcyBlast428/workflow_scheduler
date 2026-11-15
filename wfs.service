@@ -1,9 +1,8 @@
 # Managed by workflow_scheduler/scripts/install_systemd.py
 [Unit]
-Description=Workflow Scheduler Web
-Requires=wfs-scheduler.service
-After=wfs-scheduler.service
-After=network-online.target
+Description=Workflow Scheduler (Web and Scheduler)
+Conflicts=wfs-scheduler.service
+After=wfs-scheduler.service network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=120
 StartLimitBurst=10
@@ -12,25 +11,26 @@ StartLimitBurst=10
 Type=exec
 User=wfs
 Group=wfs
-EnvironmentFile=/etc/wfs/wfs.env
+WorkingDirectory=/data/workflow_scheduler
+EnvironmentFile=/data/workflow_scheduler/deploy/root-test/runtime.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-WorkingDirectory=/data/wfs/current
-Environment="ODBCSYSINI=/data/wfs/current/app/config/driver/dws_odbc/etc"
-Environment="ODBCINI=/data/wfs/current/app/config/driver/dws_odbc/etc/odbc.ini"
+Environment=WFS_COOKIE_SECURE=false
+Environment="ODBCSYSINI=/data/workflow_scheduler/app/config/driver/dws_odbc/etc"
+Environment="ODBCINI=/data/workflow_scheduler/app/config/driver/dws_odbc/etc/odbc.ini"
 UnsetEnvironment=GUNICORN_CMD_ARGS GUNICORN_FD WFS_DEV_RUN_ALL WFS_LOCAL_DB_PATH WFS_POSTGRES_TEST
-ExecStart="/data/wfs/current/.venv/bin/python" "-m" "gunicorn" "-c" "/data/wfs/current/gunicorn.conf.py" "--workers" "2" "--worker-class" "gthread" "--threads" "8" "--timeout" "120" "--graceful-timeout" "60" "--keep-alive" "75" "--bind" "127.0.0.1:8008" "--access-logfile" "-" "--error-logfile" "-" "--env" "WFS_ENV=production" "--env" "WFS_ENABLE_SCHEDULER=false" "--env" "WFS_SCHEDULER_CONTROL_URL=http://127.0.0.1:8009" "--env" "WFS_DATA_DIR=/data/wfs/shared/data" "--env" "WFS_LOG_DIR=/data/wfs/shared/logs" "--env" "PYTHONPATH=/data/wfs/current" "--env" "WFS_COOKIE_SECURE=true" "run:app"
-ExecStartPost="/data/wfs/current/.venv/bin/python" "/etc/wfs/wait_ready.py" "--url" "http://127.0.0.1:8008/api/user/ready" "--timeout" "90"
+ExecStart="/data/workflow_scheduler/.venv/bin/python" "/data/workflow_scheduler/scripts/serve.py" "--project" "/data/workflow_scheduler" "--python" "/data/workflow_scheduler/.venv/bin/python" "--web-host" "127.0.0.1" "--web-port" "8008" "--control-port" "8009" "--data" "/data/workflow_scheduler/data" "--logs" "/data/workflow_scheduler/logs"
+ExecStartPost="/data/workflow_scheduler/.venv/bin/python" "/data/workflow_scheduler/scripts/wait_ready.py" "--url" "http://127.0.0.1:8008/api/user/ready" "--timeout" "190"
 UMask=0077
 NoNewPrivileges=true
 KillMode=mixed
 KillSignal=SIGTERM
-TimeoutStartSec=100
+TimeoutStartSec=200
 TimeoutStopSec=90
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=wfs-web
+SyslogIdentifier=wfs
 
 [Install]
 WantedBy=multi-user.target

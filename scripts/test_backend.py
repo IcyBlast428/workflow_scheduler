@@ -1,6 +1,5 @@
 """Run regression tests against fresh real PostgreSQL schemas, with per-test reset."""
 
-import json
 from pathlib import Path
 import sys
 import unittest

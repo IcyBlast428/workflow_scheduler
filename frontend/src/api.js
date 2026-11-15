@@ -1,3 +1,5 @@
+import { createRequestId } from './requestId.js';
+
 const TOKEN_KEY = 'wfs_csrf_token';
 
 function createError(message, code = 'REQUEST_ERROR') {
@@ -99,7 +101,7 @@ export const api = {
   async submitExecutionRequest(pid,body) {
     const storageKey='wfs:execution-request:'+getToken()+':'+pid+':'+JSON.stringify({kind:body.kind,context:body.context || {}});
     let identifier=sessionStorage.getItem(storageKey);
-    if(!identifier){identifier=body.request_id || crypto.randomUUID().replaceAll('-','');sessionStorage.setItem(storageKey,identifier);}
+    if(!identifier){identifier=body.request_id || createRequestId();sessionStorage.setItem(storageKey,identifier);}
     try {
       const result=await request('/api/admin/operational/requests',{method:'POST',params:{pid},body:{...body,request_id:identifier}});
       sessionStorage.removeItem(storageKey);return result;
@@ -203,13 +205,9 @@ export const api = {
   async callTask(params) {
     const storageKey = 'wfs:manual:' + getToken() + ':' + params.pid;
     let requestId = sessionStorage.getItem(storageKey);
-    if (!requestId) { requestId = crypto.randomUUID().replaceAll('-', ''); sessionStorage.setItem(storageKey, requestId); }
-    try {
-      const data = await request('/api/taskinfo/call_task', { method: 'POST', params, body: { request_id: requestId } });
-      sessionStorage.removeItem(storageKey); return data;
-    } catch (error) {
-      throw error;
-    }
+    if (!requestId) { requestId = createRequestId(); sessionStorage.setItem(storageKey, requestId); }
+    const data = await request('/api/taskinfo/call_task', { method: 'POST', params, body: { request_id: requestId } });
+    sessionStorage.removeItem(storageKey); return data;
   },
   taskDetail(pid) { return request('/api/taskinfo/detail', { params: { pid } }); },
   taskFlow(pid) { return request('/api/taskinfo/flow', { params: { pid }, timeout: 30000 }); },

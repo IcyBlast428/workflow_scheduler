@@ -22,6 +22,7 @@ export function useTaskWorkspace(
   });
   const tasks = reactive({
     loading: false,
+    loaded: false,
     error: '',
     items: [],
     total: 0,
@@ -38,6 +39,7 @@ export function useTaskWorkspace(
     () => {
       taskRequestSerial++;
       tasks.loading = false;
+      tasks.loaded = false;
       tasks.items = [];
       tasks.total = 0;
       const saved = readPreference(key(), {});
@@ -95,6 +97,7 @@ export function useTaskWorkspace(
       if (onlyFavorites.value && !favorites.value.length) {
         tasks.items = [];
         tasks.total = 0;
+        tasks.loaded = true;
         return;
       }
       const data = await api.taskState({
@@ -103,6 +106,7 @@ export function useTaskWorkspace(
       });
       if (serial !== taskRequestSerial) return;
       markBackendHealthy('后端连接正常');
+      tasks.loaded = true;
       tasks.items = data.items || [];
       tasks.total = data.total || 0;
     } catch (error) {

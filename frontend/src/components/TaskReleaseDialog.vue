@@ -131,7 +131,7 @@ async function publish() {
   if (pid !== props.pid || version !== preview.value?.release.version) return;
   await work('正在发布并等待调度器确认…', async () => { await api.packageAction({action:rollback ? 'rollback' : 'publish',pid,version,revision,reason:publishReason.value}); await refresh(); await inspect(version); message.value = rollback ? '代码已回滚。' : '任务代码已发布。'; changed(); });
 }
-async function trial(){if(!await props.confirm({title:'试运行候选版本',message:'此操作会执行候选代码，只提供运行策略中配置的测试连接。',details:['请先确认脚本不会自行连接生产系统或产生外部副作用。','试运行结果单独记录，不替换当前发布版本。'],confirmText:'提交试运行',danger:true}))return;await work('正在提交试运行…',async()=>{await api.submitExecutionRequest(props.pid,{kind:'trial',request_id:crypto.randomUUID().replaceAll('-',''),context:{version:preview.value.release.version}});message.value='试运行请求已保存，可在下方“试运行设置与执行请求”中刷新结果。';});}
+async function trial(){if(!await props.confirm({title:'试运行候选版本',message:'此操作会执行候选代码，只提供运行策略中配置的测试连接。',details:['请先确认脚本不会自行连接生产系统或产生外部副作用。','试运行结果单独记录，不替换当前发布版本。'],confirmText:'提交试运行',danger:true}))return;await work('正在提交试运行…',async()=>{await api.submitExecutionRequest(props.pid,{kind:'trial',context:{version:preview.value.release.version}});message.value='试运行请求已保存，可在下方“试运行设置与执行请求”中刷新结果。';});}
 async function remove() {
   if (!await props.confirm({title:'确认删除任务',message:`GitLab 已删除 ${candidate.value.task_name}，确认停止后续调度并移入回收站？`,details:['代码历史、日志和输出文件保留，不清理运行中的目录。','已排队或运行的实例继续完成。'],confirmText:'确认删除',danger:true})) return;
   await work('正在删除任务…', async () => { await api.gitlabTaskAction({action:'delete',id:candidate.value.id}); await refresh(); message.value = '任务已移入回收站，输出文件已保留。'; changed(); });

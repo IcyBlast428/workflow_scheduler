@@ -22,7 +22,7 @@ def recent_execution_matrix():
         return forwarded
     from app.bootstrap.recent_execution_matrix import cached_snapshot
     try:
-        return success_msg(cached_snapshot(request.args.get('limit', '10')))
+        return success_msg(cached_snapshot(request.args.get('limit', '25')))
     except ValueError as exc:
         return (error_msg(str(exc)),400)
 

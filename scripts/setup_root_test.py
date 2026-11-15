@@ -52,7 +52,7 @@ def initialize(project, password):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--install', action='store_true', help='Install and start the two test services')
+    parser.add_argument('--install', action='store_true', help='Install and start the unified production service')
     args = parser.parse_args()
     if os.name != 'posix' or os.geteuid() != 0:
         parser.error('Run as root on the Linux test server')
@@ -62,8 +62,10 @@ def main():
     if not python.is_file():
         parser.error('Create /data/workflow_scheduler/.venv and install dependencies first')
     destinations = [(PROJECT/'deploy/root-test'/name, Path('/etc/systemd/system')/name)
-                    for name in ('wfs-scheduler.service', 'wfs.service')]
+                    for name in ('wfs.service',)]
     if args.install:
+        from install_systemd import assert_legacy_scheduler_retired
+        assert_legacy_scheduler_retired()
         # Do not replace a production service or an unrelated installation.
         for source, target in destinations:
             if target.is_symlink() or target.exists() and target.read_bytes() != source.read_bytes():
@@ -97,8 +99,7 @@ def main():
         target.write_bytes(source.read_bytes())
         target.chmod(0o644)
     subprocess.run(['systemctl', 'daemon-reload'], check=True)
-    subprocess.run(['systemctl', 'enable', 'wfs-scheduler.service', 'wfs.service'], check=True)
-    subprocess.run(['systemctl', 'restart', 'wfs-scheduler.service'], check=True)
+    subprocess.run(['systemctl', 'enable', 'wfs.service'], check=True)
     subprocess.run(['systemctl', 'restart', 'wfs.service'], check=True)
     print('Ready: http://<server-ip>:8008/  Username: admin')
 

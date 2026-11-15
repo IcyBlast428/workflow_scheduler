@@ -4,24 +4,40 @@ from app.bootstrap import admission, connection_settings as settings, operationa
 from app.bootstrap.task_loader import discover_task_specs
 from app.bootstrap.timebase import business_now
 
-def usage(identifier):
-    result = []
+def _usage_index():
+    """Build fresh references once per request, without per-task policy queries."""
+    result = {}
     from app.bootstrap.task_packages import registry
     specs = {spec['pid']: spec for spec in discover_task_specs()}
     for pid, record in registry().items():
         if not record.get('deleted_at'):
             specs.setdefault(pid, {'pid': pid, 'task_name': record.get('task_name', '')})
+    if not specs:
+        return result
+    with admission.store() as db:
+        policies = dict(db.execute("SELECT key,payload FROM settings WHERE key LIKE 'connections:%' OR key LIKE 'task:%'"))
     for spec in specs.values():
         pid = spec['pid']
-        access = admission.grant(pid)
-        policy = operational_policy.load('task', pid)
-        if identifier in set(access['connections']) | set(policy['declared_connections']) | set(policy['test_connections'].values()):
-            result.append({'pid': pid, 'name': spec.get('task_name') or pid, 'mode': access['mode']})
+        raw_access = policies.get('connections:' + pid)
+        access = json.loads(raw_access) if raw_access is not None else {'mode': 'restricted', 'connections': []}
+        policy = {**operational_policy.TASK_DEFAULT, **json.loads(policies.get('task:' + pid, '{}'))}
+        identifiers = set(access['connections']) | set(policy['declared_connections']) | set(policy['test_connections'].values())
+        for identifier in identifiers:
+            result.setdefault(identifier, []).append({'pid': pid, 'name': spec.get('task_name') or pid, 'mode': access['mode']})
     return result
 
+def usage(identifier):
+    return _usage_index().get(identifier, [])
+
 def summary():
-    profiles = settings.profiles()
-    return [{'id': key, 'usage': usage(key), 'last_test': admission.policy('connection-test:' + key, {})} for key in profiles if key != 'platform']
+    identifiers = [key for key in settings.profiles() if key != 'platform']
+    if not identifiers:
+        return []
+    references = _usage_index()
+    with admission.store() as db:
+        tests = dict(db.execute("SELECT key,payload FROM settings WHERE key LIKE 'connection-test:%'"))
+    return [{'id': key, 'usage': references.get(key, []),
+             'last_test': json.loads(tests.get('connection-test:' + key, '{}'))} for key in identifiers]
 
 def record_test(identifier, revision, ready, elapsed):
     value = {'ready': bool(ready), 'elapsed_ms': round(elapsed, 1), 'at': str(business_now()), 'revision': revision}

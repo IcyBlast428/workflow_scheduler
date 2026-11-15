@@ -24,7 +24,7 @@
   </div>
 
   <main
-    v-else-if="!token"
+    v-else-if="!token || !workspaceReady"
     class="login-screen"
     :style="{ '--login-radius': `${LOGIN_CORNER_RADIUS}px` }"
   >
@@ -393,6 +393,7 @@
   />
   <ExecutionDialog
     :run-id="executionRunId"
+    :initial-execution="executionInitial"
     :can-operate="canOperate"
     :retrying="retryingExecution"
     @retry="retryExecution"
@@ -424,6 +425,7 @@ import SystemEventsView from './views/SystemEventsView.vue';
 import { assetFailure, isAssetFailure } from './assetRecovery';
 import { useBackendStatus } from './composables/useBackendStatus';
 import { useLiveUpdates } from './composables/useLiveUpdates';
+import { useWorkspaceRefresh } from './composables/useWorkspaceRefresh.js';
 
 import {
   defineAsyncComponent,
@@ -494,6 +496,8 @@ function showNavHint(item, event) {
 
 const ready = ref(false);
 const token = ref(getToken());
+const workspaceReady = ref(false);
+const refreshToken = computed(() => workspaceReady.value ? token.value : '');
 const view = ref(readRoute(window.location.hash).view);
 const matrixTab = ref(readRoute(window.location.hash).params.get('tab') || 'recent');
 const packagePid = ref('');
@@ -502,6 +506,7 @@ const loginLoading = ref(false);
 const busy = ref(false);
 const detailPid = ref('');
 const executionRunId = ref('');
+const executionInitial = ref(null);
 const toasts = ref([]);
 const { confirmState, requestConfirm, resolveConfirm } = useConfirm();
 
@@ -556,9 +561,9 @@ const {
   pushToast,
 });
 
-const { dashboard, loadDashboard, syncDashboardPolling } =
+const { dashboard, loadDashboard } =
   useDashboardWorkspace({
-    token,
+    token: refreshToken,
     view,
     markBackendHealthy,
     handleRequestFailure,
@@ -582,8 +587,8 @@ const {
   setSystemLogPage,
   setSystemLogPageSize,
 } = useLogWorkspace({ markBackendHealthy, handleRequestFailure, syncRoute });
-const { startLiveEvents, stopLiveEvents } = useLiveUpdates({
-  token,
+const { stopLiveEvents } = useLiveUpdates({
+  token: refreshToken,
   view,
   tasks,
   taskLogs,
@@ -592,6 +597,8 @@ const { startLiveEvents, stopLiveEvents } = useLiveUpdates({
   markBackendHealthy,
   handleRequestFailure,
 });
+const {refreshActiveView} = useWorkspaceRefresh({token: refreshToken, view, loadDashboard, loadTasks, loadGroups,
+  loadTaskLogs, loadTaskIds, loadSystemLogs, loadSystemIds, checkBackend, backendStatus, pushToast});
 let logDetailSerial = 0;
 
 const modal = reactive({
@@ -728,6 +735,7 @@ async function handleLogin() {
   }
 
   loginLoading.value = true;
+  workspaceReady.value = false;
   try {
     const data = await api.login({ ...loginForm });
     loginForm.password = '';
@@ -736,9 +744,8 @@ async function handleLogin() {
     setToken(data.csrf_token);
     token.value = data.csrf_token;
     await loadUser();
-    await Promise.all([...(canManage.value ? [loadDashboard()] : []), loadTasks(), loadGroups()]);
-    startLiveEvents();
-    applyRoute();
+    await applyRoute();
+    workspaceReady.value = true;
   } catch (error) {
     await handleRequestFailure(error, { toastTitle: '登录失败' });
   } finally {
@@ -756,6 +763,7 @@ async function handleLogout() {
   }
   clearToken();
   token.value = '';
+  workspaceReady.value = false;
   user.roles = [];
     packagePid.value = '';
   detailPid.value = '';
@@ -774,7 +782,6 @@ async function switchView(nextView) {
   view.value = nextView;
   window.location.hash = queueTab ? 'matrix?tab=queue' : routeHash(nextView);
   mobileNavOpen.value = false;
-  syncDashboardPolling();
 }
 
 function openPackages(pid) {
@@ -784,29 +791,6 @@ function openPackages(pid) {
 }
 async function refreshPackageTasks() {
   await Promise.all([loadTasks(), loadGroups()]);
-}
-
-async function refreshActiveView(options = {}) {
-  const silent=options.silent===true;
-  const reachable = await checkBackend({ silent: true });
-  if (!reachable) {
-    if(!silent)pushToast('error', '刷新失败', backendStatus.error);
-    return;
-  }
-
-  if (view.value === 'dashboard') {
-    await loadDashboard({silent});
-  } else if (view.value === 'tasks') {
-    await Promise.all([loadTasks(false,{silent}), ...(silent?[]:[loadGroups()])]);
-  } else if (view.value === 'taskLogs') {
-    await Promise.all([loadTaskLogs(false,{silent,buffer:silent}), ...(silent?[]:[loadTaskIds()])]);
-  } else if (['matrix','queue'].includes(view.value)) {
-    window.dispatchEvent(new CustomEvent('wfs:matrix-refresh',{detail:{silent}}));
-  } else if (view.value === 'packages') {
-    window.dispatchEvent(new Event('wfs:packages-refresh'));
-  } else if(view.value==='systemLogs') {
-    await Promise.all([loadSystemLogs(), loadSystemIds()]);
-  }
 }
 
 async function openLatestLog(row) {
@@ -831,18 +815,19 @@ async function openTaskLog(row) {
   try {
     if (/^[a-f0-9]{32}$/.test(row.logid)) {
       try {
-        await api.execution(row.logid);
+        const initial = await api.execution(row.logid, 'tail');
         if (serial !== logDetailSerial || !modal.open) return;
         closeModal();
         await nextTick();
         origin?.focus({ preventScroll: true });
-        openExecution(row.logid);
+        openExecution(row.logid, initial);
         return;
       } catch (error) {
         if (!['HTTP_400', 'HTTP_404'].includes(error.code)) throw error;
         // Archived and legacy history may only retain the database log.
       }
     }
+    if (serial !== logDetailSerial || !modal.open) return;
     const content = await api.taskLogDetail({
       id: row.logid,
       end_time: row.datetime,
@@ -857,31 +842,6 @@ async function openTaskLog(row) {
     modal.content = error.message || ' ';
   }
 }
-
-function handleVisibilityChange() {
-  syncDashboardPolling();
-  if (!token.value || document.visibilityState === 'hidden') {
-    return;
-  }
-  startLiveEvents();
-  refreshActiveView({silent:true});
-}
-
-watch(view, async (nextView) => {
-  syncDashboardPolling();
-  if (!token.value) {
-    return;
-  }
-  if (nextView === 'dashboard') {
-    await loadDashboard();
-  }
-  if (nextView === 'tasks' && !tasks.items.length) {
-    await Promise.all([loadTasks(), loadGroups()]);
-  }
-  if (nextView === 'systemLogs' && !systemLogs.rows.length) {
-    await Promise.all([loadSystemLogs(), loadSystemIds()]);
-  }
-});
 
 async function applyRoute() {
   const route = readRoute(window.location.hash);
@@ -940,9 +900,13 @@ function logRouteValues() {
 }
 window.addEventListener('hashchange', applyRoute);
 watch([detailPid, executionRunId], syncRoute);
+watch(executionRunId, runId => {
+  if (executionInitial.value?.runId !== runId) executionInitial.value = null;
+});
 
-function openExecution(runId) {
+function openExecution(runId, initial = null) {
   detailPid.value = '';
+  executionInitial.value = initial ? { runId, data: initial } : null;
   executionRunId.value = runId;
 }
 async function openActiveExecution(row) {
@@ -974,11 +938,11 @@ function openMatrixLogs(record) {
 }
 function showFilteredTasks(status) {
   tasks.params.status = status;
-  switchView('tasks');
-  loadTasks(true);
+  tasks.params.currentPage = 1;
+  if (view.value === 'tasks') loadTasks(true);
+  else switchView('tasks');
 }
 onMounted(async () => {
-  document.addEventListener('visibilitychange', handleVisibilityChange);
   if (!navItems.some((item) => item.id === view.value)) {
     view.value = 'dashboard';
   }
@@ -992,10 +956,8 @@ onMounted(async () => {
   const hadToken = Boolean(token.value);
   try {
     await loadUser();
-    await Promise.all([...(canManage.value ? [loadDashboard()] : []), loadTasks(), loadGroups()]);
-    startLiveEvents();
-    syncDashboardPolling();
-    applyRoute();
+    await applyRoute();
+    workspaceReady.value = true;
   } catch (error) {
     if (isAuthError(error)) {
       clearToken();
@@ -1009,7 +971,6 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('hashchange', applyRoute);
   stopLiveEvents();
-  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 </script>
 

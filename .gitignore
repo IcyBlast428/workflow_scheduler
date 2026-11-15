@@ -53,8 +53,11 @@ coverage.xml
 *.mo
 *.pot
 
-# Django stuff:
+# Runtime logs, including rotated files
+/logs/
 *.log
+
+# Django stuff:
 local_settings.py
 db.sqlite3
 

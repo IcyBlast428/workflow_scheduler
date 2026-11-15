@@ -8,15 +8,17 @@ import shlex
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from scripts.install_systemd import render
+from scripts.install_systemd import render, assert_legacy_scheduler_retired
 from scripts.service_config import read_environment, serialize_environment
 from scripts.wait_ready import wait
 
 
 class SystemdTests(unittest.TestCase):
     def test_role_fencing_loopback_and_process_cleanup(self):
-        for scope in ('system', 'user'):
+        for scope in ('user',):
             units = render(scope=scope, unset=('WFS_LOCAL_DB_PATH',))
             scheduler = next(value for name, value in units.items() if 'scheduler' in name)
             web = next(value for name, value in units.items() if 'scheduler' not in name)
@@ -30,9 +32,42 @@ class SystemdTests(unittest.TestCase):
                 self.assertIn('Restart=on-failure', content)
                 self.assertIn('ExecStartPost=', content)
                 self.assertIn('GUNICORN_CMD_ARGS', content)
-                self.assertIn('WorkingDirectory=/data/wfs/current\n', content)
-                self.assertIn('EnvironmentFile=/etc/wfs/wfs.env\n', content)
+                self.assertIn('WorkingDirectory=/data/workflow_scheduler\n', content)
+                self.assertIn('EnvironmentFile=/data/workflow_scheduler/deploy/root-test/runtime.env\n', content)
             self.assertIn('Requires=', web)
+
+    def test_production_paths_http_cookies_and_committed_units_match(self):
+        root = Path(__file__).resolve().parents[1]
+        for name, content in render().items():
+            self.assertEqual((root/name).read_text(), content)
+            command = shlex.split(next(line.split('=', 1)[1] for line in content.splitlines() if line.startswith('ExecStart=')))
+            self.assertEqual(command[command.index('--data') + 1], '/data/workflow_scheduler/data')
+            self.assertEqual(command[command.index('--logs') + 1], '/data/workflow_scheduler/logs')
+            self.assertIn('Environment=WFS_COOKIE_SECURE=false', content)
+            self.assertIn('scripts/serve.py', command[1])
+            self.assertIn('Conflicts=wfs-scheduler.service', content)
+            self.assertNotIn('Requires=wfs-scheduler.service', content)
+            self.assertIn('/data/workflow_scheduler/scripts/wait_ready.py', content)
+            self.assertNotIn('/data/wfs', content)
+        for content in render(https_proxy=True).values():
+            self.assertIn('WFS_COOKIE_SECURE=true', content)
+        custom = render(project='/srv/custom-project')
+        for content in custom.values():
+            self.assertNotIn('/data/workflow_scheduler', content)
+            self.assertIn('/srv/custom-project/data', content)
+            self.assertIn('EnvironmentFile=/srv/custom-project/deploy/root-test/runtime.env', content)
+
+    def test_system_profile_is_one_service_and_old_scheduler_must_be_retired(self):
+        self.assertEqual(list(render()), ['wfs.service'])
+        for active, enabled, rejected in [('active','disabled',True), ('inactive','enabled',True),
+                                           ('activating','disabled',True), ('inactive','disabled',False),
+                                           ('inactive','',False)]:
+            replies = [SimpleNamespace(returncode=0, stdout=active), SimpleNamespace(returncode=0, stdout=enabled)]
+            with self.subTest(active=active, enabled=enabled), patch('scripts.install_systemd.subprocess.run', side_effect=replies):
+                if rejected:
+                    with self.assertRaises(ValueError): assert_legacy_scheduler_retired()
+                else:
+                    assert_legacy_scheduler_retired()
 
     def test_literal_environment_roundtrip_and_no_shell_execution(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -11,7 +11,7 @@
   </section>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
+import { onBeforeUnmount, ref, computed } from 'vue';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 defineProps({ canManage: Boolean }); defineEmits(['detail','execution','admin','queue']);

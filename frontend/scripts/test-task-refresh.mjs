@@ -56,6 +56,7 @@ try {
     'A silent refresh must complete the superseded foreground spinner',
   );
   assert.equal(workspace.tasks.items[0].id, 'new');
+  assert.equal(workspace.tasks.loaded, true);
 
   const older = workspace.loadTasks();
   const newest = workspace.loadTasks(false, { silent: true });
@@ -75,6 +76,7 @@ try {
   identity.value = 'viewer';
   await nextTick();
   assert.equal(workspace.tasks.loading, false);
+  assert.equal(workspace.tasks.loaded, false, 'A different account must start with an unloaded workspace');
   requests[4].resolve({ items: [{ id: 'admin-only' }] });
   await outgoing;
   assert.deepEqual(workspace.tasks.items, []);

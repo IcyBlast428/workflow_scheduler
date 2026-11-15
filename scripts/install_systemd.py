@@ -1,12 +1,10 @@
-"""Render or install Web/Scheduler units; no database migration or data deletion."""
+"""Render/install one production service; retain the existing split WSL user profile."""
 import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
-import shutil
 import subprocess
-import sys
 import tempfile
 
 if __package__:
@@ -34,9 +32,14 @@ def unit_path(value):
     return value.replace('%', '%%')
 
 
-def render(*, scope='system', project='/data/wfs/current', python=None, environment_file='/etc/wfs/wfs.env',
-           helper='/etc/wfs/wait_ready.py', data='/data/wfs/shared/data', logs='/data/wfs/shared/logs',
-           user='wfs', group='wfs', web_port=8008, control_port=8009, unset=()):
+def render(*, scope='system', project='/data/workflow_scheduler', python=None, environment_file=None,
+           helper=None, data=None, logs=None,
+           user='wfs', group='wfs', web_port=8008, control_port=8009, unset=(), https_proxy=False):
+    project = str(project)
+    environment_file = environment_file or project + '/deploy/root-test/runtime.env'
+    helper = helper or project + '/scripts/wait_ready.py'
+    data = data or project + '/data'
+    logs = logs or project + '/logs'
     if scope not in ('system', 'user') or web_port == control_port or not all(1 <= p <= 65535 for p in (web_port, control_port)):
         raise ValueError('Invalid scope or service ports')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*\$?', user) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', group):
@@ -47,6 +50,28 @@ def render(*, scope='system', project='/data/wfs/current', python=None, environm
     python = python or str(PurePosixPath(project)/'.venv/bin/python')
     base = 'wfs' if scope == 'system' else 'wfs-local'
     units = {}
+    if scope == 'system':
+        removed = {'GUNICORN_CMD_ARGS', 'GUNICORN_FD', 'WFS_LOCAL_DB_PATH', 'WFS_POSTGRES_TEST', 'WFS_DEV_RUN_ALL', *unset}
+        command = [python, project + '/scripts/serve.py', '--project', project, '--python', python,
+                   '--web-host', '127.0.0.1', '--web-port', str(web_port), '--control-port', str(control_port),
+                   '--data', data, '--logs', logs]
+        lines = [MARKER, '[Unit]', 'Description=Workflow Scheduler (Web and Scheduler)',
+                 'Conflicts=wfs-scheduler.service', 'After=wfs-scheduler.service network-online.target',
+                 'Wants=network-online.target', 'StartLimitIntervalSec=120', 'StartLimitBurst=10', '',
+                 '[Service]', 'Type=exec', 'User=' + user, 'Group=' + group,
+                 'WorkingDirectory=' + unit_path(project), 'EnvironmentFile=' + unit_path(environment_file),
+                 'Environment=PYTHONDONTWRITEBYTECODE=1',
+                 'Environment=WFS_COOKIE_SECURE=' + ('true' if https_proxy else 'false'),
+                 'Environment=' + quote('ODBCSYSINI=' + project + '/app/config/driver/dws_odbc/etc'),
+                 'Environment=' + quote('ODBCINI=' + project + '/app/config/driver/dws_odbc/etc/odbc.ini'),
+                 'UnsetEnvironment=' + ' '.join(sorted(removed)),
+                 'ExecStart=' + ' '.join(map(quote, command)),
+                 'ExecStartPost=' + ' '.join(map(quote, [python, helper, '--url', f'http://127.0.0.1:{web_port}/api/user/ready', '--timeout', '190'])),
+                 'UMask=0077', 'NoNewPrivileges=true', 'KillMode=mixed', 'KillSignal=SIGTERM',
+                 'TimeoutStartSec=200', 'TimeoutStopSec=90', 'Restart=on-failure', 'RestartSec=5',
+                 'StandardOutput=journal', 'StandardError=journal', 'SyslogIdentifier=wfs', '',
+                 '[Install]', 'WantedBy=multi-user.target', '']
+        return {'wfs.service': '\n'.join(lines)}
     for role in ('scheduler', 'web'):
         name = base + ('-scheduler' if role == 'scheduler' else '') + '.service'
         scheduler = base + '-scheduler.service'
@@ -73,7 +98,7 @@ def render(*, scope='system', project='/data/wfs/current', python=None, environm
                       WFS_SCHEDULER_CONTROL_URL='' if role == 'scheduler' else 'http://127.0.0.1:' + str(control_port),
                       WFS_DATA_DIR=data, WFS_LOG_DIR=logs, PYTHONPATH=project)
         if scope == 'system':
-            pinned['WFS_COOKIE_SECURE'] = 'true'
+            pinned['WFS_COOKIE_SECURE'] = 'true' if https_proxy else 'false'
         command = [python, '-m', 'gunicorn', '-c', project + '/gunicorn.conf.py', '--workers',
                    '1' if role == 'scheduler' else '2', '--worker-class', 'gthread', '--threads', '8',
                    '--timeout', '120', '--graceful-timeout', '60', '--keep-alive', '75', '--bind',
@@ -105,11 +130,24 @@ def atomic_write(path, content, mode):
             os.unlink(temporary)
 
 
+def assert_legacy_scheduler_retired():
+    # Read-only migration preflight: never stop an old live scheduler implicitly.
+    for property_name, allowed in (
+        ('ActiveState', {'', 'inactive', 'failed'}),
+        ('UnitFileState', {'', 'disabled', 'masked', 'static', 'not-found'}),
+    ):
+        result = subprocess.run(['systemctl', 'show', '--property=' + property_name,
+                                 '--value', 'wfs-scheduler.service'], capture_output=True, text=True)
+        if result.returncode or result.stdout.strip() not in allowed:
+            raise ValueError('旧 wfs-scheduler.service 尚未停用；请先维护排空，再执行 systemctl disable --now wfs-scheduler.service。')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scope', choices=('system', 'user'), default='system')
-    parser.add_argument('--project', default='/data/wfs/current')
-    parser.add_argument('--environment-file', default='/etc/wfs/wfs.env')
+    parser.add_argument('--project', default='/data/workflow_scheduler')
+    parser.add_argument('--environment-file', help='默认使用项目 deploy/root-test/runtime.env')
+    parser.add_argument('--https-proxy', action='store_true', help='仅用于已配置 HTTPS 代理的系统服务：启用 Secure Cookie')
     parser.add_argument('--python')
     parser.add_argument('--data')
     parser.add_argument('--logs')
@@ -131,12 +169,12 @@ def main():
     if args.install and local and os.geteuid() == 0:
         parser.error('run the user-service installer as the ordinary project owner')
     project = Path(args.project).absolute()
-    source_env = Path(args.environment_file).absolute()
+    source_env = Path(args.environment_file or project/'deploy/root-test/runtime.env').absolute()
     values, unset = read_environment(source_env) if local or args.install else ({}, set())
     if args.install and (not values.get('WFS_SECRET_KEY') or not values.get('WFS_ADMIN_PASSWORD_HASH')):
         parser.error('configure WFS_SECRET_KEY and WFS_ADMIN_PASSWORD_HASH first')
-    data = str(Path(args.data or values.get('WFS_DATA_DIR') or ('/data/wfs/shared/data' if not local else str(project/'data'))).absolute())
-    logs = str(Path(args.logs or values.get('WFS_LOG_DIR') or ('/data/wfs/shared/logs' if not local else str(project/'logs'))).absolute())
+    data = str(Path(args.data or values.get('WFS_DATA_DIR') or str(project/'data')).absolute())
+    logs = str(Path(args.logs or values.get('WFS_LOG_DIR') or str(project/'logs')).absolute())
     python = args.python or (values.get('WFS_PYTHON') if local else None) or str(project/'.venv/bin/python')
     if local:
         config_home = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home()/'.config'))).absolute()
@@ -144,12 +182,13 @@ def main():
         environment_file, helper = configuration/'systemd.env', configuration/'wait_ready.py'
         unit_dir = config_home/'systemd/user'
     else:
-        environment_file, helper = source_env, source_env.parent/'wait_ready.py'
+        environment_file, helper = source_env, project/'scripts/wait_ready.py'
         unit_dir = Path('/etc/systemd/system')
     units = render(scope=args.scope, project=str(project), python=python, environment_file=str(environment_file),
                    helper=str(helper), data=data, logs=logs, user=args.user, group=args.group,
                    web_port=args.web_port or int(values.get('WFS_PORT', 18008 if local else 8008)),
-                   control_port=args.control_port or int(values.get('WFS_CONTROL_PORT', 18009 if local else 8009)), unset=unset)
+                   control_port=args.control_port or int(values.get('WFS_CONTROL_PORT', 18009 if local else 8009)), unset=unset,
+                   https_proxy=args.https_proxy or values.get('WFS_COOKIE_SECURE', '').lower() in ('1', 'true', 'yes', 'on'))
     if args.output:
         args.output.mkdir(parents=True, exist_ok=True)
         for name, content in units.items():
@@ -164,6 +203,7 @@ def main():
             # only with a deliberate manual backup, described in the handbook.
             raise ValueError('Refusing to overwrite an unmanaged service file: ' + str(existing))
     if not local:
+        assert_legacy_scheduler_retired()
         import pwd
         account = pwd.getpwnam(args.user)
         for directory in (data, logs):
@@ -176,7 +216,8 @@ def main():
             Path(directory).mkdir(parents=True, exist_ok=True)
         atomic_write(environment_file, serialize_environment(values), 0o600)
         atomic_write(configuration/'systemd-source.txt', str(source_env) + '\n', 0o600)
-    atomic_write(helper, (ROOT/'scripts/wait_ready.py').read_text(), 0o644)
+    if local:
+        atomic_write(helper, (ROOT/'scripts/wait_ready.py').read_text(), 0o644)
     for name, content in units.items():
         atomic_write(unit_dir/name, content, 0o644)
     if local:
@@ -187,7 +228,7 @@ def main():
     if args.start:
         subprocess.run(control + ['enable', *units], check=True)
         subprocess.run(control + ['restart', *units], check=True)
-        print('Both services passed their startup readiness checks.')
+        print('Installed service(s) passed their startup readiness checks.')
 
 
 if __name__ == '__main__':
