@@ -90,6 +90,13 @@ class PackageTests(unittest.TestCase):
     def activate(self, data, rollback=False):
         return packages.publish(data['pid'], data['version'], packages.task(data['pid'])['revision'], 'admin', rollback)
 
+    def test_direct_database_driver_is_rejected_before_environment_preparation(self):
+        with self.assertRaisesRegex(packages.PackageError, 'helper.py:1.*NewDB'):
+            self.new({'main.py': 'import helper', 'helper.py': 'import pymysql'})
+        valid = self.new({'main.py': 'from app.common.database import NewDB\nprint("not executed")'})
+        self.assertTrue(valid['database_access']['passed'])
+        self.assertEqual(valid['database_access']['entry'], 'NewDB')
+
     def test_multifile_publish_diff_rollback_delete_restore_and_execution_pin(self):
         v1 = self.ready(self.new({'main.py': 'from helper import value\nprint(value)\n', 'helper.py': 'value="v1"\n', 'sql/query.sql': 'select 1;'}))
         current = self.activate(v1)

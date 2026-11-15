@@ -57,30 +57,49 @@ def page(clauses, params, size, scope, cursor, binding):
         next_cursor = base64.urlsafe_b64encode(json.dumps({'binding': signature, 'time': str(rows[-1][7]), 'id': rows[-1][0]}).encode()).decode()
     return (rows, has_more, next_cursor)
 
+def archive_pending(cutoff):
+    with GaussDB() as db:
+        return bool(db.execute_query_sql('SELECT 1 FROM wfs_run_history WHERE end_time < ? ORDER BY end_time,id LIMIT 1', params=(cutoff,)))
+
+
 def archive_batch(cutoff, size=200):
-    """Copy and compare every row before deleting it, in one transaction."""
-    if not 1 <= size <= 1000:
+    """Copy, verify and remove one locked batch in a transaction, never discard history."""
+    from collections import Counter
+    if type(size) is not int or not 1 <= size <= 1000:
         raise ValueError('batch size must be between 1 and 1000')
     if cutoff.tzinfo or cutoff > business_now() - dt.timedelta(days=90):
         raise ValueError('retain at least 90 days online')
     with GaussDB() as db:
         db.begin_transaction()
         try:
-            locking = ' FOR UPDATE'
-            rows = db.execute_query_sql(f'SELECT {RUN_COLUMNS} FROM wfs_run_history WHERE end_time < ? ORDER BY end_time,id LIMIT ?{locking}', params=(cutoff, size))
-            for row in rows:
-                key = (row[0], row[9])
-                existing = db.execute_query_sql(f'SELECT {RUN_COLUMNS} FROM wfs_run_history_archive WHERE id=? AND end_time=?', params=key)
-                if not existing:
-                    db.execute_sql(f'INSERT INTO wfs_run_history_archive({RUN_COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?)', params=tuple(row))
-                    existing = db.execute_query_sql(f'SELECT {RUN_COLUMNS} FROM wfs_run_history_archive WHERE id=? AND end_time=?', params=key)
-                if not existing or tuple(existing[0]) != tuple(row):
-                    raise RuntimeError('archive verification failed; source history retained')
-                if is_failure(row[6]):
-                    if not db.execute_query_sql('SELECT 1 FROM wfs_history_rollup WHERE pid=?', params=(row[1],)):
-                        db.execute_sql('INSERT INTO wfs_history_rollup(pid,archived_failures) VALUES(?,0)', params=(row[1],))
-                    db.execute_sql('UPDATE wfs_history_rollup SET archived_failures=archived_failures+1 WHERE pid=?', params=(row[1],))
-                db.execute_sql('DELETE FROM wfs_run_history WHERE id=? AND end_time=?', params=key)
+            # Keep uncounted rows online so the summary backfill and coverage check
+            # cannot lose them. Only completed summary rows are eligible to move.
+            locking = ' FOR UPDATE SKIP LOCKED' if db.dialect == 'PostgreSQL' else ' FOR UPDATE'
+            rows = db.execute_query_sql(f'SELECT {RUN_COLUMNS} FROM wfs_run_history WHERE summary_version=1 AND end_time < ? ORDER BY end_time,id LIMIT ?{locking}', params=(cutoff, size))
+            if not rows:
+                db.set_commit()
+                return 0
+            # One batch read/write/verification instead of a round trip per record.
+            predicate = ' OR '.join('(h.id=? AND h.end_time=?)' for _ in rows)
+            keys = tuple(value for row in rows for value in (row[0], row[9]))
+            columns = ','.join('h.' + name for name in RUN_COLUMNS.split(','))
+            db.execute_sql(f'INSERT INTO wfs_run_history_archive({RUN_COLUMNS}) SELECT {columns} FROM wfs_run_history h WHERE ({predicate}) AND NOT EXISTS (SELECT 1 FROM wfs_run_history_archive a WHERE a.id=h.id AND a.end_time=h.end_time)', params=keys)
+            copies = db.execute_query_sql(f'SELECT {columns} FROM wfs_run_history_archive h WHERE {predicate}', params=keys)
+            expected = {(row[0], str(row[9])): tuple(row) for row in rows}
+            actual = {(row[0], str(row[9])): tuple(row) for row in copies}
+            if actual != expected:
+                raise RuntimeError('archive verification failed; source history retained')
+            failures = Counter(row[1] for row in rows if is_failure(row[6]))
+            if failures and db.dialect != 'PostgreSQL':
+                db.execute_sql('LOCK TABLE wfs_history_rollup IN EXCLUSIVE MODE')
+            for pid, count in sorted(failures.items()):
+                if db.dialect == 'PostgreSQL':
+                    db.execute_sql('INSERT INTO wfs_history_rollup(pid,archived_failures) VALUES(?,?) ON CONFLICT(pid) DO UPDATE SET archived_failures=wfs_history_rollup.archived_failures+EXCLUDED.archived_failures', params=(pid, count))
+                elif db.execute_query_sql('SELECT 1 FROM wfs_history_rollup WHERE pid=?', params=(pid,)):
+                    db.execute_sql('UPDATE wfs_history_rollup SET archived_failures=archived_failures+? WHERE pid=?', params=(count, pid))
+                else:
+                    db.execute_sql('INSERT INTO wfs_history_rollup(pid,archived_failures) VALUES(?,?)', params=(pid, count))
+            db.execute_sql('DELETE FROM wfs_run_history WHERE ' + predicate.replace('h.', ''), params=keys)
             db.set_commit()
             return len(rows)
         except Exception:

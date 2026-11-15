@@ -44,6 +44,27 @@ class SupervisorTests(unittest.TestCase):
         self.assertNotIn('GUNICORN_CMD_ARGS', environment)
         self.assertNotIn('GUNICORN_FD', environment)
 
+    def test_main_pins_one_encrypted_configuration_for_all_children(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            environment={**serve.child_environment(),'WFS_SECRET_KEY':'supervisor-test-key'}
+            observed=[]
+            instance=SimpleNamespace(environment=environment,request_stop=lambda *args:None)
+            def run(services):
+                target=Path(instance.environment['WFS_PLATFORM_ACTIVE_CONFIG_FILE'])
+                self.assertTrue(target.is_file())
+                self.assertEqual(target.parent,root/'data/platform-runtime')
+                self.assertEqual([role for role,_,_ in services],['scheduler','web'])
+                observed.append(target)
+                return 0
+            instance.run=run
+            args=['serve','--project',str(root),'--data',str(root/'data')]
+            with patch.object(serve.sys,'argv',args),patch.object(serve,'Supervisor',return_value=instance),patch.object(serve,'check_ports'),patch.object(serve.signal,'signal'):
+                self.assertEqual(serve.main(),0)
+            self.assertEqual(len(observed),1)
+            self.assertFalse(observed[0].exists())
+
     def test_orderly_stop_reaps_both_roles(self):
         instance, code = self.run_supervisor(self.services(), stop_after=.3)
         self.assertEqual(code, 0)

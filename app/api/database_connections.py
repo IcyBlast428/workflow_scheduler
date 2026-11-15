@@ -14,6 +14,7 @@ def connections():
     try:
         from app.common.db.catalog import capabilities
         from app.bootstrap.helpers import get_runtime_env
+        from app.common.db.engine_pool import snapshot as pool_snapshot
 
         test = os.environ.get("WFS_POSTGRES_TEST") == "true"
         return success_msg(
@@ -29,6 +30,9 @@ def connections():
                     settings.public_profile(p) for p in settings.profiles().values()
                 ],
                 "supported_databases": capabilities(),
+                "business_pools": pool_snapshot(),
+                "business_pool_scope": "current_web_process",
+                "task_connection_entry": "NewDB",
             }
         )
     except ValueError as exc:

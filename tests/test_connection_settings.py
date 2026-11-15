@@ -64,6 +64,43 @@ class ConnectionSettingsTests(unittest.TestCase):
         self.assertTrue(options['ssl_verify_cert'])
         self.assertFalse(options['local_infile'])
 
+    def test_driver_types_defaults_and_tls_validation(self):
+        config = settings.validate(dict(self.form, dialect='dws', port=''))
+        self.assertEqual((config['dialect'], config['port'], config['driver']), ('gaussdb', 8000, 'DWS'))
+        self.assertEqual((config['pool_size'], config['max_overflow']), (1, 1))
+        self.assertEqual(settings.validate(dict(self.form, dialect='oracle', port=''))['port'], 1521)
+        server = settings.validate(dict(self.form, dialect='sqlserver', port='', tls='verify_identity'))
+        self.assertEqual(server['driver'], 'ODBC Driver 18 for SQL Server')
+        self.assertEqual(server['ssl_ca'], '')
+        self.assertEqual(settings.validate(dict(self.form, dialect='gaussdb', tls='require'))['tls'], 'require')
+        for change in ({'dialect': 'gaussdb', 'tls': 'verify_identity'},
+                       {'dialect': 'sqlserver', 'driver': '/tmp/arbitrary.so'},
+                       {'dialect': 'sqlserver', 'driver': 'Driver;PWD=hidden'},
+                       {'dialect': 'mysql', 'tls': 'require'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                settings.validate(dict(self.form, **change))
+
+    def test_oracle_probe_needs_only_read_only_select_and_always_closes(self):
+        profile = settings.validate(dict(self.form, dialect='oracle', port=1521))
+        adapter = MagicMock()
+        adapter.execute_query_sql.return_value = [(1,)]
+        with patch('app.common.db.factory.adapter_for', return_value=adapter), \
+                patch('app.common.db.engine_pool.dispose') as dispose:
+            result = settings.probe_business(profile)
+        adapter.execute_query_sql.assert_called_once_with('SELECT 1 FROM DUAL')
+        self.assertTrue(result['ready'])
+        adapter.close.assert_called_once()
+        dispose.assert_called_once()
+        adapter.reset_mock()
+        adapter.execute_query_sql.side_effect = RuntimeError('private-host-secret')
+        with patch('app.common.db.factory.adapter_for', return_value=adapter), \
+                patch('app.common.db.engine_pool.dispose') as dispose:
+            with self.assertRaises(ValueError) as error:
+                settings.probe_business(profile)
+        self.assertNotIn('private-host-secret', str(error.exception))
+        adapter.close.assert_called_once()
+        dispose.assert_called_once()
+
     def test_admin_only_connection_api_csrf_and_failed_save(self):
         app = create_app()
         client = app.test_client()

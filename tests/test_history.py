@@ -7,7 +7,7 @@ import test_local_integration as shared
 from app import create_app
 from app.bootstrap.database import GaussDB
 from app.bootstrap.history import archive_batch, RUN_COLUMNS
-from app.bootstrap import operations
+from app.bootstrap import operations, run_summary
 from app.api.task import views
 
 
@@ -20,12 +20,14 @@ class HistoryTests(unittest.TestCase):
 
     def tearDown(self):
         with GaussDB() as db:
-            for table in ('wfs_run_history','wfs_run_history_archive','wfs_history_rollup'):
+            for table in ('wfs_run_history','wfs_run_history_archive','wfs_history_rollup','wfs_run_summary','wfs_run_totals'):
                 db.execute_sql(f'DELETE FROM {table} WHERE pid=?', params=(self.pid,))
 
-    def insert(self, identifier, when, state=0, text='中文日志'):
+    def insert(self, identifier, when, state=0, text='中文日志', summarized=True):
         with GaussDB() as db:
             db.execute_sql(f'INSERT INTO wfs_run_history({RUN_COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?)', params=(identifier,self.pid,self.pid,'test','test','test',state,text,when-dt.timedelta(seconds=2),when))
+            if summarized:
+                run_summary.summarize_row(db, identifier, self.pid, state, when)
 
     def query(self, **kwargs):
         return self.client.post('/api/taskinfo/taskLogs', headers=self.headers, query_string={'taskid':self.pid, **kwargs})
@@ -90,6 +92,23 @@ class HistoryTests(unittest.TestCase):
         with GaussDB() as db:
             self.assertEqual(db.execute_query_sql('SELECT COUNT(*) FROM wfs_run_history WHERE pid=?',params=(self.pid,))[0][0],2)
             self.assertEqual(db.execute_query_sql('SELECT COUNT(*) FROM wfs_run_history_archive WHERE id=?',params=(self.pid+'-a',))[0][0],0)
+
+    def test_unsummarized_old_history_stays_online_until_backfilled(self):
+        stamp = dt.datetime.now() - dt.timedelta(days=120)
+        self.insert(self.pid, stamp, state=1, summarized=False)
+        cutoff = dt.datetime.now() - dt.timedelta(days=90)
+        self.assertEqual(archive_batch(cutoff), 0)
+        with GaussDB() as db:
+            self.assertFalse(run_summary.coverage(db)['complete'])
+            self.assertEqual(db.execute_query_sql('SELECT count(*) FROM wfs_run_history WHERE pid=?', params=(self.pid,))[0][0], 1)
+            self.assertEqual(db.execute_query_sql('SELECT count(*) FROM wfs_run_history_archive WHERE pid=?', params=(self.pid,))[0][0], 0)
+        self.assertEqual(run_summary.backfill(), 1)
+        self.assertEqual(archive_batch(cutoff), 1)
+        with GaussDB() as db:
+            self.assertTrue(run_summary.coverage(db)['complete'])
+            self.assertEqual(db.execute_query_sql('SELECT sum(executions) FROM wfs_run_summary WHERE pid=?', params=(self.pid,))[0][0], 1)
+            self.assertEqual(db.execute_query_sql('SELECT failures FROM wfs_run_totals WHERE pid=?', params=(self.pid,))[0][0], 1)
+        self.assertEqual(run_summary.backfill(), 0)
 
     def test_invalid_range_cursor_and_online_retention_guard(self):
         stamp = dt.datetime.now()

@@ -99,20 +99,22 @@ def enqueue_scheduled(job, planned):
     except ValueError:
         pass
     context = dict(source='scheduled', actor='scheduler', scheduled_time=str(planned), version=version, schedule_revision=(job.kwargs.get('limits') or {}).get('_schedule_revision', 0), parameters=task_policy['parameters'], scheduled_args=list(job.args), scheduled_limits=job.kwargs.get('limits') or {})
-    with admission.store() as db:
-        db.execute('BEGIN')
-        if db.execute('SELECT 1 FROM work_requests WHERE id=?', (identifier,)).fetchone():
-            return identifier
-        status, message = ('pending', '等待错峰时间。' if offset else '等待执行名额。')
-        if now >= expiry:
-            status, message = ('expired', '错过允许启动的时间，未执行。')
-        elif due >= expiry:
-            status, message = ('rejected', '错峰偏移超过允许启动窗口，请调整任务错峰设置。')
-        elif admission.maintenance()['enabled']:
-            status, message = ('cancelled', '维护期间的自动计划不补跑。')
-        elif _full(db, pid, policy):
-            status, message = ('rejected', '执行队列已满，此次计划未接收；请核对业务是否需要补跑。')
-        db.execute('INSERT INTO work_requests(id,pid,kind,status,payload,created_at,due_at,expires_at,message) VALUES(?,?,?,?,?,?,?,?,?)', (identifier, pid, 'scheduled', status, json.dumps(context, ensure_ascii=False), str(now), str(due), str(expiry), message))
+    with admission.lock:
+        closed = admission.maintenance()['enabled']
+        with admission.store() as db:
+            db.execute('BEGIN')
+            if db.execute('SELECT 1 FROM work_requests WHERE id=?', (identifier,)).fetchone():
+                return identifier
+            status, message = ('pending', '等待错峰时间。' if offset else '等待执行名额。')
+            if now >= expiry:
+                status, message = ('expired', '错过允许启动的时间，未执行。')
+            elif due >= expiry:
+                status, message = ('rejected', '错峰偏移超过允许启动窗口，请调整任务错峰设置。')
+            elif closed:
+                status, message = ('cancelled', '维护期间的自动计划不补跑。')
+            elif _full(db, pid, policy):
+                status, message = ('rejected', '执行队列已满，此次计划未接收；请核对业务是否需要补跑。')
+            db.execute('INSERT INTO work_requests(id,pid,kind,status,payload,created_at,due_at,expires_at,message) VALUES(?,?,?,?,?,?,?,?,?)', (identifier, pid, 'scheduled', status, json.dumps(context, ensure_ascii=False), str(now), str(due), str(expiry), message))
     if status != 'pending':
         logger.warning('scheduled request %s %s: %s', identifier, status, message)
     return identifier
@@ -135,10 +137,16 @@ def _dispatch(recover=False):
         db.execute("DELETE FROM work_requests WHERE id IN (SELECT id FROM work_requests WHERE status IN ('accepted','expired','rejected','cancelled') AND created_at<? LIMIT 1000)", (str(now - dt.timedelta(days=7)),))
     if admission.maintenance()['enabled'] or dispatch_control.reason(include_interval=False):
         return
+    budget = dispatch_control.available_slots()
+    if not budget:
+        return
     with admission.store() as db:
         rows = db.execute("SELECT id,pid,kind,payload,expires_at,created_at FROM work_requests WHERE status='pending' AND due_at<=? ORDER BY due_at,created_at,id LIMIT 100", (str(now),)).fetchall()
+    dispatched = 0
+    # Keep bounded look-ahead for task/group fairness, but only dispatch the
+    # available capacity. Global saturation must not rewrite every waiting row.
     for identifier, pid, kind, raw, expiry, created in rows:
-        if dispatch_control.reason(include_interval=False):
+        if dispatched >= budget or not dispatch_control.available_slots() or dispatch_control.reason(include_interval=False):
             break
         context = json.loads(raw)
         if expiry and str(business_now()) >= expiry:
@@ -155,11 +163,14 @@ def _dispatch(recover=False):
             from app.bootstrap.core import call_task_once
             result = admission.manual_request(context['actor'], pid, identifier, lambda: call_task_once(pid, actor=context['actor'], context={**context, 'request_id': identifier, 'expires_at': expiry}))
             status, run_id, message = ('accepted', result['run_id'], '')
+            dispatched += 1
             from app.bootstrap.runtime_metrics import record_delay
             record_delay('queue:dispatch_wait', created, business_now())
         except (admission.CapacityUnavailable, admission.MaintenanceClosed) as exc:
             with admission.store() as db:
                 db.execute("UPDATE work_requests SET status='pending',due_at=?,message=? WHERE id=?", (str(business_now() + dt.timedelta(seconds=1)), str(exc).replace('本次调度跳过', '等待名额').replace('本次计划跳过', '等待名额'), identifier))
+            if isinstance(exc, admission.MaintenanceClosed) or not dispatch_control.available_slots():
+                break
             continue
         except admission.PlanCancelled as exc:
             status, run_id, message = ('cancelled', '', str(exc)[:500])

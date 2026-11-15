@@ -110,10 +110,28 @@ class NewDBTests(unittest.TestCase):
         self.assertEqual(len(closed),2)
 
 
+    def test_pool_diagnostics_count_connections_waits_and_timeouts_without_secrets(self):
+        from app.common.db.engine_pool import snapshot
+        saved = settings.save(settings.validate(dict(self.saved, pool_size=1, max_overflow=0, pool_timeout=1)))
+        held = NewDB('pg_reports')
+        held.get_connection()
+        try:
+            with self.assertRaises(TimeoutError):
+                NewDB('pg_reports').query('SELECT 1')
+            stats = next(value for value in snapshot() if value['id'] == 'pg_reports')
+            self.assertEqual(stats['active'], 1)
+            self.assertEqual(stats['timeouts'], 1)
+            self.assertGreaterEqual(stats['wait_max_ms'], 900)
+            self.assertNotIn('password', str(stats))
+        finally:
+            held.close()
+        self.assertEqual(next(v for v in snapshot() if v['id'] == 'pg_reports')['active'], 0)
+
     def test_portable_parameters_ignore_literals_comments_and_support_legacy_named_style(self):
         db = NewDB('pg_reports')
         self.assertEqual(db.query("SELECT '?' AS literal, ? AS value -- ?\n", ('中文 50%',), as_dict=True), [{'literal':'?','value':'中文 50%'}])
         self.assertEqual(db.query('SELECT %(value)s', {'value':'value'}), [('value',)])
+        self.assertEqual(db.query("SELECT $$ :literal ? 'quote$$ AS literal, ? AS value -- :comment\n", (7,)), [(" :literal ? 'quote", 7)])
         with self.assertRaises(ValueError):
             db.query('SELECT ?,?', (1,))
         with self.assertRaises(RuntimeError):
@@ -127,13 +145,11 @@ class NewDBTests(unittest.TestCase):
         self.assertEqual(settings.validate(dict(mysql,dialect='postgresql'))['port'],5432)
         from app.common.db.catalog import capabilities
         catalog = {item['dialect']: item['label'] for item in capabilities()}
-        self.assertEqual(set(catalog), {'mysql', 'postgresql', 'clickhouse'})
-        self.assertEqual(catalog['postgresql'], 'PostgreSQL / GaussDB')
-        for removed in ('oracle', 'mssql', 'sqlserver'):
-            with self.subTest(dialect=removed), self.assertRaises(ValueError):
-                settings.validate(dict(mysql, dialect=removed))
-            with self.subTest(adapter=removed), self.assertRaises(ValueError):
-                adapter_for(dict(mysql, dialect=removed))
+        self.assertEqual(set(catalog), {'mysql', 'postgresql', 'gaussdb', 'sqlserver', 'oracle', 'clickhouse'})
+        self.assertEqual(catalog['postgresql'], 'PostgreSQL')
+        for family in ('oracle', 'mssql', 'sqlserver', 'gaussdb', 'dws'):
+            with self.subTest(dialect=family):
+                self.assertIn(settings.validate(dict(mysql, dialect=family))['dialect'], catalog)
         with self.assertRaises(ValueError):
             settings.validate(dict(mysql,id='platform',dialect='postgresql'))
         with self.assertRaises(ValueError):

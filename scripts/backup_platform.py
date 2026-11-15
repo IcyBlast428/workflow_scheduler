@@ -10,15 +10,22 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import zipfile
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=5432,tool='pg_dump',container=None,releases=None):
     if __package__:
         from .backup_files import add_task_storage
+        from .backup_bootstrap import collect, write, receipt_plan
     else:
         from backup_files import add_task_storage
+        from backup_bootstrap import collect, write, receipt_plan
     import fcntl
     data,tasks,output=map(lambda value:Path(value).resolve(),(data,tasks,output))
     if not data.is_dir() or not tasks.is_dir() or output.exists() or data in output.parents or tasks in output.parents:
@@ -26,6 +33,9 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
     output.parent.mkdir(parents=True,exist_ok=True)
     with (data/'.scheduler.lock').open('a') as lease:
         fcntl.flock(lease,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        bootstrap_files, bootstrap_manifest = collect(data)
+        receipt, receipt_config = receipt_plan(bootstrap_files, bootstrap_manifest,
+            database=database, schema=schema, host=host, port=port, container=container)
         with tempfile.TemporaryDirectory() as temporary:
             dump=Path(temporary)/'database.dump'
             if container:
@@ -43,6 +53,7 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
             descriptor=os.open(output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
             with os.fdopen(descriptor,'wb') as target,zipfile.ZipFile(target,'w',compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.write(dump,'database.dump')
+                write(archive, bootstrap_files)
                 for name in ('executions','audit-spool'):
                     for path in (data/name).rglob('*'):
                         if path.is_file() and not path.is_symlink():
@@ -53,10 +64,11 @@ def bundle(data, tasks, output, database, schema, user, host='127.0.0.1',port=54
                         archive.write(path,'jobs/'+relative.as_posix())
                 add_task_storage(archive, data, releases, output)
                 archive.writestr('manifest.json',json.dumps({'format':'wfs-platform-1','database':database,'schema':schema,
-                    'dump_tool':tool,'created_at':dt.datetime.now().isoformat(' '),'dump_sha256':digest.hexdigest(),
-                    'database_contains_encrypted_business_credentials':True,'encryption_keys_included':False,'restore_target':'new database only'},indent=2))
+                    'dump_tool':tool,'dump_endpoint':({'mode':'container','container':container} if container else {'mode':'network','host':host,'port':port}),'created_at':dt.datetime.now().isoformat(' '),'dump_sha256':digest.hexdigest(),
+                    'backup_receipt':receipt,'database_contains_encrypted_business_credentials':True,'platform_configuration':bootstrap_manifest,'encryption_keys_included':False,'restore_target':'new database only'},indent=2))
     from scripts.backup_receipt import record
-    record(data,output)
+    if receipt['write_requested']:
+        record(data,output, config_override=receipt_config)
     return output
 
 

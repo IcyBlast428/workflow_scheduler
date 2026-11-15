@@ -287,9 +287,14 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note='', ar
         else:
             _unpack(blob, code, entry, archive_layout)
         manifest = _manifest(code)
+        from app.bootstrap.business_db_policy import enforce as enforce_database_access
+        try:
+            database_access = enforce_database_access(code)
+        except ValueError as exc:
+            raise PackageError(str(exc)) from exc
         requirements = _requirements(code)
         selected = _entry(manifest, entry)
-        data = {'pid': record['pid'], 'version': version, 'created_at': str(business_now()), 'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '', 'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest), 'requirements': requirements, 'base_version': record.get('active_version'), 'base_revision': record['revision'], 'archive_layout': archive_layout}
+        data = {'pid': record['pid'], 'version': version, 'created_at': str(business_now()), 'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '', 'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest), 'requirements': requirements, 'base_version': record.get('active_version'), 'base_revision': record['revision'], 'archive_layout': archive_layout, 'database_access': database_access}
         temporary.rename(destination)
         _write_release(data, insert=True)
         return data
@@ -446,6 +451,11 @@ def _prepare_worker(pid, version, token):
         stage('校验文件')
         root = release_dir(pid, version)
         code = root / 'code'
+        from app.bootstrap.business_db_policy import enforce as enforce_database_access
+        try:
+            data['database_access'] = enforce_database_access(code)
+        except ValueError as exc:
+            raise PackageError(str(exc)) from exc
         if _checksum(_manifest(code)) != data['checksum']:
             raise PackageError('暂存代码校验不一致，请重新上传。')
         env = root / ('environment-' + token)
@@ -523,6 +533,12 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
         if selected not in {f['path'] for f in data['manifest'] if f['path'].endswith('.py')}:
             raise PackageError('任务包缺少当前调度配置使用的入口文件，请保留入口后重新上传。', 409)
         root = release_dir(pid, version)
+        if not rollback:
+            from app.bootstrap.business_db_policy import enforce as enforce_database_access
+            try:
+                data['database_access'] = enforce_database_access(root / 'code')
+            except ValueError as exc:
+                raise PackageError(str(exc)) from exc
         if data.get('shared_sdk_sha256') and (not data.get('shared_sdk_package')):
             from app.bootstrap.shared_sdk import verify
             if not verify(root, data['shared_sdk_sha256']):
@@ -678,6 +694,8 @@ def preview(pid, version, filename=None):
     config = _record_maps().get(pid) or {}
     selected = config.get('main_file') or data['main_file']
     result['preflight'] = dict(active_instances=runnings.count(pid), entry=selected, entry_present=selected in new, entry_changed=bool(base and base['main_file'] != data['main_file']), shared_sdk_changed=bool(base and base.get('shared_sdk_sha256') != data.get('shared_sdk_sha256')), shared_sdk_current=(base or {}).get('shared_sdk_sha256', ''), shared_sdk_candidate=data.get('shared_sdk_sha256', ''), dependencies_changed=any((c['path'] in ('requirements.txt', 'requirements.lock', 'pyproject.toml') or c['path'].startswith('wheels/') for c in changes)), environment_ready=data['status'] in ('ready', 'applied'), schedule_enabled=str(config.get('enabled', '')).lower() in ('1', 'true', 'yes', 'on'), current_version=record.get('active_version'), candidate_version=version, business_verified=False)
+    from app.bootstrap.business_db_policy import inspect_tree as inspect_database_access
+    result['preflight']['database_access'] = inspect_database_access(release_dir(pid, version) / 'code')
     if filename is None:
         from app.bootstrap.release_controls import preview as gates
         from app.extensions import scheduler

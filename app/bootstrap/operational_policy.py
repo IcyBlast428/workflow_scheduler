@@ -32,13 +32,15 @@ def save(kind, identifier, form, actor):
     else:
         raise ValueError('未知策略类型。')
     value.update(revision=previous['revision'] + 1, actor=actor, updated_at=str(business_now()))
-    with admission.lock, admission.store() as db:
-        db.execute('BEGIN')
-        row = db.execute('SELECT payload FROM settings WHERE key=?', (kind + ':' + identifier,)).fetchone()
-        revision = json.loads(row[0])['revision'] if row else 0
-        if revision != previous['revision']:
-            raise RuntimeError('策略已被修改，请刷新。')
-        db.replace('settings', ('key', 'payload'), (kind + ':' + identifier, json.dumps(value, ensure_ascii=False)))
+    with admission.lock:
+        with admission.store() as db:
+            db.execute('BEGIN')
+            row = db.execute('SELECT payload FROM settings WHERE key=?', (kind + ':' + identifier,)).fetchone()
+            revision = json.loads(row[0])['revision'] if row else 0
+            if revision != previous['revision']:
+                raise RuntimeError('策略已被修改，请刷新。')
+            db.replace('settings', ('key', 'payload'), (kind + ':' + identifier, json.dumps(value, ensure_ascii=False)))
+        admission.invalidate_policy_cache()
     return value
 
 def string_list(value, maximum=100):

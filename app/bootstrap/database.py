@@ -2,8 +2,8 @@
 """项目本体数据库连接工具。
 
 平台仅使用 GaussDB/DWS；本机协议验收显式使用 PostgreSQL。
-当前采用“短生命周期连接 + ODBC 驱动层复用”的模式：每次业务操作打开连接，
-操作结束关闭连接，避免在 Flask/Gunicorn 多线程环境里共享全局 connection。
+平台连接由有界的进程内连接池管理，每个句柄独占连接和事务；
+归还时回滚未完成事务，线程及进程之间不共享正在使用的连接。
 """
 
 import os
@@ -14,6 +14,9 @@ from functools import wraps
 
 try:
     import pyodbc
+    # QueuePool owns reuse and capacity. A second driver-manager pool would
+    # keep retired/overflow physical connections alive after close().
+    pyodbc.pooling = False
 except ImportError:
     pyodbc = None
 from configobj import ConfigObj
@@ -100,90 +103,63 @@ class GaussDB:
             else "GaussDB/DWS"
         )
 
-    def __init__(self, db_id=None):
+    def __init__(self, db_id=None, *, config_override=None, pooled=True):
+        from app.bootstrap import platform_config
+        options = dict(config_override) if config_override is not None else platform_config.active()
         self._in_transaction = False
+        self._lease = None
+        self.conn = self.cursor = None
         self.current_env = get_runtime_env()
-        db_name, schema = _split_db_id(
-            db_id or os.environ.get("WFS_DB_ID", DEFAULT_DB_ID)
-        )
-        self.__conf_dic = self.__get_db_config(db_name, schema)
-        self.__host = self.__conf_dic["host"]
-        self.__port = self.__conf_dic["port"]
-        self.__db = self.__conf_dic["db"]
-        self.__schema = self.__conf_dic["schema"]
-        self.__user = self.__conf_dic["user"]
-        self.__password = self.__conf_dic["password"]
-        self.__driver = os.environ.get("WFS_DB_DRIVER", GAUSS_DRIVER)
-
-        if self.__password and self.current_env == "production":
-            self.__password = base64.b64decode(self.__password).decode("utf-8")
-
-        if self.__driver == "psycopg" and os.environ.get("WFS_POSTGRES_TEST") == "true":
-            if self.__db != "wfstest" or self.__host not in ("127.0.0.1", "localhost"):
-                raise RuntimeError(
-                    "Native PostgreSQL acceptance is restricted to localhost/wfstest"
-                )
+        native_test = os.environ.get("WFS_POSTGRES_TEST") == "true" and config_override is None
+        direct = options['source'] == 'direct' and not native_test and db_id is None
+        if direct:
+            schema = options['schema']
+            config = dict(host=options['host'], port=options['port'], db=options['database'],
+                          schema=schema, user=options['user'], password=options['password'])
+        else:
+            identifier = db_id or (os.environ.get('WFS_DB_ID', DEFAULT_DB_ID) if native_test else options['db_id'])
+            db_name, schema = _split_db_id(identifier)
+            config = self.__get_db_config(db_name, schema)
+            if config.get('password') and self.current_env == 'production':
+                config['password'] = base64.b64decode(config['password']).decode('utf-8')
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', schema):
+            raise ValueError('invalid database schema identifier')
+        driver = os.environ.get('WFS_DB_DRIVER', GAUSS_DRIVER) if native_test else options['driver']
+        timeout = int(options['query_timeout'])
+        if not 1 <= timeout <= 3600:
+            raise ValueError('WFS_DB_QUERY_TIMEOUT_SECONDS must be between 1 and 3600')
+        if driver == 'psycopg' and native_test:
+            if config['db'] != 'wfstest' or config['host'] not in ('127.0.0.1', 'localhost'):
+                raise RuntimeError('Native PostgreSQL acceptance is restricted to localhost/wfstest')
             from app.bootstrap.postgres_native import Connection
-
-            from app.bootstrap.runtime_metrics import measure
-            with measure('database:connect'):
-                self.conn = Connection(
-                    host=self.__host,
-                    port=int(self.__port),
-                    dbname=self.__db,
-                    user=self.__user,
-                    password=self.__password,
-                )
-            self.cursor = self.conn.cursor()
-            try:
-                self.cursor.execute("SET statement_timeout = 10000")
-                self.cursor.execute(f"SET search_path TO {schema}")
-            except Exception:
-                self.close()
-                raise
-            return
-        if pyodbc is None:
-            raise RuntimeError(
-                "pyodbc is not installed; please run pip install -r requirements.txt and configure the DWS ODBC driver"
-            )
-
-        def odbc_value(value):
-            text = str(value)
-            return (
-                "{" + text.replace("}", "}}") + "}"
-                if any(char in text for char in ";{}")
-                else text
-            )
-
-        server_key = (
-            "SERVERNAME" if self.__driver.startswith("PostgreSQL") else "SERVER"
-        )
-        conn_str = ";".join(
-            f"{key}={odbc_value(value)}"
-            for key, value in (
-                ("DRIVER", self.__driver),
-                (server_key, self.__host),
-                ("DATABASE", self.__db),
-                ("UID", self.__user),
-                ("PWD", self.__password),
-                ("PORT", self.__port),
-            )
-        )
-        timeout_seconds = int(os.environ.get("WFS_DB_QUERY_TIMEOUT_SECONDS", "10"))
-        if not 1 <= timeout_seconds <= 3600:
-            raise ValueError("WFS_DB_QUERY_TIMEOUT_SECONDS must be between 1 and 3600")
-        # 高斯 DWS ODBC 驱动自带连接复用能力，Python 层不维护跨线程长连接。
-        from app.bootstrap.runtime_metrics import measure
-        with measure('database:connect'):
-            self.conn = pyodbc.connect(conn_str, autocommit=True, timeout=10)
-        self.conn.autocommit = True
-        self.cursor = self.conn.cursor()
-        # Server timeout also works when the ODBC driver rejects timeout attributes.
+            def connect():
+                return Connection(host=config['host'], port=int(config['port']), dbname=config['db'],
+                                  user=config['user'], password=config['password'])
+        else:
+            if pyodbc is None:
+                raise RuntimeError('pyodbc is not installed; configure the DWS ODBC driver')
+            def odbc_value(value):
+                text = str(value)
+                return '{' + text.replace('}', '}}') + '}' if any(c in text for c in ';{}') else text
+            server_key = 'SERVERNAME' if driver.startswith('PostgreSQL') else 'SERVER'
+            connection_string = ';'.join(f'{key}={odbc_value(value)}' for key, value in (
+                ('DRIVER', driver), (server_key, config['host']), ('DATABASE', config['db']),
+                ('UID', config['user']), ('PWD', config['password']), ('PORT', config['port'])))
+            def connect():
+                return pyodbc.connect(connection_string, autocommit=True, timeout=options['connect_timeout'])
+        if pooled:
+            from app.bootstrap.platform_pool import acquire
+            self._lease = acquire([driver, config], connect, options)
+            self.conn = self._lease.raw
+        else:
+            self.conn = connect()
         try:
-            self.cursor.execute(f"SET statement_timeout = {timeout_seconds * 1000}")
-            self.cursor.execute(f"set schema '{self.__schema}';")
-        except Exception:
-            self.close()
+            self.conn.autocommit = True
+            self.cursor = self.conn.cursor()
+            self.cursor.execute(f'SET statement_timeout = {timeout * 1000}')
+            self.cursor.execute(f'SET search_path TO {schema}')
+        except BaseException:
+            self.close(broken=True)
             raise
 
     def __enter__(self):
@@ -214,15 +190,24 @@ class GaussDB:
     def get_cursor(self):
         return self.cursor
 
-    def close(self):
+    def close(self, broken=False):
+        connection, cursor, lease = self.conn, self.cursor, self._lease
+        self.conn = self.cursor = self._lease = None
+        if connection is None:
+            return
         try:
-            if not self.conn.autocommit:
-                self.conn.rollback()
+            if cursor is not None:
+                cursor.close()
+            if not connection.autocommit:
+                connection.rollback()
+                connection.autocommit = True
+        except Exception:
+            broken = True
         finally:
-            try:
-                self.cursor.close()
-            finally:
-                self.conn.close()
+            if lease is not None:
+                lease.close(broken=broken)
+            else:
+                connection.close()
 
     @measured("database:query")
     def execute_query_sql(self, sql, return_json=False, params=None):

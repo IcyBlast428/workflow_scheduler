@@ -8,6 +8,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.bootstrap.database import GaussDB
 from app.bootstrap.history import archive_batch
+from app.bootstrap.timebase import business_now
 
 
 def main():
@@ -19,7 +20,7 @@ def main():
     args = parser.parse_args()
     if args.days < 90 or not 1 <= args.batch_size <= 1000 or not 1 <= args.max_batches <= 10000:
         parser.error('days >= 90; batch-size 1..1000; max-batches 1..10000')
-    cutoff = dt.datetime.now()-dt.timedelta(days=args.days)
+    cutoff = business_now()-dt.timedelta(days=args.days)
     if not args.apply:
         with GaussDB() as db:
             sample = db.execute_query_sql('SELECT id,end_time FROM wfs_run_history WHERE end_time < ? ORDER BY end_time,id LIMIT ?', params=(cutoff,args.batch_size))

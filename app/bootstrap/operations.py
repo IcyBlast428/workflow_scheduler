@@ -176,12 +176,14 @@ def save_history(record):
         output = record.get('reason', '') + '\n' + output
         if record.get('log_truncated') or path.exists() and path.stat().st_size >= 63 * 1024:
             output += '\nTask output was truncated at 63 KiB; retained log can be downloaded.'
+        from app.bootstrap.storage_policy import history_excerpt
+        excerpt = history_excerpt(record, output)
         with GaussDB() as db:
             db.begin_transaction()
             try:
                 if not db.execute_query_sql('SELECT 1 FROM wfs_run_history WHERE id=?', params=(record['run_id'],)):
                     db.execute_sql('INSERT INTO wfs_run_history(id,pid,taskname,dirname,group_name,folder_name,state,tasklog,start_time,end_time) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                                   params=(record['run_id'], record['pid'], record['task_name'], record.get('dir_name',''), record.get('group_name',''), record.get('folder_name',''), record.get('state',1), output, record.get('start_time') or record['created_at'], record['end_time']))
+                                   params=(record['run_id'], record['pid'], record['task_name'], record.get('dir_name',''), record.get('group_name',''), record.get('folder_name',''), record.get('state',1), excerpt, record.get('start_time') or record['created_at'], record['end_time']))
                     if record.get('state') == 0:
                         db.execute_sql('UPDATE wfs_job_stats SET last_status=0, last_sms_alarm=NULL, failed_times=0 WHERE pid=?', params=(record['pid'],))
                     elif not is_failure(record.get('state')):
@@ -307,6 +309,9 @@ def maintenance(recover=False):
         for pid, version in db.execute_query_sql('SELECT pid,version FROM wfs_task_config'):
             db.execute_sql('DELETE FROM wfs_config_versions WHERE pid=? AND version<=?', params=(pid,version - versions_to_keep))
         pending = db.execute_query_sql('SELECT c.pid FROM wfs_task_config c LEFT JOIN wfs_config_application a ON c.pid=a.pid WHERE a.pid IS NULL OR c.version<>a.version OR a.status<>?', params=('applied',))
+    if not recover:
+        from app.bootstrap.storage_policy import run_cycle
+        run_cycle()
     if _service_state['ready']:
         from app.bootstrap.core import aps_start
         for (pid,) in pending:

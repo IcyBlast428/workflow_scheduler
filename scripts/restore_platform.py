@@ -22,6 +22,11 @@ def restore(backup, destination):
                     digest.update(block)
             if digest.hexdigest()!=manifest['dump_sha256']:
                 raise ValueError('数据库备份摘要校验失败。')
+        if __package__:
+            from .backup_bootstrap import verify
+        else:
+            from backup_bootstrap import verify
+        verify(archive, manifest)
         for item in archive.infolist():
             name=PurePosixPath(item.filename)
             if name.is_absolute() or '..' in name.parts or '\\' in item.filename or ':' in item.filename:
@@ -48,7 +53,9 @@ def restore(backup, destination):
         except Exception:
             # Preserve failed material for inspection; never remove a computed tree.
             raise
-    receipt={'scope':'archive paths and dump checksum','database_restore_verified':False}
+    receipt={'scope':'archive paths, dump and platform bootstrap checksums','database_restore_verified':False,
+             'platform_configuration_applied':False,
+             'platform_configuration':manifest.get('platform_configuration', {})}
     (destination/'restore-receipt.json').write_text(json.dumps(receipt),encoding='utf-8')
     return destination
 

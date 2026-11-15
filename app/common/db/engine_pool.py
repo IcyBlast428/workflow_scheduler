@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.pool import NullPool, QueuePool
 
 _engines = OrderedDict()
@@ -22,8 +22,8 @@ def engine_for(config, url, connect_args, options=None):
     options = options or {}
     if config.get('pool_enabled', True):
         for name, value, low, high in [
-            ('pool_size',options.get('poolSize',config.get('pool_size',3)),1,20),
-            ('max_overflow',config.get('max_overflow',2),0,20),
+            ('pool_size',options.get('poolSize',config.get('pool_size',1)),1,20),
+            ('max_overflow',config.get('max_overflow',1),0,20),
             ('pool_recycle',options.get('poolRecycle',config.get('pool_recycle',600)),30,3600),
             ('pool_timeout',options.get('poolTimeout',config.get('pool_timeout',10)),1,120),
         ]:
@@ -57,14 +57,33 @@ def engine_for(config, url, connect_args, options=None):
                       connect_args=connect_args, pool_reset_on_return='rollback')
         if config.get('pool_enabled', True):
             kwargs.update(poolclass=QueuePool,
-                          pool_size=int(options.get('poolSize', config.get('pool_size', 3))),
-                          max_overflow=int(config.get('max_overflow', 2)),
+                          pool_size=int(options.get('poolSize', config.get('pool_size', 1))),
+                          max_overflow=int(config.get('max_overflow', 1)),
                           pool_recycle=int(options.get('poolRecycle', config.get('pool_recycle', 600))),
                           pool_timeout=int(options.get('poolTimeout', config.get('pool_timeout', 10))))
         else:
             kwargs['poolclass'] = NullPool
         engine = create_engine(url, **kwargs)
-        _engines[key] = {'signature': signature, 'engine': engine, 'used': now}
+        entry = {'signature': signature, 'engine': engine, 'used': now, 'enabled': bool(config.get('pool_enabled', True)),
+                 'created': 0, 'checkouts': 0, 'invalidations': 0, 'timeouts': 0, 'active': 0, 'wait_max_ms': 0.0, 'wait_last_ms': 0.0,
+                 'pool_size': int(kwargs.get('pool_size', 0)), 'max_overflow': int(kwargs.get('max_overflow', 0))}
+        def count(name):
+            def observed(*args):
+                with _lock:
+                    entry[name] += 1
+            return observed
+        event.listen(engine, 'connect', count('created'))
+        def checkout(*args):
+            with _lock:
+                entry['checkouts'] += 1
+                entry['active'] += 1
+        def checkin(*args):
+            with _lock:
+                entry['active'] = max(0, entry['active'] - 1)
+        event.listen(engine, 'checkout', checkout)
+        event.listen(engine, 'checkin', checkin)
+        event.listen(engine, 'invalidate', count('invalidations'))
+        _engines[key] = entry
         while len(_engines) > MAX_PROFILES:
             _engines.popitem(last=False)[1]['engine'].dispose()
         return engine
@@ -89,3 +108,33 @@ def _after_fork():
 if hasattr(os, 'register_at_fork'):
     os.register_at_fork(after_in_child=_after_fork)
 atexit.register(dispose)
+
+
+def record_wait(engine, milliseconds, timed_out=False):
+    """Only bounded counters, never SQL/parameters/credentials."""
+    with _lock:
+        for entry in _engines.values():
+            if entry['engine'] is engine:
+                value = round(max(0.0, milliseconds), 2)
+                entry['wait_last_ms'] = value
+                entry['wait_max_ms'] = max(entry['wait_max_ms'], value)
+                entry['timeouts'] += int(timed_out)
+                break
+
+
+def snapshot():
+    """This process only; task subprocess pools are not a global shared pool."""
+    with _lock:
+        result = []
+        for (dialect, identifier), entry in _engines.items():
+            if str(identifier).startswith('@probe-'):
+                continue
+            pool = entry['engine'].pool
+            value = {name: entry[name] for name in ('enabled', 'created', 'checkouts', 'invalidations', 'timeouts',
+                                                     'wait_max_ms', 'wait_last_ms', 'pool_size', 'max_overflow')}
+            value.update(id=identifier, dialect=dialect, pid=os.getpid(),
+                         active=pool.checkedout() if entry['enabled'] else entry['active'],
+                         idle=pool.checkedin() if entry['enabled'] else 0,
+                         overflow=max(0, pool.overflow()) if entry['enabled'] else 0)
+            result.append(value)
+        return result

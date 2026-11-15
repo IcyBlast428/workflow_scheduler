@@ -33,8 +33,10 @@ test('maintenance rejects new requests, preserves receipts and drains running ta
 test('GaussDB platform source and embedded task authorization workspace',async({page})=>{
   const faults=[];page.on('pageerror',e=>faults.push(e.message));
   await login(page,'connections');
-  await expect(page.getByText(/配置来源：独立协议测试配置/)).toBeVisible();
-  await expect(page.getByRole('button',{name:'测试并保存（重启生效）'})).toHaveCount(0);
+  await page.getByRole('button',{name:'平台数据库',exact:true}).click();
+  await expect(page.getByText(/当前是本机独立协议测试环境/)).toBeVisible();
+  await expect(page.getByRole('heading',{name:'平台数据库 · GaussDB / DWS'})).toBeVisible();
+  await expect(page.getByRole('combobox',{name:'配置来源',exact:true})).toHaveValue('service');
   await page.getByRole('button',{name:'任务列表',exact:true}).click();
   const row=page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
   await row.locator('.task-name-link').click();

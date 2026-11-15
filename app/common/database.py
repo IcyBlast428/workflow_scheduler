@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Task-facing database API; explicit access lazily loads platform drivers."""
+"""Tasks use NewDB for all business database families.
+
+The legacy GaussDB attribute remains for old frozen releases/importers only;
+new task publications reject direct platform/driver access with migration help.
+"""
 
 from app.common.db import NewDB, get_db
 

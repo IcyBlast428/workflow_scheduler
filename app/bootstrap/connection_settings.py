@@ -112,6 +112,7 @@ def validate(form):
     dialect = normalize(form.get("dialect", previous.get("dialect", "mysql")))
     if dialect not in DATABASES or identifier == "platform":
         raise ValueError("平台连接固定由服务配置管理；这里只保存任务业务连接。")
+    spec = DATABASES[dialect]
     result = {"id": identifier, "dialect": dialect, "charset": "utf8mb4"}
     for key, maximum in [("host", 253), ("database", 64), ("user", 100)]:
         value = form.get(key)
@@ -133,7 +134,7 @@ def validate(form):
     try:
         raw_port = form.get("port")
         port = (
-            {"mysql": 3306, "postgresql": 5432, "clickhouse": 8123}[dialect]
+            spec["port"]
             if raw_port in (None, "")
             else int(raw_port)
         )
@@ -151,17 +152,24 @@ def validate(form):
     if not result["password"]:
         raise ValueError("新连接必须填写数据库密码。")
     mode = form.get("tls", previous.get("tls", "disabled"))
-    if mode not in {"verify_identity", "disabled"}:
+    if mode not in spec.get("tls_modes", ["verify_identity", "disabled"]):
         raise ValueError("TLS 配置无效。")
     ca = form.get("ssl_ca", "")
     if not isinstance(ca, str) or len(ca) > 1024 or "\x00" in ca:
         raise ValueError("CA 证书路径无效。")
-    if mode == "verify_identity" and (not ca or not Path(ca).is_file()):
+    if mode == "verify_identity" and spec.get("ca_file", True) and (not ca or not Path(ca).is_file()):
         raise ValueError("启用 TLS 时请填写此服务器上有效的 CA 证书文件路径。")
-    result.update(tls=mode, ssl_ca=ca if mode == "verify_identity" else "")
+    result.update(tls=mode, ssl_ca=ca if mode == "verify_identity" and spec.get("ca_file", True) else "")
+    if spec.get("odbc_driver"):
+        driver = form.get("driver") or (previous.get("driver") if previous.get("dialect") == dialect else None) or spec["default_driver"]
+        if not isinstance(driver, str) or not 1 <= len(driver) <= 128 or any(ord(c) < 32 or c in ";{}\\/" for c in driver):
+            raise ValueError("ODBC 驱动请填写已安装的驱动名称，不能填写路径或连接字符串。")
+        result["driver"] = driver
+    else:
+        result["driver"] = ""
     for key, default, minimum, maximum in [
-        ("pool_size", 3, 1, 20),
-        ("max_overflow", 2, 0, 20),
+        ("pool_size", 1, 1, 20),
+        ("max_overflow", 1, 0, 20),
         ("pool_recycle", 600, 30, 3600),
         ("pool_timeout", 10, 1, 120),
     ]:
@@ -239,8 +247,14 @@ def probe_business(profile):
             "mysql": "SELECT VERSION()",
             "postgresql": "SELECT version()",
             "clickhouse": "SELECT version()",
+            "gaussdb": "SELECT version()",
+            "sqlserver": "SELECT @@VERSION",
+            "oracle": "SELECT 1 FROM DUAL",
         }[profile["dialect"]]
         version = adapter.execute_query_sql(sql)[0][0]
+        if profile["dialect"] == "oracle":
+            # Basic read-only health must not require access to v$version.
+            version = "Oracle（只读连通性检查通过）"
         return {
             "connected": True,
             "ready": True,

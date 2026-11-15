@@ -74,6 +74,14 @@ def reserve_launch():
         return True
 
 
+def available_slots(policy=None):
+    from app.bootstrap.global_vars import runnings
+    import os
+    policy = policy or load('dispatch')
+    maximum = min(policy['max_active'], int(os.environ.get('WFS_MAX_ACTIVE_RUNS', '20')))
+    return max(0, maximum - runnings.count())
+
+
 def snapshot():
     policy=load('dispatch')
     from app.bootstrap.global_vars import runnings
@@ -94,8 +102,12 @@ def wait_for_launch(reservation,deadline='',launch=lambda:None):
         if runnings.is_cancelled(reservation): raise LaunchCancelled('启动前已取消。')
         if deadline and str(business_now())>=deadline: raise LaunchExpired('已超过允许启动的时间，未启动业务进程。')
         with admission.lock:
-            admission.ensure_open()
-            if runnings.is_cancelled(reservation): raise LaunchCancelled('启动前已取消。')
-            if deadline and str(business_now())>=deadline: raise LaunchExpired('已超过允许启动的时间，未启动业务进程。')
-            if reserve_launch(): return launch()
+            # Cached checks keep the wait loop cheap. At the actual launch
+            # boundary, read maintenance directly under the same lock used by
+            # its writer; even a missing invalidation cannot start a new task.
+            if not reason():
+                admission.ensure_open(fresh=True)
+                if runnings.is_cancelled(reservation): raise LaunchCancelled('启动前已取消。')
+                if deadline and str(business_now())>=deadline: raise LaunchExpired('已超过允许启动的时间，未启动业务进程。')
+                if reserve_launch(): return launch()
         time.sleep(0.1)

@@ -3,7 +3,7 @@
 from app.common.db.config import load_database_config
 from app.common.db.mysql import MySQLAdapter
 from app.common.db.clickhouse import ClickHouseAdapter
-from app.common.db.adapters import PostgreSQLAdapter
+from app.common.db.adapters import PostgreSQLAdapter, GaussDBAdapter, SQLServerAdapter, OracleAdapter
 from app.common.db.catalog import DATABASES, normalize
 from contextlib import contextmanager
 
@@ -12,6 +12,9 @@ ADAPTERS = {
     'mysql': MySQLAdapter,
     'clickhouse': ClickHouseAdapter,
     'postgresql': PostgreSQLAdapter,
+    'gaussdb': GaussDBAdapter,
+    'sqlserver': SQLServerAdapter,
+    'oracle': OracleAdapter,
 }
 
 
@@ -23,6 +26,11 @@ def adapter_for(config):
     spec = DATABASES[dialect]
     if importlib.util.find_spec(spec['module']) is None:
         raise RuntimeError('此环境尚未安装数据库驱动：'+spec['package'])
+    if spec['module'] == 'pyodbc':
+        # QueuePool owns the connection budget. Disable driver-manager pooling
+        # before the first ODBC connection in this independent task process.
+        import pyodbc
+        pyodbc.pooling = False
     return ADAPTERS[dialect]({**config, 'dialect': dialect})
 
 
@@ -126,5 +134,5 @@ class NewDB:
 
 
 def get_db(db_id):
-    """根据 db_id 返回非高斯业务数据库连接。"""
+    """根据已授权连接标识返回任意受支持类型的业务数据库。"""
     return NewDB(db_id)

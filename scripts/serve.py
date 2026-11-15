@@ -13,6 +13,7 @@ import time
 from urllib.request import ProxyHandler, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 
 def commands(project, python, web_host, web_port, control_port, data, logs):
@@ -40,7 +41,7 @@ def child_environment():
     environment = dict(os.environ)
     # Role flags are pinned in commands(); inherited Gunicorn options must not
     # preload the scheduler or create additional workers/listeners.
-    for key in ('GUNICORN_CMD_ARGS', 'GUNICORN_FD', 'WFS_DEV_RUN_ALL'):
+    for key in ('GUNICORN_CMD_ARGS', 'GUNICORN_FD', 'WFS_DEV_RUN_ALL', 'WFS_PLATFORM_ACTIVE_CONFIG_FILE'):
         environment.pop(key, None)
     environment['PYTHONDONTWRITEBYTECODE'] = '1'
     return environment
@@ -175,8 +176,11 @@ def main():
     try:
         with instance_lock(data):
             check_ports(args.web_host, args.web_port, args.control_port)
-            return supervisor.run(commands(project, args.python, args.web_host, args.web_port, args.control_port, data, logs))
-    except (RuntimeError, OSError) as error:
+            from app.bootstrap.platform_config import frozen_service_config
+            with frozen_service_config(data, supervisor.environment) as frozen:
+                supervisor.environment['WFS_PLATFORM_ACTIVE_CONFIG_FILE'] = frozen
+                return supervisor.run(commands(project, args.python, args.web_host, args.web_port, args.control_port, data, logs))
+    except (RuntimeError, ValueError, OSError) as error:
         print('Cannot start service: ' + str(error), file=sys.stderr)
         return 1
 

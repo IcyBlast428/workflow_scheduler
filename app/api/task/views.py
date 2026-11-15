@@ -267,7 +267,7 @@ def _dedupe_task_markers(items):
             merged.append(normalized)
     return merged
 
-def _load_task_start_markers(hours=CPU_TIMELINE_HOURS, live_markers=None):
+def _history_task_start_markers(hours):
     since = business_now() - datetime.timedelta(hours=hours)
     markers = []
     try:
@@ -282,7 +282,14 @@ def _load_task_start_markers(hours=CPU_TIMELINE_HOURS, live_markers=None):
             markers.append({'id': row.get('pid'), 'name': row.get('taskname') or row.get('pid'), 'state': row.get('state'), 'group_name': row.get('group_name') or '', 'folder_name': row.get('folder_name') or '', 'start_time': _format_datetime_value(row.get('start_time')), 'end_time': _format_datetime_value(row.get('end_time')), 'source': 'history'})
     except Exception:
         markers = []
-    return sorted(_dedupe_task_markers(markers + (recent_task_starts(since) if live_markers is None else live_markers)), key=lambda item: _parse_datetime_value(item.get('start_time')) or datetime.datetime.min)
+    return markers
+
+
+def _load_task_start_markers(hours=CPU_TIMELINE_HOURS, live_markers=None):
+    markers = cached(('overview-start-markers', hours), 5, lambda: _history_task_start_markers(hours))
+    since = business_now() - datetime.timedelta(hours=hours)
+    live = recent_task_starts(since) if live_markers is None else live_markers
+    return sorted(_dedupe_task_markers(markers + live), key=lambda item: _parse_datetime_value(item.get('start_time')) or datetime.datetime.min)
 
 def _log_content(value):
     if value in (None, ''):
@@ -605,20 +612,33 @@ class TaskLogDetail(Resource):
             end_time = request.args.get('end_time')
             pid = request.args.get('pid')
             if log_id and end_time:
-                sql = 'SELECT ' + LOG_PREVIEW_SQL + ' FROM wfs_run_history WHERE id=? AND end_time=? LIMIT 1'
+                sql = 'SELECT ' + LOG_PREVIEW_SQL + ',id,pid FROM wfs_run_history WHERE id=? AND end_time=? LIMIT 1'
                 with GaussDB() as db:
                     res = db.execute_query_sql(sql=sql, return_json=False, params=(log_id, end_time))
                     if not res:
                         res = db.execute_query_sql(sql=sql.replace('wfs_run_history', 'wfs_run_history_archive'), return_json=False, params=(log_id, end_time))
             elif pid:
-                sql = 'SELECT ' + LOG_PREVIEW_SQL + ' FROM wfs_run_history WHERE pid=? ORDER BY end_time DESC LIMIT 1'
+                sql = 'SELECT ' + LOG_PREVIEW_SQL + ',id,pid FROM wfs_run_history WHERE pid=? ORDER BY end_time DESC LIMIT 1'
                 with GaussDB() as db:
                     res = db.execute_query_sql(sql=sql, return_json=False, params=(pid,))
             else:
                 return error_msg('missing log id')
         except Exception as exc:
             return error_msg('log read failed: ' + str(exc))
-        return success_msg(_log_content(res[0][0]) if res else ' ')
+        content = _log_content(res[0][0]) if res else ' '
+        if res:
+            # New history rows contain only a small summary. Preserve the existing
+            # bounded detail preview when a full retained execution file exists.
+            try:
+                from app.bootstrap.operations import read_log
+                detail = read_log(res[0][1], 'tail')
+                if detail['record']['pid'] == res[0][2] and not detail['log_unavailable']:
+                    content = detail['content']
+                    if detail['start_offset']:
+                        content = '[仅显示保留日志末尾，完整内容请进入执行详情下载。]\n' + content
+            except (ValueError, OSError):
+                pass
+        return success_msg(content)
 
 class CallTask(Resource):
 

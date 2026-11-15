@@ -8,7 +8,7 @@
     <div v-if="error" class="inline-alert danger" role="alert">{{ error }}</div><div v-if="message" class="inline-alert success" role="status">{{ message }}</div>
     <DatabaseConnections v-if="visited.has('connections')" v-show="section==='connections'" :confirm="confirm" />
     <section v-if="visited.has('repository')" v-show="section==='repository'" class="surface-card"><h3>依赖仓库</h3><PackageRepositorySettings open /></section>
-    <LogStorage v-if="visited.has('storage')" v-show="section==='storage'" />
+    <div v-if="visited.has('storage')" v-show="section==='storage'"><HistoryStoragePolicy /><LogStorage /></div>
     <DispatchSettings v-show="section==='runtime'" />
     <section v-show="section==='runtime'" class="surface-card runtime-status" aria-labelledby="runtime-heading">
       <div class="section-heading"><h3 id="runtime-heading">运行维护状态</h3><p>查看记录补写、历史汇总与通知发送情况。</p></div>
@@ -55,6 +55,7 @@ import VersionStorage from './VersionStorage.vue';
 import DatabaseConnections from './DatabaseConnections.vue';
 import PackageRepositorySettings from './PackageRepositorySettings.vue';
 import LogStorage from './LogStorage.vue';
+import HistoryStoragePolicy from './HistoryStoragePolicy.vue';
 defineProps({confirm:Function});
 const groups=[{id:'operations',label:'运行与发布',sections:[{id:'runtime',label:'运行策略'},{id:'release',label:'发布设置'}]},{id:'connections',label:'连接与依赖',sections:[{id:'connections',label:'数据库连接'},{id:'repository',label:'依赖仓库'}]},{id:'accounts',label:'账户与权限',sections:[{id:'accounts',label:'账户权限'}]},{id:'storage',label:'审计与存储',sections:[{id:'audit',label:'审计记录'},{id:'storage',label:'存储清理与备份'}]}];
 const sections=groups.flatMap(item=>item.sections);

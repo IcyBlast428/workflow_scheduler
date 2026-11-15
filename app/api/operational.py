@@ -43,6 +43,15 @@ def log_storage():
     audit('log_cleanup', 'platform', json.dumps(value, ensure_ascii=False))
     return success_msg(value)
 
+@blueprint.route('/api/admin/operational/history-storage', methods=['GET', 'POST'])
+def history_storage():
+    from app.bootstrap import storage_policy
+    if request.method == 'POST':
+        value = storage_policy.save(request.get_json(silent=True) or {}, g.identity['username'])
+        audit('history_storage_policy', 'platform', str(value['revision']))
+    return success_msg(storage_policy.snapshot())
+
+
 @blueprint.route('/api/admin/operational/policy/<kind>', methods=['GET', 'POST'])
 def operational_policy(kind):
     if kind not in ('task', 'release', 'groups', 'dispatch'):

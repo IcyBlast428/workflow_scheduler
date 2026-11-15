@@ -40,6 +40,8 @@ class ResetResult(unittest.TextTestResult):
                             params=tuple(row),
                         )
         task_loader.invalidate_task_cache()
+        from app.bootstrap.admission import clear_policy_cache
+        clear_policy_cache()
         super().startTest(test)
 
 

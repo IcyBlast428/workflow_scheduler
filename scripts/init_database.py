@@ -16,7 +16,11 @@ VERSION = 1
 def schema_name():
     from app.bootstrap.database import DEFAULT_DB_ID, _split_db_id
 
-    return _split_db_id(os.environ.get("WFS_DB_ID", DEFAULT_DB_ID))[1]
+    if os.environ.get('WFS_POSTGRES_TEST') == 'true':
+        return _split_db_id(os.environ.get("WFS_DB_ID", DEFAULT_DB_ID))[1]
+    from app.bootstrap.platform_config import active
+    value = active()
+    return value['schema'] if value['source'] == 'direct' else _split_db_id(value['db_id'])[1]
 
 
 def table_names():

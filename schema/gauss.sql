@@ -313,6 +313,10 @@ CREATE INDEX wfs_state_requests_pid ON wfs_state_admission_work_requests(pid,sta
 
 CREATE INDEX wfs_state_requests_expiry ON wfs_state_admission_work_requests(status,expires_at);
 
+-- Global timeline/cleanup access paths; pid-leading indexes do not cover these sorts.
+CREATE INDEX idx_wfs_run_start_id ON wfs_run_history(start_time DESC,id DESC);
+CREATE INDEX idx_wfs_executions_created_id ON wfs_executions(created_at,run_id);
+
 CREATE TABLE wfs_schema_version (version INTEGER PRIMARY KEY, installed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 
 INSERT INTO wfs_schema_version(version) VALUES(1);

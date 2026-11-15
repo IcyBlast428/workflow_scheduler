@@ -137,6 +137,51 @@ class QueueTests(unittest.TestCase):
         with self.assertRaises(ValueError):queue.queue_status('invalid')
         with self.assertRaises(ValueError):queue.queue_status(page=0)
 
+    def test_full_global_capacity_leaves_waiting_rows_untouched(self):
+        from app.bootstrap import global_vars
+        from app.bootstrap.auxiliary_store import Store
+        self.configure(max_active=1)
+        state=RunningState()
+        with patch.object(global_vars,'runnings',state):
+            state.claim('busy')
+            for n in range(12):queue.enqueue('queued_'+str(n),'manual',{},'admin')
+            original=queue.snapshot()
+            queries=[];execute=Store._run
+            def observed(store,sql,params=()):
+                queries.append(sql)
+                return execute(store,sql,params)
+            with patch.object(Store,'_run',observed),patch.object(core,'call_task_once') as submit:
+                queue.dispatch();queue.dispatch()
+                submit.assert_not_called()
+            self.assertFalse(any("status='dispatching'" in sql for sql in queries))
+            self.assertFalse(any('SELECT id,pid,kind,payload' in sql for sql in queries))
+            self.assertEqual(queue.snapshot(),original)
+
+    def test_dispatch_batch_respects_initial_available_capacity(self):
+        from app.bootstrap import global_vars
+        self.configure(max_active=3)
+        state=RunningState()
+        with patch.object(global_vars,'runnings',state):
+            state.claim('busy')
+            for n in range(8):queue.enqueue('queued_'+str(n),'manual',{},'admin')
+            with patch.object(core,'call_task_once',return_value='run') as submit:
+                queue.dispatch()
+                self.assertEqual(submit.call_count,2)
+            statuses=[row['status'] for row in queue.snapshot()]
+            self.assertEqual(statuses.count('accepted'),2)
+            self.assertEqual(statuses.count('pending'),6)
+
+    def test_final_launch_gate_ignores_stale_maintenance_snapshot(self):
+        self.assertFalse(admission.maintenance()['enabled'])
+        # Simulate an external write that did not emit our invalidation token.
+        with admission.store() as db:
+            db.replace('settings',('key','payload'),('maintenance',json.dumps({'enabled':True,'revision':1})))
+        self.assertFalse(admission.maintenance()['enabled'])
+        with patch.object(control,'reserve_launch') as reserve:
+            with self.assertRaises(admission.MaintenanceClosed):
+                control.wait_for_launch(object(),launch=lambda:self.fail('started during maintenance'))
+            reserve.assert_not_called()
+
     def test_policy_rejects_invalid_limits_and_stale_updates(self):
         for field,value in [('max_active',21),('max_pending',0),('max_wait_seconds',0),('start_interval_ms',0),('load_protection',1)]:
             with self.assertRaises(ValueError):self.configure(**{field:value})

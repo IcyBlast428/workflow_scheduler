@@ -11,8 +11,8 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 - Web 与单实例 Scheduler 分离，由 systemd 管理。
 - 平台数据统一存入 GaussDB：账户、会话、任务配置、执行历史、队列、授权、业务连接、GitLab 配置、发布记录、DDL 修改记录和标签。
 - 共享文件目录保存任务代码版本、独立 Python 环境、业务输出、日志、指标，以及数据库故障时的临时恢复文件。
-- 任务默认无业务库授权，只能使用管理员明确授权的连接。业务库支持 MySQL、PostgreSQL 协议（含需独立验收的 GaussDB）与 ClickHouse。
-- 不提供文件数据库、平台 MySQL 切换、旧目录自动发现或旧数据导入。全新安装使用唯一基线 `schema/gauss.sql`。
+- 任务默认无业务库授权，只能使用管理员明确授权的连接。业务库统一通过 `NewDB` 访问，提供 MySQL/PolarDB/MariaDB、PostgreSQL、GaussDB/DWS ODBC、SQL Server、Oracle 和 ClickHouse 适配器；目标服务端仍须实库验收。
+- 平台连接支持服务配置/Nacos或加密保存的自定义连接，完整重启后生效；不自动迁移平台数据。全新安装使用唯一基线 `schema/gauss.sql`，现有本版架构可按升级说明补齐性能索引。
 
 ## 功能
 
@@ -26,6 +26,10 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 
 初始化前由 DBA 建立独立数据库与账号，配置 Nacos 和 DWS ODBC。执行 `scripts/init_database.py` 创建全新 schema 的 32 张平台表；重复执行只检查当前基线。发现非空且没有本版标记的 schema 会拒绝初始化，不会升级、清空或导入。
 
+## 当前部署的性能升级
+
+已有 GaussDB/DWS 部署请阅读 [性能与数据库连接升级说明](docs/performance-and-connections.md)，其中包含索引预览/升级、平台连接备份与重启、业务 NewDB 访问规范、连接池与日志归档的配置边界。升级不会自动扩大任务并发，也不会自动删除历史数据。
+
 ## 本机开发与测试
 
 生产仅使用 GaussDB/DWS。本机缺少生产服务器时，可显式使用独立 PostgreSQL 测试库验证协议、事务与界面；它不代表已通过实际 GaussDB 验收。应用仍以 systemd 运行，Docker 仅承载独立测试数据库。
@@ -34,4 +38,4 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 
 ## 文档
 
-[架构与新手指南](docs/onboarding/index.html) · [新人讲解手册 PDF](docs/onboarding/workflow-scheduler-guide.pdf) · [文档索引](docs/README.md) · [任务发布](docs/task-packages.md) · [GitLab 联动](docs/gitlab-updates.md) · [DDL 与标签](docs/task-schema-and-tags.md) · [调度容量](docs/task-dispatch.md) · [新架构检查记录](docs/fresh-gauss-audit.md)
+[架构与新手指南](docs/onboarding/index.html) · [新人讲解手册 PDF](docs/onboarding/workflow-scheduler-guide.pdf) · [文档索引](docs/README.md) · [任务发布](docs/task-packages.md) · [GitLab 联动](docs/gitlab-updates.md) · [DDL 与标签](docs/task-schema-and-tags.md) · [调度容量](docs/task-dispatch.md) · [性能与连接升级](docs/performance-and-connections.md) · [业务 NewDB](docs/business-database-connections.md) · [日志与历史存储](docs/performance-storage.md) · [新架构检查记录](docs/fresh-gauss-audit.md)

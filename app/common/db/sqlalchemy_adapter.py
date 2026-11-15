@@ -2,35 +2,66 @@
 from contextlib import contextmanager
 import os
 import threading
+import time
+import re
+from sqlalchemy.exc import TimeoutError as PoolTimeout
+from app.common.db.engine_pool import record_wait
 from sqlalchemy import text
 from app.common.db.base import DatabaseAdapter
 from app.common.db.engine_pool import engine_for
 
 
-def _rewrite(sql, replacement):
-    """Replace bind tokens outside strings, identifiers and SQL comments."""
+def _rewrite(sql, replacement, dialect=None, protect_literals=False):
+    """Replace bind tokens outside dialect-specific literals and identifiers."""
     result, index, quote = [], 0, ''
+    def literal(value):
+        # SQLAlchemy text() recognizes colon binds even inside SQL literals.
+        # Its compiler removes this escape before sending SQL to the driver.
+        return re.sub(r'(?<!\\):(?=\w)', r'\\:', value) if protect_literals else value
+    backslash = False
     while index < len(sql):
         char = sql[index]
         if quote:
+            if protect_literals and char == ':' and (index == 0 or sql[index - 1] != '\\'):
+                result.append('\\')
             result.append(char)
-            if char == '\\' and index + 1 < len(sql):
-                index += 1; result.append(sql[index])
+            if backslash and char == '\\' and index + 1 < len(sql):
+                index += 1
+                result.append(sql[index])
             elif char == quote:
                 if index + 1 < len(sql) and sql[index + 1] == quote:
-                    result.append(quote); index += 1
+                    result.append(quote)
+                    index += 1
                 else:
                     quote = ''
-        elif char in "'\"`":
-            quote = char; result.append(char)
-        elif sql.startswith('--', index) or sql.startswith('/*', index) or char == '#':
+        elif dialect in {'postgresql', 'gaussdb'} and char == '$' and (tag := re.match(r'\$(?:[A-Za-z_]\w*)?\$', sql[index:])):
+            marker = tag.group()
+            end = sql.find(marker, index + len(marker))
+            end = len(sql) if end < 0 else end + len(marker)
+            result.append(literal(sql[index:end]))
+            index = end - 1
+        elif dialect == 'oracle' and sql[index:index + 2].lower() == "q'" and index + 2 < len(sql):
+            delimiter = sql[index + 2]
+            closing = {'[': ']', '{': '}', '(': ')', '<': '>'}.get(delimiter, delimiter)
+            end = sql.find(closing + "'", index + 3)
+            end = len(sql) if end < 0 else end + 2
+            result.append(literal(sql[index:end]))
+            index = end - 1
+        elif char in "'\"`" or dialect == 'sqlserver' and char == '[':
+            quote = ']' if char == '[' else char
+            backslash = dialect in {None, 'mysql', 'clickhouse'} or (
+                dialect in {'postgresql', 'gaussdb'} and char == "'" and index > 0 and sql[index - 1] in 'eE')
+            result.append(char)
+        elif sql.startswith('--', index) or sql.startswith('/*', index) or (char == '#' and dialect in {None, 'mysql', 'clickhouse'}):
             end = sql.find('*/', index + 2) + 2 if char == '/' else sql.find('\n', index)
             if end <= index:
                 end = len(sql)
-            result.append(sql[index:end]); index = end - 1
+            result.append(literal(sql[index:end]))
+            index = end - 1
         else:
             token, consumed = replacement(sql, index)
-            result.append(token); index += consumed - 1
+            result.append(token)
+            index += consumed - 1
         index += 1
     return ''.join(result)
 
@@ -61,8 +92,20 @@ class SQLAlchemyAdapter(DatabaseAdapter):
     def get_connection(self):
         self._check_owner()
         if self._connection is None or self._connection.closed:
-            self._connection = self.get_engine().connect()
+            self._connection = self._checkout()
         return self._connection
+
+    def _checkout(self):
+        engine = self.get_engine()
+        started = time.monotonic()
+        timed_out = False
+        try:
+            return engine.connect()
+        except PoolTimeout:
+            timed_out = True
+            raise
+        finally:
+            record_wait(engine, (time.monotonic() - started) * 1000, timed_out)
 
     def close(self):
         self._check_owner()
@@ -83,7 +126,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
                     self._connection.rollback()
                 raise
         else:
-            with self.get_engine().connect() as connection:
+            with self._checkout() as connection:
                 yield connection
 
     @contextmanager
@@ -104,7 +147,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
                 self.close()
 
     def _execute(self, connection, sql, params):
-        statement, values, native = self._prepare_statement(sql, params)
+        statement, values, native = self._prepare_statement(sql, params, self.config.get('dialect'))
         return connection.exec_driver_sql(statement, values) if native else connection.execute(text(statement), values)
 
     def execute_single_sql(self, sql, params=None):
@@ -132,7 +175,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
             return self.insert_many(sql, args)
 
     @staticmethod
-    def _prepare_statement(sql, params):
+    def _prepare_statement(sql, params, dialect=None):
         if params is None:
             return sql, None, True
         many = isinstance(params, list) and bool(params) and isinstance(params[0], (dict, tuple, list))
@@ -142,7 +185,7 @@ class SQLAlchemyAdapter(DatabaseAdapter):
             def named(source, index):
                 match = re.match(r'%\(([A-Za-z_]\w*)\)s', source[index:])
                 return (':'+match[1], len(match[0])) if match else (source[index], 1)
-            return _rewrite(sql, named), params, False
+            return _rewrite(sql, named, dialect, protect_literals=True), params, False
         if not isinstance(first, (list, tuple)):
             raise ValueError('参数请使用字典或元组；批量写入请传入字典/元组列表。')
         positions = []
@@ -151,11 +194,12 @@ class SQLAlchemyAdapter(DatabaseAdapter):
                 name = 'wfs_bind_' + str(len(positions)); positions.append(name)
                 return ':'+name, 1
             return source[index], 1
-        statement = _rewrite(sql, positional)
+        statement = _rewrite(sql, positional, dialect)
         if positions:
             rows = params if many else [params]
             if any(len(row) != len(positions) for row in rows):
                 raise ValueError('SQL 参数数量与占位符不一致。')
             values = [dict(zip(positions, row)) for row in rows]
+            statement = _rewrite(statement, lambda source, index: (source[index], 1), dialect, protect_literals=True)
             return statement, values if many else values[0], False
         return sql, params, True

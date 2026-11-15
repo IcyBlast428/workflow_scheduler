@@ -1,6 +1,6 @@
 # 文档索引
 
-当前版本只面向全新 GaussDB/DWS 部署，无旧数据迁移。
+平台正式部署使用 GaussDB/DWS；全新安装与已有本版架构的性能升级分别按对应说明执行，不自动导入旧架构数据或迁移平台数据库。
 
 - [架构图与新手使用说明（离线网页）](onboarding/index.html)
 - [新人讲解手册（12 页 PDF）](onboarding/workflow-scheduler-guide.pdf)
@@ -14,6 +14,9 @@
 - [独立环境与私有 PyPI](task-environments-and-nexus.md)
 - [输出与项目目录](task-outputs-and-projects.md)
 - [DDL 与标签](task-schema-and-tags.md)
+- [性能优化与数据库连接升级](performance-and-connections.md)
+- [统一业务数据库连接 / NewDB](business-database-connections.md)
+- [日志摘要与历史归档](performance-storage.md)
 - [排队与负载控制](task-dispatch.md)
 - [导航与日志清理](navigation-and-log-storage.md)
 - [执行矩阵](execution-matrix.md)

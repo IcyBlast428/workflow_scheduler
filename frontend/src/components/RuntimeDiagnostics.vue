@@ -26,7 +26,7 @@ const health=computed(()=>props.runtime.execution_health || {});
 const incomplete=computed(()=>performance.value.write_error || performance.value.invalid_snapshots || performance.value.truncated || performance.value.dropped_metrics);
 const cards=[{name:'database:connect',label:'平台数据库连接'},{name:'lock:all',label:'事务锁等待'},{name:'queue:dispatch_wait',label:'队列等待'},{name:'task:start_delay',label:'任务启动延迟'}];
 const excluded=[{name:'cancelled',label:'取消'},{name:'interrupted',label:'中断'},{name:'skipped',label:'跳过'},{name:'missed',label:'错过'},{name:'unknown',label:'未知'}];
-const names={'lock:all':'事务锁等待（全部分区）','database:connect':'平台数据库连接','database:config':'数据库配置读取','database:query':'数据库查询','database:write':'数据库写入','queue:dispatch_wait':'请求队列等待','task:start_delay':'任务启动延迟'};
+const names={'lock:all':'事务锁等待（全部分区）','database:connect':'平台数据库物理连接建立','database:pool_wait':'平台连接池等待','database:config':'数据库配置读取','database:query':'数据库查询','database:write':'数据库写入','queue:dispatch_wait':'请求队列等待','task:start_delay':'任务启动延迟'};
 const label=name=>names[name] || (name.startsWith('lock:')?'事务锁等待 · '+name.slice(5):name.startsWith('nacos:')?'Nacos · '+name.slice(6):name);
 const duration=value=>value==null?'待采样':value>=1000?(value/1000).toFixed(2)+' s':Number(value).toFixed(1)+' ms';
 </script>
