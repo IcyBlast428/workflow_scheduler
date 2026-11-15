@@ -2,8 +2,8 @@
   <ModalShell :embedded="embedded" :open="Boolean(runId)" :label="`本次执行：${record.task_name || record.pid || '加载中'}`" panel-class="execution-modal" backdrop-class="" @close="$emit('close')">
       <header class="modal-head"><div><h3>本次执行：{{ record.task_name || record.pid || '加载中' }}</h3><p class="hint mono">{{ runId }}</p></div>
         <button class="btn icon-only" title="关闭" @click="$emit('close')">×</button></header>
-      <div class="modal-body">
-        <LoadingStatus :active="initialLoading" label="正在读取执行详情与日志…" />
+      <div class="modal-body execution-body">
+        <LoadingStatus compact :active="initialLoading" label="正在读取执行详情与日志…" />
         <div v-if="error" class="inline-alert danger">{{ error }} <button class="btn" @click="refresh(true)">重试</button></div>
         <section v-if="record.status" class="workbench-summary" aria-label="执行摘要">
           <div><small>执行结果</small><strong><span class="tag" :class="statusClass(record.status)">{{ statusLabel(record.status) }}</span></strong></div>
@@ -31,8 +31,8 @@
         <p v-if="logUnavailable" class="hint">{{ record.log_cleaned_at ? '日志文件已清理，执行记录和历史摘要仍然保留。' : '日志尚未生成或已超过保留期限。' }}</p>
         <p v-else class="hint">{{ historical ? '正在分段查看历史日志' : '默认展示日志末尾，页面最多保留最近 256 KiB' }} · 文件大小 {{ (logSize/1024).toFixed(1) }} KiB。搜索仅针对当前已加载内容，完整内容可下载查看。</p>
         <div class="filter-actions" aria-label="日志分段导航"><button class="btn" :disabled="initialLoading || inFlight || !pageStart" @click="showPage(0)">日志开头</button><button class="btn" :disabled="initialLoading || inFlight || !pageStart" @click="showPage(Math.max(0,pageStart-65536))">较早一段</button><button class="btn" :disabled="initialLoading || inFlight || !historical || offset>=logSize" @click="showPage(offset)">较后一段</button><button class="btn" :disabled="initialLoading || inFlight || logUnavailable" @click="showPage('tail')">最新日志</button></div>
-        <div class="filter-actions"><input v-model="search" class="input" placeholder="搜索当前日志片段" aria-label="搜索当前日志片段">
-          <label><input v-model="follow" type="checkbox">自动滚动</label>
+        <div class="filter-actions execution-log-toolbar"><input v-model="search" class="input" placeholder="搜索当前日志片段" aria-label="搜索当前日志片段">
+          <label class="execution-log-follow"><input v-model="follow" type="checkbox">自动滚动</label>
           <a v-if="!logUnavailable" class="btn" :href="`/api/taskinfo/run-download?run_id=${runId}`" download>下载保留日志</a></div>
         <pre ref="logElement" class="log-pre execution-output">{{ filtered || emptyExecutionLog(record.status, search) }}</pre>
         </div>

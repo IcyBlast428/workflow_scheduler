@@ -36,4 +36,4 @@ async function cancelRequest(item){if(!await props.confirm({title:'取消待派�
 async function probe(){try{probeResult.value=await api.isolationProbe();}catch(e){error.value=e.message;}}
 onBeforeUnmount(()=>generation++);
 </script>
-<style scoped>.task-operations,.task-operations fieldset,.operational-stack{display:grid;gap:16px}.task-operations fieldset{border:0;padding:0;margin:0;min-width:0}.task-operations label{display:grid;gap:8px}.task-operations .checkbox-row{display:flex}.task-operations .filter-grid{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}</style>
+<style scoped>.task-operations,.task-operations fieldset,.operational-stack{display:grid;gap:16px}.task-operations fieldset{border:0;padding:0;margin:0;min-width:0}.task-operations label{display:grid;gap:8px}.task-operations .checkbox-row{display:flex}.task-operations .filter-grid{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}</style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="loading-status" :class="{ 'is-loading': visible }" :aria-busy="active">
+  <div class="loading-status" :class="{ 'is-loading': visible, 'is-compact': compact }" :aria-busy="active">
     <div class="loading-status-content" :aria-hidden="!visible">
       <span role="status" aria-live="polite">{{ visible ? label : '' }}</span>
       <div class="loading-bar" aria-hidden="true"></div>
@@ -8,7 +8,7 @@
 </template>
 <script setup>
 import { onBeforeUnmount, ref, watch } from 'vue';
-const props = defineProps({ active: Boolean, label: { type: String, default: '正在更新…' } });
+const props = defineProps({ active: Boolean, compact: Boolean, label: { type: String, default: '正在更新…' } });
 const visible = ref(false);
 let timer;
 watch(() => props.active, active => {

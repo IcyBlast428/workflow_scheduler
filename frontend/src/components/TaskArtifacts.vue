@@ -17,7 +17,7 @@
     <p class="hint">
       本次执行独立保存，更新代码不会覆盖。运行中可预览，执行结束后可下载完整文件。
     </p>
-    <LoadingStatus
+    <LoadingStatus compact
       :active="loading || previewLoading"
       label="正在读取输出文件…"
     />
@@ -77,7 +77,7 @@
         </tbody>
       </table>
     </div>
-    <div class="filter-actions">
+    <div v-if="offset || hasMore" class="filter-actions">
       <button
         v-if="offset"
         class="btn"

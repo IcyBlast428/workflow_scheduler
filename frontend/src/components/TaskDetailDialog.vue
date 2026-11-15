@@ -145,7 +145,14 @@ onBeforeUnmount(() => {generation++;window.removeEventListener('hashchange',rest
 
 <style>
 .modal-backdrop.task-workbench-backdrop{display:flex;align-items:stretch;justify-content:flex-end;padding:12px}.task-detail-modal.task-workbench{width:min(1320px,100%);height:calc(100dvh - 24px);max-height:calc(100dvh - 24px);margin-left:auto}.workbench-groups{display:flex;gap:8px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid var(--line);flex:none}.workbench-groups .btn{min-height:38px}.task-workbench .detail-tabs{flex:1 1 240px}.task-workbench .detail-tabs .btn.primary{background:var(--brand-soft);color:var(--brand);border-color:var(--brand)}.task-workbench .detail-toolbar{padding-top:12px}.task-workbench .detail-panels{overflow:auto}.task-workbench .workbench-summary{gap:12px}.task-workbench .detail-tab-panel{min-height:200px;height:auto}.task-workbench .detail-tab-panel:has(.source-viewer){height:100%}
-@media(max-width:600px){.modal-backdrop.task-workbench-backdrop{padding:0}.task-detail-modal.task-workbench{height:100dvh;max-height:100dvh;border-radius:0}.task-workbench .modal-body{padding:12px}.task-workbench .workbench-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.task-workbench .detail-toolbar .btn{min-height:34px;padding:6px 10px}.task-workbench .loading-status{height:24px;padding:0}.workbench-groups{gap:4px}.workbench-groups .btn{padding:6px 10px}}
+@media(max-width:600px){.modal-backdrop.task-workbench-backdrop{padding:0}.task-detail-modal.task-workbench{height:100dvh;max-height:100dvh;border-radius:0}.task-workbench .modal-body{padding:12px}.task-workbench .workbench-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.task-workbench .detail-toolbar .btn{min-height:34px;padding:6px 10px}.task-workbench .task-detail-body > .loading-status{height:24px;padding:0}.workbench-groups{gap:4px}.workbench-groups .btn{padding:6px 10px}}
+@media (max-width: 600px), (max-height: 600px) {
+  .task-workbench .task-detail-body { overflow: auto; }
+  .task-workbench .task-detail-body > * { flex-shrink: 0; }
+  .task-workbench .detail-panels { flex: 0 0 auto; overflow: visible; }
+  .task-workbench .detail-panels > .detail-tab-panel { min-height: 0; height: auto; }
+}
+
 </style>
 
 <style scoped>

@@ -1637,6 +1637,9 @@ tbody tr:hover {
 .loading-status:not(.is-loading) .loading-bar::before { animation:none; }
 .loading-status-content > span { display: block; height: 15px; margin-bottom: 5px; color: var(--muted); font-size: 11px; line-height: 15px; }
 .loading-status .loading-bar { height: 2px; border-radius: 2px; }
+/* Compact feedback keeps a stable progress line without an empty text row. */
+.loading-status.is-compact { height: 4px; padding: 0; position: relative; }
+.loading-status.is-compact .loading-status-content > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .panel > .loading-status, .schedule-body > .loading-status { padding-inline: var(--panel-padding); }
 .task-detail-modal { height: min(760px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); }
 .task-detail-body { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
@@ -1745,7 +1748,17 @@ tbody tr:hover {
 .workbench-summary {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:12px;padding:14px 16px;margin-bottom:16px;border:1px solid var(--line);border-radius:12px;background:var(--panel-soft)}
 .workbench-summary>div{min-width:0;display:grid;gap:7px}.workbench-summary small{color:var(--muted);font-size:12px}.workbench-summary strong{font-size:14px;overflow-wrap:anywhere}
 .execution-reason p,p.execution-reason{margin:6px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}.execution-content-tabs{margin-top:12px}
-.execution-modal .filter-actions .input { width: auto; flex: 1 1 260px; }
+/* Keep nested execution tools separated in both dialogs and task workbenches. */
+.execution-log-panel { display: grid; align-content: start; gap: 12px; min-width: 0; }
+.execution-log-panel > .hint { margin: 0; }
+.execution-modal > .execution-body { display: flex; flex-direction: column; }
+.execution-modal > .execution-body > * { flex-shrink: 0; }
+.execution-modal .execution-log-panel { flex: 1; min-height: 0; grid-template-rows: auto auto auto minmax(220px, 1fr); }
+.execution-modal .execution-output { min-height: 0; max-height: none; }
+.execution-log-toolbar .input { width: auto; min-width: 0; flex: 1 1 260px; }
+.execution-log-follow { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.execution-log-follow input { margin: 0; }
+.execution-log-toolbar > .btn { flex: none; }
 .execution-output { padding: 16px; margin: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-soft); }
 .modal-head .hint { margin: 6px 0 0; }
 .modal-body h4 { margin: 24px 0 12px; font-size: 14px; }

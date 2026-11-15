@@ -1,7 +1,7 @@
 <template>
   <section class="panel admin-panel">
     <div class="panel-head"><div><h2>平台设置</h2><p>集中管理运行发布、连接依赖、账户权限与存储，切换分栏保留编辑内容。</p></div><button class="btn" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></div>
-    <LoadingStatus :active="loading" label="正在更新维护状态与账户…" />
+    <LoadingStatus compact :active="loading" label="正在更新维护状态与账户…" />
     <nav class="settings-nav" aria-label="平台设置分组"><button v-for="item in groups" :key="item.id" class="btn" :class="{primary:group.id===item.id}" :aria-pressed="group.id===item.id" @click="selectSection(item.sections[0].id)">{{ item.label }}</button></nav>
     <nav v-if="group.sections.length>1" class="settings-nav" aria-label="平台设置分栏"><button v-for="item in group.sections" :key="item.id" class="btn" :class="{primary:section===item.id}" :aria-pressed="section===item.id" @click="selectSection(item.id)">{{ item.label }}</button></nav>
     <div class="panel-body">

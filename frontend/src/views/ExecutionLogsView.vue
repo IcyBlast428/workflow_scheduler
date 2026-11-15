@@ -167,4 +167,19 @@ const filterChips = computed(() => {
 });
 defineEmits(['range', 'search', 'reset', 'open', 'page', 'page-size','updates','tasks','clear-filter']);
 </script>
-<style scoped>.log-update-lane,.log-filter-chips{min-height:48px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 var(--panel-padding) 8px}.log-update-lane .hint{font-size:12px}.log-filter-chips .btn{min-height:32px;white-space:normal;overflow-wrap:anywhere}</style>
+<style scoped>
+.filter-grid.logs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.filter-grid.logs > .form-row { min-width: 0; }
+.filter-grid.logs > .filter-actions { grid-column: 1 / -1; }
+.filter-grid.logs :is(.input, .select) { width: 100%; min-width: 0; }
+@media (min-width: 1400px) {
+  .filter-grid.logs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (max-width: 980px) {
+  .filter-grid.logs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .filter-grid.logs { grid-template-columns: minmax(0, 1fr); }
+}
+.log-update-lane,.log-filter-chips{min-height:48px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 var(--panel-padding) 8px}.log-update-lane .hint{font-size:12px}.log-filter-chips .btn{min-height:32px;white-space:normal;overflow-wrap:anywhere}
+</style>
