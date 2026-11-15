@@ -1,4 +1,4 @@
-"""Collect only encrypted platform bootstrap evidence, never keys or target paths."""
+"""Collect encrypted platform and Nacos bootstrap evidence, never keys or target paths."""
 import base64
 import hashlib
 import os
@@ -6,26 +6,31 @@ from pathlib import Path
 import stat
 import zipfile
 
-NAMES = {'pending': 'bootstrap/platform-connection.enc', 'active': 'bootstrap/platform-active.enc'}
+NAMES = {'pending': 'bootstrap/platform-connection.enc', 'active': 'bootstrap/platform-active.enc',
+         'nacos': 'bootstrap/nacos-connection.enc'}
 
 
 def collect(data):
     """分别保存待生效密文与本次启动快照；不把外部路径或解密密钥写入清单。"""
     configured = os.environ.get('WFS_PLATFORM_CONFIG_FILE')
     active = os.environ.get('WFS_PLATFORM_ACTIVE_CONFIG_FILE')
+    nacos = os.environ.get('WFS_NACOS_CONFIG_FILE')
     paths = {'pending': Path(configured) if configured else Path(data) / 'platform-connection.enc',
-             'active': Path(active) if active else None}
+             'active': Path(active) if active else None,
+             'nacos': Path(nacos) if nacos else Path(data) / 'nacos-connection.enc'}
     files, manifest = {}, {'automatic_restore': False, 'keys_included': False}
     for role, path in paths.items():
-        entry = {'included': False, 'role': 'saved_for_next_restart' if role == 'pending' else 'service_start_snapshot'}
+        roles = {'pending': 'saved_for_next_restart', 'active': 'service_start_snapshot',
+                 'nacos': 'configuration_center_connection'}
+        entry = {'included': False, 'role': roles[role]}
         manifest[role] = entry
         if path is None:
             continue
         if path.is_symlink():
             raise ValueError('平台连接备份不接受符号链接。')
         if not path.exists():
-            if role == 'pending' and configured:
-                raise ValueError('显式指定的平台连接配置文件不存在，备份未创建。')
+            if (role == 'pending' and configured) or (role == 'nacos' and nacos):
+                raise ValueError('显式指定的引导连接配置文件不存在，备份未创建。')
             continue
         if not path.is_file() or path.stat().st_size > 65536:
             raise ValueError('平台连接配置文件类型或大小无效，备份未创建。')
@@ -60,6 +65,8 @@ def verify(archive, manifest):
         raise ValueError('平台连接备份清单无效。')
     for role, name in NAMES.items():
         entry = configuration.get(role)
+        if role == 'nacos' and entry is None:
+            continue  # 旧版本备份没有 Nacos 引导项，仍可正常校验和恢复。
         if not isinstance(entry, dict) or type(entry.get('included')) is not bool:
             raise ValueError('平台连接备份清单无效。')
         if not entry['included']:
@@ -94,12 +101,23 @@ def receipt_plan(files, manifest, *, database, schema, host, port, container=Non
         from app.bootstrap import platform_config
         if active_path:
             options = json.loads(platform_config._cipher().decrypt(files[NAMES['active']]))
+            frozen_nacos = options.get('_nacos_resolved')
+            if frozen_nacos is not None:
+                fields = ('host', 'port', 'database', 'schema', 'user', 'password')
+                if not isinstance(frozen_nacos, dict) or any(key not in frozen_nacos for key in fields):
+                    return skipped('active_configuration_target_could_not_be_verified')
+                # 本次启动的实际连接才是证据；远端配置可能已经被编辑或切换。
+                options = {**options, **{key: frozen_nacos[key] for key in fields}, 'source': 'direct'}
+            elif options.get('source') == 'nacos':
+                return skipped('nacos_configuration_has_no_frozen_active_evidence')
             baseline = {**platform_config.defaults(), **options}
             options = platform_config.validate(baseline, previous=baseline)
         else:
             # Even pre-bootstrap deployments must match the explicitly dumped
             # endpoint before writing a receipt through their service settings.
             options = platform_config.defaults()
+        if options['source'] == 'nacos':
+            return skipped('nacos_configuration_has_no_frozen_active_evidence')
         if options['source'] == 'service':
             # Resolve service configuration without opening a database connection.
             from app.bootstrap.database import GaussDB, _split_db_id

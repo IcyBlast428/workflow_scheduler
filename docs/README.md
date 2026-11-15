@@ -16,6 +16,8 @@
 - [DDL 与标签](task-schema-and-tags.md)
 - [性能优化与数据库连接升级](performance-and-connections.md)
 - [统一业务数据库连接 / NewDB](business-database-connections.md)
+- [Nacos 2.x 配置管理与双向同步](nacos-connections.md)
+- [数据库增删改查、事务与异步用法](database-usage.md)
 - [日志摘要与历史归档](performance-storage.md)
 - [排队与负载控制](task-dispatch.md)
 - [导航与日志清理](navigation-and-log-storage.md)

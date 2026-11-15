@@ -4,6 +4,8 @@ from flask import Blueprint, request, g
 from app.bootstrap import platform_config as settings
 from app.bootstrap.global_vars import success_msg, error_msg
 from app.settings import AUTH_ADMIN_USERNAME
+from app.bootstrap import nacos_connections
+from app.common.nacos import NacosError, NacosConflict, NacosPublishUncertain
 
 blueprint = Blueprint('platform_database', __name__)
 
@@ -51,18 +53,38 @@ def change(action):
     if action not in ('test', 'save'):
         return error_msg('操作不存在。'), 404
     try:
-        profile = settings.validate(request.get_json(silent=True))
+        previous = settings.saved()
+        form = request.get_json(silent=True)
+        if not isinstance(form, dict):
+            raise ValueError('连接信息必须为对象。')
+        session = nacos_connections.context(form) if form.get('source', previous.get('source')) == 'nacos' else None
+        profile = settings.validate(nacos_connections.prepare(form, previous, session), previous=previous)
         result = probe(profile)
         if action == 'save':
             # The audit must succeed against the CURRENT platform before staging.
             from app.bootstrap.operations import audit
             audit(g.identity['username'], 'platform_connection_stage', 'platform', details='连接测试通过，准备保存待重启配置；不自动迁移数据。')
             # settings.save 会再次核对 revision；测试期间被他人修改时不能覆盖新配置。
-            result['profile'] = settings.save(profile)
+            if settings.saved()['revision'] != profile['revision']:
+                raise RuntimeError('平台连接已被修改，请刷新后重试。')
+            remote_synced = nacos_connections.publish(profile, session)
+            result['nacos_synced'] = remote_synced
+            try:
+                if remote_synced:
+                    nacos_connections.check_context(session)
+                result['profile'] = settings.save(profile)
+            except Exception:
+                if remote_synced:
+                    return error_msg('Nacos 已更新，但平台待重启配置保存失败；请重新读取后再保存。当前平台仍使用原连接。'), 503
+                raise
             result['restart_required'] = True
         return success_msg(result)
     except ValueError as exc:
         return error_msg(str(exc)), 400
+    except NacosConflict as exc:
+        return error_msg(str(exc)), 409
+    except (NacosPublishUncertain, NacosError) as exc:
+        return error_msg(str(exc)), 503
     except RuntimeError as exc:
         return error_msg(str(exc)), 409
     except OSError:

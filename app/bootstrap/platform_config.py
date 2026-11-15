@@ -37,7 +37,7 @@ def defaults(environment=None):
         raise ValueError('WFS_DB_QUERY_TIMEOUT_SECONDS must be between 1 and 3600')
     value = dict(revision=0, source='service', host='', port=8000, database='', schema='wfs',
                 user='', password='', driver=environment.get('WFS_DB_DRIVER', 'DWS'),
-                db_id=environment.get('WFS_DB_ID', 'wfsscheduler_wfs'),
+                db_id=environment.get('WFS_DB_ID', 'wfsscheduler_wfs'), nacos=None, nacos_md5='',
                 **{key: value[0] for key, value in FIELDS.items()})
     value['query_timeout'] = query_timeout
     return value
@@ -64,7 +64,10 @@ def saved(target=None, environment=None):
         if not isinstance(value, dict) or type(value.get('revision')) is not int:
             raise ValueError()
         baseline = {**defaults(environment), **value}
-        return validate(baseline, previous=baseline)
+        validated = validate(baseline, previous=baseline)
+        if '_nacos_resolved' in value:
+            validated['_nacos_resolved'] = value['_nacos_resolved']
+        return validated
     except Exception:
         raise ValueError('平台连接配置无法读取或解密，请核对配置文件和原加密密钥。') from None
 
@@ -81,7 +84,7 @@ def active():
             else:
                 if frozen and not Path(frozen).is_file():
                     raise ValueError('当前服务的平台连接快照丢失，请完整重启服务。')
-                _active[key] = saved(frozen)
+                _active[key] = resolve_startup(saved(frozen))
         return deepcopy(_active[key])
 
 
@@ -99,9 +102,19 @@ def validate(form, previous=None):
     if type(form.get('revision')) is not int or form['revision'] != previous['revision']:
         raise RuntimeError('平台连接已被修改，请刷新后重试。')
     source = form.get('source', previous['source'])
-    if source not in ('service', 'direct'):
-        raise ValueError('请选择服务配置或自定义连接。')
+    if source not in ('service', 'direct', 'nacos'):
+        raise ValueError('请选择服务配置、自定义连接或 Nacos 配置。')
     value['source'] = source
+    # A posted form cannot inject the private service-start credential snapshot.
+    value.pop('_nacos_resolved', None)
+    if source == 'nacos':
+        from app.bootstrap import nacos_bindings
+        value['nacos'] = nacos_bindings.validate(form.get('nacos', value.get('nacos')))
+        value['nacos_md5'] = form.get('nacos_md5', value.get('nacos_md5', ''))
+        if not isinstance(value['nacos_md5'], str) or not re.fullmatch(r'[0-9a-f]{32}', value['nacos_md5']):
+            raise ValueError('请先读取 Nacos 配置，再测试或保存。')
+    else:
+        value['nacos'], value['nacos_md5'] = None, ''
     for key, (_, low, high) in FIELDS.items():
         number = form.get(key, value[key])
         if type(number) is not int or not low <= number <= high:
@@ -208,12 +221,12 @@ if hasattr(os, 'register_at_fork'):
 def frozen_service_config(data, environment):
     """由服务主进程创建启动快照，所有 Web/Scheduler 及替补进程继承其路径。
 
-    快照随本次服务生命周期清理，不回写待生效文件。service 来源仍按既有
-    Nacos/本地配置规则解析；这里冻结的是页面保存的连接选项。
+    快照随本次服务生命周期清理，不回写待生效文件。Nacos 来源在启动时
+    解析并冻结实际连接，所有 worker 及其替补进程使用同一份凭据。
     """
     directory = Path(data) / 'platform-runtime'
     source = environment.get('WFS_PLATFORM_CONFIG_FILE', str(Path(data) / 'platform-connection.enc'))
-    value = saved(source, environment)
+    value = resolve_startup(saved(source, environment), environment)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / ('service-' + uuid.uuid4().hex + '.enc')
     try:
@@ -224,3 +237,38 @@ def frozen_service_config(data, environment):
         yield str(target)
     finally:
         target.unlink(missing_ok=True)
+
+
+def resolve_startup(value, environment=None):
+    """Freeze resolved Nacos credentials once, rather than changing a live pool's target."""
+    environment = os.environ if environment is None else environment
+    value = deepcopy(value)
+    if value.get('_nacos_resolved') or environment.get('WFS_POSTGRES_TEST') == 'true':
+        return value
+    from app.bootstrap import nacos_bindings, nacos_config
+    from app.common.nacos import Nacos
+    source = value['source']
+    production = (environment.get('WFS_ENV') or environment.get('APP_ENV')
+                  or environment.get('FLASK_ENV') or ('development' if os.name == 'nt' else 'production')) == 'production'
+    if source == 'nacos':
+        binding = value['nacos']
+    elif source == 'service' and production:
+        database, schema = value['db_id'].split('_', 1)
+        binding = dict(namespace='', group='gauss', data_id=f'gauss.{database}.{schema}.json',
+                       password_encoding='base64')
+    else:
+        return value
+    data = Path(environment.get('WFS_DATA_DIR', str(path().parent)))
+    settings_path = environment.get('WFS_NACOS_CONFIG_FILE', str(data / 'nacos-connection.enc'))
+    client = Nacos(config=nacos_config.saved(settings_path, environment))
+    remote = nacos_bindings.read(binding, force_refresh=True, client=client)
+    resolved = remote['values']
+    if source == 'service':
+        resolved['schema'] = schema
+    else:
+        resolved.setdefault('schema', value['schema'])
+    # Validate the fetched values, not potentially stale copies from the pending file.
+    checked = validate({**value, **resolved, 'source': 'direct'}, previous=value)
+    value['_nacos_resolved'] = {key: checked[key] for key in ('host', 'port', 'database', 'schema', 'user', 'password')}
+    value['nacos_md5'] = remote['md5']
+    return value

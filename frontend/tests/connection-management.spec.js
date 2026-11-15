@@ -18,7 +18,7 @@ test('business connections use a searchable inventory and type-specific NewDB se
   await pane.getByLabel('查找业务连接').clear();
   await pane.getByLabel('连接标识',{exact:true}).fill('future_reporting');
   await expect(pane.getByLabel('数据库类型',{exact:true}).locator('option')).toHaveText(['MySQL / PolarDB / MariaDB','PostgreSQL','GaussDB / DWS（ODBC）','ClickHouse']);
-  await expect(pane.locator('.connection-example')).toContainText('SELECT 1');
+  await expect(pane.locator('.connection-body .database-usage-examples')).toHaveCount(0);
   await pane.getByLabel('数据库类型',{exact:true}).selectOption('gaussdb');
   await expect(pane.getByLabel('ODBC 驱动名称',{exact:false})).toHaveValue('DWS');
   const tls=pane.getByLabel('连接加密',{exact:false});

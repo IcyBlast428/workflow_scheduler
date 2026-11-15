@@ -17,6 +17,8 @@ def init_api(app):
     app.register_blueprint(packages_blueprint)
     from app.api.database_connections import blueprint as connections_blueprint
     app.register_blueprint(connections_blueprint)
+    from app.api.nacos_management import blueprint as nacos_blueprint
+    app.register_blueprint(nacos_blueprint)
     from app.api.platform_database import blueprint as platform_blueprint
     app.register_blueprint(platform_blueprint)
     from app.api.task_publishing import blueprint as publishing_blueprint

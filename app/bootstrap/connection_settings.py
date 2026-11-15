@@ -91,6 +91,12 @@ def business_profile(identifier):
     value = _decode(row[0], identifier) if row else None
     if value and (not value.get("enabled", True)):
         raise PermissionError("业务连接已停用：" + identifier)
+    if value and value.get("source") == "nacos":
+        # Resolve in the parent before exporting the task's authorized snapshot.
+        # Force a fresh read across workers; never fall back to saved credentials.
+        from app.bootstrap import nacos_bindings
+        remote = nacos_bindings.read(value["nacos"], force_refresh=True)
+        value = validate({**value, **remote["values"], "nacos_md5": remote["md5"]}, previous=value)
     return value
 
 
@@ -101,7 +107,7 @@ def public_profile(profile):
     }
 
 
-def validate(form):
+def validate(form, previous=None):
     if not isinstance(form, dict):
         raise ValueError("连接信息必须为对象。")
     identifier = form.get("id")
@@ -109,7 +115,7 @@ def validate(form):
         raise ValueError(
             "连接标识应以字母开头，最多 100 位，仅使用字母、数字、下划线或连字符。"
         )
-    previous = profiles().get(identifier, {})
+    previous = profiles().get(identifier, {}) if previous is None else previous
     from app.common.db.catalog import DATABASES, normalize
 
     dialect = normalize(form.get("dialect", previous.get("dialect", "mysql")))
@@ -118,7 +124,16 @@ def validate(form):
     if dialect not in DATABASES:
         raise ValueError("不支持的业务数据库类型：" + dialect)
     spec = DATABASES[dialect]
-    result = {"id": identifier, "dialect": dialect, "charset": "utf8mb4"}
+    source = form.get("source", previous.get("source", "direct"))
+    if source not in ("direct", "nacos"):
+        raise ValueError("请选择直接配置或 Nacos 配置。")
+    result = {"id": identifier, "dialect": dialect, "charset": "utf8mb4", "source": source}
+    if source == "nacos":
+        from app.bootstrap import nacos_bindings
+        result["nacos"] = nacos_bindings.validate(form.get("nacos", previous.get("nacos")))
+        result["nacos_md5"] = form.get("nacos_md5", previous.get("nacos_md5", ""))
+        if not isinstance(result["nacos_md5"], str) or not re.fullmatch(r"[0-9a-f]{32}", result["nacos_md5"]):
+            raise ValueError("请先读取 Nacos 配置，再测试或保存。")
     for key, maximum in [("host", 253), ("database", 64), ("user", 100)]:
         value = form.get(key)
         if (

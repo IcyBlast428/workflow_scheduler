@@ -113,6 +113,11 @@ class GaussDB:
         self.current_env = get_runtime_env()
         # 本机协议测试不能把真实候选连接误测成本机测试库，因此 override 不走替身。
         native_test = os.environ.get("WFS_POSTGRES_TEST") == "true" and config_override is None
+        if config_override is not None and options['source'] == 'nacos':
+            # API candidates are already resolved and probed before any remote publish.
+            options = {**options, 'source': 'direct'}
+        if options.get('_nacos_resolved') and not native_test and db_id is None:
+            options = {**options, **options['_nacos_resolved'], 'source': 'direct'}
         direct = options['source'] == 'direct' and not native_test and db_id is None
         if direct:
             schema = options['schema']

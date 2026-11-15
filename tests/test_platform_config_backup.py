@@ -197,3 +197,58 @@ class PlatformConfigBackupTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '校验失败'):
                 restore(archive, root / 'restored')
             self.assertFalse((root / 'restored').exists())
+
+    def test_nacos_bootstrap_is_encrypted_separate_evidence_and_old_manifests_still_verify(self):
+        from scripts.backup_bootstrap import verify, write
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            custom = root / 'custom-nacos.enc'
+            encrypted = Fernet(Fernet.generate_key()).encrypt(b'{"password":"nacos-secret"}')
+            custom.write_bytes(encrypted)
+            with patch.dict(os.environ, {'WFS_PLATFORM_CONFIG_FILE': '', 'WFS_PLATFORM_ACTIVE_CONFIG_FILE': '',
+                                         'WFS_NACOS_CONFIG_FILE': str(custom)}):
+                files, metadata = collect(root)
+            self.assertEqual(files['bootstrap/nacos-connection.enc'], encrypted)
+            self.assertTrue(metadata['nacos']['included'])
+            self.assertNotIn(str(custom), json.dumps(metadata))
+            self.assertNotIn('nacos-secret', json.dumps(metadata))
+            archive = root / 'bootstrap.zip'
+            with zipfile.ZipFile(archive, 'w') as output:
+                write(output, files)
+            with zipfile.ZipFile(archive) as source:
+                verify(source, {'platform_configuration': metadata})
+                legacy = {key: value for key, value in metadata.items() if key != 'nacos'}
+                verify(source, {'platform_configuration': legacy})
+            with patch.dict(os.environ, {'WFS_PLATFORM_CONFIG_FILE': '', 'WFS_PLATFORM_ACTIVE_CONFIG_FILE': '',
+                                         'WFS_NACOS_CONFIG_FILE': str(root / 'missing.enc')}):
+                with self.assertRaises(ValueError):
+                    collect(root)
+
+    def test_nacos_receipt_uses_only_frozen_startup_credentials(self):
+        from app.bootstrap import platform_config
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'WFS_CONNECTIONS_KEY': 'backup-test-key'}):
+            root = Path(folder)
+            active = root / 'active.enc'
+            target = dict(host='original.example', port=8000, database='original', schema='wfs')
+            resolved = {**target, 'user': 'owner', 'password': 'original-password'}
+            options = {**platform_config.defaults(), 'source': 'nacos', 'revision': 1,
+                       'nacos': {'data_id': 'platform.json'}, 'nacos_md5': 'a' * 32,
+                       '_nacos_resolved': resolved}
+            cipher = platform_config._cipher()
+            active.write_bytes(cipher.encrypt(json.dumps(options).encode()))
+            with patch.dict(os.environ, {'WFS_PLATFORM_CONFIG_FILE': '', 'WFS_PLATFORM_ACTIVE_CONFIG_FILE': str(active),
+                                         'WFS_NACOS_CONFIG_FILE': ''}), \
+                 patch('app.common.nacos.Nacos.read_document', side_effect=AssertionError('must not re-read Nacos')):
+                files, metadata = collect(root)
+                receipt, frozen = receipt_plan(files, metadata, **target)
+                self.assertTrue(receipt['write_requested'])
+                self.assertEqual(frozen['source'], 'direct')
+                self.assertEqual(frozen['password'], 'original-password')
+                self.assertEqual(frozen['host'], 'original.example')
+                options.pop('_nacos_resolved')
+                active.write_bytes(cipher.encrypt(json.dumps(options).encode()))
+                files, metadata = collect(root)
+                receipt, frozen = receipt_plan(files, metadata, **target)
+                self.assertFalse(receipt['write_requested'])
+                self.assertIsNone(frozen)
+                self.assertEqual(receipt['reason'], 'nacos_configuration_has_no_frozen_active_evidence')

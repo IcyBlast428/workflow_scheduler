@@ -20,6 +20,8 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 
 页面提供任务列表与标签搜索、执行矩阵、增量日志、输出预览和下载、DDL 编辑与修改记录、GitLab 联动、角色权限、业务连接授权、私有依赖源、维护模式及备份状态。DDL 编辑不会直接执行数据库语句；ZIP 示例可下载，但不支持通过 ZIP 上传发布任务。
 
+业务数据库 `NewDB` 的增删改查、批量、事务与异步示例位于「左下角管理员菜单 → 任务示例与文档」；平台内部 `GaussDB` 示例保留在「平台设置 → 连接与依赖 → 数据库连接 → 平台数据库」。示例可查看和复制，页面不会执行 SQL，详见 [数据库使用说明](docs/database-usage.md)。
+
 ## 全新部署
 
 请按 [systemd 部署手册](docs/systemd-deployment.md) 或固定目录的 [root 测试部署手册](deploy/root-test/README.md) 操作。不要复用旧平台库/schema，也不要复制旧数据目录。
@@ -38,4 +40,4 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 
 ## 文档
 
-[架构与新手指南](docs/onboarding/index.html) · [新人讲解手册 PDF](docs/onboarding/workflow-scheduler-guide.pdf) · [文档索引](docs/README.md) · [任务发布](docs/task-packages.md) · [GitLab 联动](docs/gitlab-updates.md) · [DDL 与标签](docs/task-schema-and-tags.md) · [调度容量](docs/task-dispatch.md) · [性能与连接升级](docs/performance-and-connections.md) · [业务 NewDB](docs/business-database-connections.md) · [日志与历史存储](docs/performance-storage.md) · [新架构检查记录](docs/fresh-gauss-audit.md)
+[架构与新手指南](docs/onboarding/index.html) · [新人讲解手册 PDF](docs/onboarding/workflow-scheduler-guide.pdf) · [文档索引](docs/README.md) · [任务发布](docs/task-packages.md) · [GitLab 联动](docs/gitlab-updates.md) · [DDL 与标签](docs/task-schema-and-tags.md) · [调度容量](docs/task-dispatch.md) · [性能与连接升级](docs/performance-and-connections.md) · [业务 NewDB](docs/business-database-connections.md) · [Nacos 配置管理](docs/nacos-connections.md) · [数据库使用示例](docs/database-usage.md) · [日志与历史存储](docs/performance-storage.md) · [新架构检查记录](docs/fresh-gauss-audit.md)
