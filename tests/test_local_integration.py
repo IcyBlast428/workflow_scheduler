@@ -182,14 +182,38 @@ class LocalIntegrationTests(unittest.TestCase):
             self.assertEqual(db.execute_query_sql('SELECT version FROM wfs_schema_version')[0][0],1)
             for table in table_names():db.execute_query_sql('SELECT 1 FROM '+table+' LIMIT 0')
 
-    def test_retired_online_deployment_endpoints_do_not_load_tasks(self):
+    def test_removed_api_routes_return_not_found_without_loading_tasks(self):
         client = self.app.test_client()
         login = client.post('/api/user/login', json={'username': 'admin', 'password': 'test-password'})
         headers = {'X-CSRF-Token': login.json['data']['csrf_token']}
         with patch.object(task_views, 'aps_start') as start:
-            for endpoint in ('overloading', 'updatecode'):
-                self.assertEqual(client.post('/api/taskinfo/' + endpoint, headers=headers).status_code, 410)
+            for endpoint in ('overloading', 'updatecode', 'packages/upload'):
+                with self.subTest(endpoint=endpoint):
+                    response = client.post('/api/taskinfo/' + endpoint, headers=headers)
+                    self.assertEqual(response.status_code, 404)
+                    self.assertTrue(response.is_json)
+                    self.assertEqual(response.json['message'], 'api not found')
+            response = client.get('/api/user/test')
+            self.assertEqual(response.status_code, 404)
+            self.assertTrue(response.is_json)
+            self.assertEqual(response.json['code'], 404)
         start.assert_not_called()
+
+    def test_unknown_api_methods_preserve_real_api_and_page_routing(self):
+        client = self.app.test_client()
+        login = client.post('/api/user/login', json={'username': 'admin', 'password': 'test-password'})
+        headers = {'X-CSRF-Token': login.json['data']['csrf_token']}
+        self.assertEqual(client.get('/api/user/health').status_code, 200)
+        self.assertEqual(client.post('/api/user/health', headers=headers).status_code, 405)
+        self.assertEqual(client.delete('/api/taskinfo/groups', headers=headers).status_code, 405)
+        self.assertEqual(client.post('/api/taskinfo/groups', headers=headers).status_code, 200)
+        response = client.get('/admin/tasks/example')
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.content_type.startswith('text/html'))
+        finally:
+            response.close()
+        self.assertEqual(client.post('/admin/tasks/example').status_code, 405)
 
 
 # These two baseline fixtures are new publications used only by regression tests.

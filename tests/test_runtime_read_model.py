@@ -72,22 +72,38 @@ class RuntimeReadModelTests(unittest.TestCase):
         client.post('/api/user/login', json={'username':'admin','password':'test-password'})
         data = {'tasks':[{'id':'testJob__test_job1','state':'true','pending':True,'running_instances':1,'next_run_time':'2030-01-01 10:00:00'}],
                 'scheduler':{'enabled':True,'job_count':1}, 'server_time':str(business_now()), 'logs':{}, 'task_starts':[]}
+        metrics = {'samples': [], 'cursor': '', 'incremental': False, 'current': 12,
+                   'current_memory': 50, 'sample_interval_seconds': 5, 'retention_hours': 6,
+                   'warning': '资源历史采样暂不可用'}
         with patch.object(views, 'WFS_ENABLE_SCHEDULER', False), patch.object(views, 'WFS_SCHEDULER_CONTROL_URL', 'http://control'), \
                 patch.object(runtime_snapshot, 'read_snapshot', return_value=data), \
+                patch.object(views, 'cpu_monitor_snapshot', return_value=metrics), \
                 patch.object(views, '_proxy_scheduler_resource', side_effect=AssertionError('query reached control thread')):
             state = client.get('/api/taskinfo/state').json['data']
             row = next(item for item in state['items'] if item['id'] == 'testJob__test_job1')
             self.assertEqual(row['state'], 'true')
             self.assertEqual(row['running_instances'], 1)
-            self.assertEqual(client.get('/api/taskinfo/events').json['data']['tasks'], data['tasks'])
+            events = client.get('/api/taskinfo/events').json['data']
+            self.assertEqual(events['tasks'], data['tasks'])
+            self.assertEqual(events['scheduler'], data['scheduler'])
             dashboard = client.get('/api/taskinfo/dashboard').json['data']
             self.assertEqual(dashboard['summary']['pending'], 1)
-            self.assertTrue(dashboard['scheduler']['enabled'])
+            self.assertEqual(set(dashboard), {'summary', 'failure_rank', 'recent_runs', 'cpu_timeline'})
+            self.assertEqual(dashboard['cpu_timeline']['warning'], metrics['warning'])
+            self.assertEqual(dashboard['cpu_timeline']['current_memory'], 50)
         with patch.object(views, 'WFS_ENABLE_SCHEDULER', False), patch.object(views, 'WFS_SCHEDULER_CONTROL_URL', 'http://control'), \
                 patch.object(runtime_snapshot, 'read_snapshot', return_value=None), \
                 patch.object(views, '_proxy_scheduler_resource', return_value=({'code':100},503)) as forward:
             self.assertEqual(client.get('/api/taskinfo/state').status_code, 503)
             forward.assert_called_once()
+
+    def test_dashboard_history_failure_remains_diagnosable_after_removing_legacy_warning(self):
+        with patch.object(views, 'GaussDB', side_effect=RuntimeError('simulated statistics failure')), \
+                self.assertLogs(views.__name__, level='WARNING') as logged:
+            result = views._recent_run_stats()
+        self.assertEqual(result, {'failure_rank': [], 'recent_runs': []})
+        self.assertIn('Recent dashboard execution statistics could not be loaded', logged.output[0])
+        self.assertIn('simulated statistics failure', logged.output[0])
 
     def test_readiness_reports_component_failure_without_leaking_exception(self):
         from app.bootstrap.global_vars import DATA_DIR

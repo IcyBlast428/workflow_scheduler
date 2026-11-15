@@ -88,8 +88,6 @@ curl --fail http://127.0.0.1:8009/api/user/ready
 
 页面入口 HTML 使用 no-store；更新后重新载入页面即可获取新资源。前端源代码变更须在构建机运行 `npm --prefix frontend test` 和 `npm --prefix frontend run build` 后打包。
 
-`scripts/deploy_release.sh` 是单独的旧版多版本发布工具，不适用于本手册的固定目录安装。它现在要求明确传入独立发布根目录和 `WFS_DEPLOY_CONFIG`，不会默认使用另一套目录。其 `current/releases/shared` 布局必须与该独立安装的单服务定义匹配，新服务引用的每个版本都必须包含 `scripts/serve.py`。
-
 平台部署与任务发布分开：业务任务依旧按 GitLab 审查、依赖准备、显式发布流程处理，不需要重新部署平台。
 
 ## 5. 运维与备份

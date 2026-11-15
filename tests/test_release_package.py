@@ -18,6 +18,35 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertTrue(package.permitted('app/dist/static/index-new.js'))
         self.assertTrue(package.permitted('scripts/deploy.py'))
 
+    def test_release_omits_retired_leftovers_but_keeps_current_launchers_sdk_and_odbc(self):
+        retained = {
+            'START-HERE.md': b'guide', 'deploy.sh': b'#!/bin/bash\n',
+            'scripts/deploy.py': b'print(1)', 'schema/gauss.sql': b'-- schema',
+            'app/dist/index.html': b'<html></html>', 'app/dist/.vite/manifest.json': b'{}',
+            'app/dist/unsupported-browser.html': b'unsupported',
+            'scripts/serve.py': b'print(1)', 'wfs.service': b'[Service]',
+            'requirements-linux-py312.lock': b'# lock', 'run.py': b'app = object()',
+            'backend_dev_runner.py': b'from run import app',
+            'scripts/local_postgres.py': b'pass', 'scripts/local_service.sh': b'#!/bin/bash\n',
+            'scripts/install_systemd.py': b'pass', 'scripts/setup_root_test.py': b'pass',
+            'scripts/build_task_sdk.py': b'pass', 'app/bootstrap/shared_sdk.py': b'pass',
+            'app/common/database.py': b'pass', 'requirements-databases.txt': b'# drivers',
+            'app/config/driver/dws_odbc/lib/odbc/psqlodbcw.so': b'odbc-driver',
+        }
+        retired = {name: b'retired leftover' for name in (
+            'run.sh', 'run.bat', 'scripts/deploy_release.sh', 'app/config/driver/gsjdbc4.jar')}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, blob in (retained | retired).items():
+                path = root/name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(blob)
+            names = '\0'.join(retained | retired).encode()
+            with patch.object(package.subprocess, 'check_output', return_value=names):
+                payload, sanitized = package.collect(root)
+            self.assertEqual(payload, retained)
+            self.assertEqual(sanitized, [])
+
     def test_legacy_templates_do_not_distribute_old_accounts(self):
         text = package.sanitize('app/config/database/db_nacos_conf.py', b'password=secret')
         self.assertNotIn(b'secret', text)

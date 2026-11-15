@@ -1,5 +1,6 @@
 from app.bootstrap.timebase import business_now
 import datetime
+import logging
 import time
 import threading
 from collections import deque
@@ -157,40 +158,24 @@ def _load_job_stats():
     except Exception:
         return {}
 
-def _empty_dashboard_trend():
-    now = business_now().replace(minute=0, second=0, microsecond=0)
-    hours = [now - datetime.timedelta(hours=index) for index in range(RECENT_HOURS - 1, -1, -1)]
-    return [{'hour': hour.strftime('%m-%d %H:00'), 'success': 0, 'failed': 0} for hour in hours]
-
 def _load_recent_run_stats():
     return cached('recent-statistics', 10, _recent_run_stats, mutable=False)
 
 def _recent_run_stats():
-    trend = _empty_dashboard_trend()
-    trend_by_hour = {item['hour']: item for item in trend}
     since = business_now().replace(minute=0, second=0, microsecond=0) - datetime.timedelta(hours=RECENT_HOURS - 1)
     try:
         with GaussDB() as db:
             complete = coverage(db)['complete']
             if complete:
-                rows = db.execute_query_sql('SELECT bucket,status,SUM(executions) FROM wfs_run_summary WHERE bucket>=? GROUP BY bucket,status', params=(since,))
                 rank = db.execute_query_sql("SELECT pid,SUM(executions) FROM wfs_run_summary WHERE bucket>=? AND status IN ('failed','timed_out') GROUP BY pid ORDER BY SUM(executions) DESC LIMIT 8", params=(since,))
             else:
-                hour = "date_trunc('hour',end_time)"
-                raw = db.execute_query_sql(f'SELECT {hour},state,COUNT(*) FROM wfs_run_history WHERE end_time>=? GROUP BY {hour},state', params=(since,))
-                from app.bootstrap.execution_state import state_status
-                rows = [(bucket, state_status(state), count) for bucket, state, count in raw]
                 rank = db.execute_query_sql(f'SELECT pid,COUNT(*) FROM wfs_run_history WHERE end_time>=? AND {FAILURE_SQL} GROUP BY pid ORDER BY COUNT(*) DESC LIMIT 8', params=(since,))
             latest = db.execute_query_sql('SELECT id AS run_id,pid,taskname,state,start_time,end_time,group_name,folder_name FROM wfs_run_history ORDER BY end_time DESC,id DESC LIMIT 8', return_json=True)
-        for bucket, status, count in rows:
-            key = datetime.datetime.fromisoformat(str(bucket)).strftime('%m-%d %H:00')
-            if key in trend_by_hour:
-                target = 'success' if status == 'success' else 'failed' if status in ('failed', 'timed_out') else status
-                trend_by_hour[key][target] = trend_by_hour[key].get(target, 0) + int(count)
         names = {spec['pid']: spec.get('task_name') or spec['folder_name'] for spec in discover_task_specs()}
-        return {'trend': trend, 'failure_rank': [{'id': pid, 'name': names.get(pid, pid), 'count': int(count)} for pid, count in rank], 'recent_runs': [dict(row, id=row['pid'], name=row['taskname'] or row['pid'], start_time=str(row['start_time']), end_time=str(row['end_time'])) for row in latest], 'error': '' if complete else '历史统计正在后台补算；当前使用完整原始记录计算。'}
-    except Exception as exc:
-        return {'trend': trend, 'failure_rank': [], 'recent_runs': [], 'error': str(exc)}
+        return {'failure_rank': [{'id': pid, 'name': names.get(pid, pid), 'count': int(count)} for pid, count in rank], 'recent_runs': [dict(row, id=row['pid'], name=row['taskname'] or row['pid'], start_time=str(row['start_time']), end_time=str(row['end_time'])) for row in latest]}
+    except Exception:
+        logging.getLogger(__name__).warning('Recent dashboard execution statistics could not be loaded', exc_info=True)
+        return {'failure_rank': [], 'recent_runs': []}
 
 def _format_datetime_value(value):
     if hasattr(value, 'strftime'):
@@ -379,7 +364,7 @@ class Dashboard(Resource):
                 counters['failed_jobs'] += 1
         recent = _load_recent_run_stats()
         cpu_metrics = cpu_monitor_snapshot(hours=CPU_TIMELINE_HOURS, after=request.args.get('after', '')[:19])
-        data = {'scheduler': shared['scheduler'] if shared is not None else {'enabled': WFS_ENABLE_SCHEDULER, 'control_url': WFS_SCHEDULER_CONTROL_URL, 'job_count': len(scheduler.get_jobs()) if WFS_ENABLE_SCHEDULER else 0}, 'summary': counters, 'trend': recent['trend'], 'failure_rank': recent['failure_rank'], 'recent_runs': recent['recent_runs'], 'cpu_timeline': {'samples': cpu_metrics['samples'], 'cursor': cpu_metrics['cursor'], 'incremental': cpu_metrics['incremental'], 'markers': _load_task_start_markers(CPU_TIMELINE_HOURS, shared['task_starts'] if shared is not None else None), 'current': cpu_metrics['current'], 'current_memory': cpu_metrics['current_memory'], 'sample_interval_seconds': cpu_metrics['sample_interval_seconds'], 'retention_hours': cpu_metrics['retention_hours'], 'warning': cpu_metrics['warning']}, 'warning': recent['error']}
+        data = {'summary': counters, 'failure_rank': recent['failure_rank'], 'recent_runs': recent['recent_runs'], 'cpu_timeline': {'samples': cpu_metrics['samples'], 'cursor': cpu_metrics['cursor'], 'incremental': cpu_metrics['incremental'], 'markers': _load_task_start_markers(CPU_TIMELINE_HOURS, shared['task_starts'] if shared is not None else None), 'current': cpu_metrics['current'], 'current_memory': cpu_metrics['current_memory'], 'sample_interval_seconds': cpu_metrics['sample_interval_seconds'], 'retention_hours': cpu_metrics['retention_hours'], 'warning': cpu_metrics['warning']}}
         return success_msg(data)
 
 class State(Resource):
@@ -599,16 +584,6 @@ class SystemIds(Resource):
 
     def post(self):
         return success_msg(_task_id_options())
-
-class Reload(Resource):
-
-    def post(self):
-        return (error_msg('目录同步与全量重载已停用，请使用任务发布管理业务任务。'), 410)
-
-class Code(Resource):
-
-    def post(self):
-        return (error_msg('平台版本发布由运维部署流程管理，在线版本检查已停用。'), 410)
 
 class DetailLog(Resource):
 

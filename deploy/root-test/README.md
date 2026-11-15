@@ -11,7 +11,7 @@ bash deploy.sh
 
 数据库由 DBA 提前创建，建库、Nacos 配置和表清单见 [DATABASE.md](DATABASE.md)。服务器须具备 Python 3.12、systemd、unixODBC，以及与目标系统匹配的 DWS 客户端。前端已构建，不需要 Node。索引和离线依赖参数、常用运维命令见入口文档。
 
-原有 `setup_root_test.py` 保留为手动分步工具，不必再逐条运行。同目录下的专用账号、HTTP/HTTPS 代理与已有安装更新说明见 [systemd 手册](../../docs/systemd-deployment.md)。ZIP 包不含 Git 历史，不使用依赖 Git 的 `deploy_release.sh`。
+安装工具会调用 `scripts/setup_root_test.py` 完成底层配置，无需手动逐条运行。专用账号、HTTP/HTTPS 代理与已有安装更新说明见 [systemd 手册](../../docs/systemd-deployment.md)。ZIP 包不含 Git 历史，部署统一使用项目根目录的 `deploy.sh`。
 
 首次任务列表为空。配置 GitLab 与任务依赖仓库后，审查、准备依赖并显式发布任务。自动调度默认关闭，业务库默认无授权。
 

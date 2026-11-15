@@ -1,6 +1,6 @@
 # GitLab 任务发布与版本管理
 
-管理员在「任务列表」审查 GitLab 变更，或在任务详情中点击「管理代码版本」。导航中的「任务示例」用于查看、编辑和下载示例；「依赖仓库」独立维护私有 PyPI 设置。ZIP 上传入口已删除，旧接口返回 410。
+管理员在「任务列表」审查 GitLab 变更，或在任务详情中点击「管理代码版本」。导航中的「任务示例」用于查看、编辑和下载示例；「依赖仓库」独立维护私有 PyPI 设置。任务代码从 GitLab 审查后发布，示例仍可下载为 ZIP。
 
 ## 新增、更新与删除
 
@@ -85,10 +85,9 @@ Linux 上准备好的代码文件和目录设置为只读，并禁止运行时�
 ## 接口
 
 - `GET /api/taskinfo/packages`：任务与回收站；加 `pid` 返回任务状态和最近 50 个版本。
-- `POST /api/taskinfo/packages/upload`：已移除，返回 410。
 - `GET /api/taskinfo/packages/gitlab`：获取缓存任务变更，不执行外部网络请求；`POST` 携带变更 `id` 和 `stage/delete` 操作。
 - `GET /api/taskinfo/packages/preview?pid=…&version=…`：清单、当前版本差异；加 `path` 返回受限文本差异。
 - `GET /api/taskinfo/packages/download?pid=…&version=…`：只下载该版本代码包，不包含虚拟环境和业务数据。
-- `POST /api/taskinfo/packages/action`：`prepare/publish/rollback/trash/restore`；切换或删除携带当前 `revision`，过期状态返回 409。旧 `import` 返回 410。
+- `POST /api/taskinfo/packages/action`：`prepare/publish/rollback/trash/restore`；切换或删除携带当前 `revision`，过期状态返回 409；不支持的操作返回 400。
 
 任务代码是管理员可信代码。本功能提供版本隔离和发布检查，不是执行不可信代码的安全沙箱。

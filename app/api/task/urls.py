@@ -13,7 +13,5 @@ def task_api(api):
     api.add_resource(TaskIds, '/taskids')
     api.add_resource(Groups, '/groups')
     api.add_resource(SystemIds, '/systemids')
-    api.add_resource(Reload, '/overloading')
-    api.add_resource(Code, '/updatecode')
     api.add_resource(DetailLog, '/logview')
     api.add_resource(CallTask, '/call_task')

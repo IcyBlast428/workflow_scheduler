@@ -13,7 +13,8 @@ def create_app():
     '''
     from app.bootstrap.auxiliary_store import validate_backend
     validate_backend()
-    from flask import Flask, send_from_directory
+    from flask import Flask, request, send_from_directory
+    from werkzeug.exceptions import HTTPException
     from flask_compress import Compress
     from app.extensions import ext_init
     from app.loggings import init_log
@@ -43,6 +44,24 @@ def create_app():
     init_api(app=app)
     # 第三方扩展调度
     ext_init(app=app)
+
+    @app.errorhandler(405)
+    def missing_api_route(error):
+        # The GET-only SPA fallback must not make an unknown API look like a
+        # real endpoint with the wrong method. Keep 405 for registered APIs.
+        if request.path.startswith('/api/'):
+            adapter = app.url_map.bind_to_environ(request.environ)
+            for method in error.valid_methods or ():
+                try:
+                    rule, _ = adapter.match(method=method, return_rule=True)
+                except HTTPException:
+                    continue
+                if rule.endpoint != 'index':
+                    return error
+            message = error_msg('api not found')
+            message['code'] = 404
+            return message, 404
+        return error
 
     # 初始化时添加index路由
     @app.route('/', defaults={'path': ''})

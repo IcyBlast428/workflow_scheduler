@@ -47,16 +47,26 @@ class ScaleTests(unittest.TestCase):
             self.assertEqual(rows,[('timed_out',1)])
             self.assertEqual(db.execute_query_sql('SELECT failures FROM wfs_run_totals WHERE pid=?',params=(self.pid,))[0][0],1)
 
-    def test_dashboard_counts_more_than_1000_records(self):
+    def test_dashboard_failure_rank_counts_more_than_1000_records_before_and_after_backfill(self):
         stamp=dt.datetime.now().replace(minute=0,second=0,microsecond=0)
         with GaussDB() as db:
             db.begin_transaction()
             for i in range(1205):
                 db.execute_sql(f'INSERT INTO wfs_run_history({RUN_COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?)',params=(uuid.uuid4().hex,self.pid,self.pid,'','test','task',1,'',stamp,stamp))
             db.set_commit()
-        result=views._recent_run_stats()
-        self.assertGreaterEqual(sum(item['failed'] for item in result['trend']),1205)
+        def recent_statistics(source):
+            with patch.object(GaussDB, 'execute_query_sql', autospec=True,
+                              side_effect=GaussDB.execute_query_sql) as query:
+                result = views._recent_run_stats()
+            self.assertEqual(next(item['count'] for item in result['failure_rank'] if item['id'] == self.pid), 1205)
+            self.assertEqual(len(result['recent_runs']), 8)
+            self.assertTrue(all(item['id'] == self.pid for item in result['recent_runs']))
+            grouped_reads = [call.args[1] for call in query.call_args_list if 'GROUP BY' in call.args[1]]
+            self.assertEqual(len(grouped_reads), 1, 'Only the displayed failure ranking needs an aggregate read')
+            self.assertIn(source, grouped_reads[0])
+        recent_statistics('wfs_run_history')
         run_summary.backfill(5000);run_summary.backfill(5000)
+        recent_statistics('wfs_run_summary')
         with GaussDB() as db:
             self.assertEqual(db.execute_query_sql('SELECT failures FROM wfs_run_totals WHERE pid=?',params=(self.pid,))[0][0],1205)
 

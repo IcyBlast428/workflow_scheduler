@@ -85,8 +85,3 @@ class ready(Resource):
         from app.bootstrap.readiness import snapshot
         data = snapshot()
         return success_msg(data), 200 if data['ready'] else 503
-
-
-class test(Resource):
-    def get(self):
-        return success_msg({'message': 'user api is reachable'})

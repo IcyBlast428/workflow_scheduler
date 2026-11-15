@@ -10,8 +10,6 @@ BASE = '/api/taskinfo/packages'
 
 @blueprint.before_request
 def guard_and_forward():
-    if request.path == BASE + '/upload':
-        return (error_msg('ZIP 上传已移除，请在任务列表通过 GitLab 发布代码。'), 410)
     if request.method not in ('GET', 'HEAD'):
         if request.content_length is None or request.content_length > 100000:
             return (error_msg('请求内容过大。'), 413)
@@ -81,10 +79,6 @@ def _audit(action, pid, version=''):
     audit(g.identity['username'], 'package_' + action, pid, details=version)
     g.audit_forwarded = True
 
-@blueprint.post(BASE + '/upload')
-def upload():
-    return (error_msg('ZIP 上传已移除，请在任务列表通过 GitLab 发布代码。'), 410)
-
 @blueprint.route(BASE + '/gitlab', methods=['GET', 'POST'])
 def gitlab_tasks():
     from app.bootstrap import gitlab_tasks as tasks
@@ -119,9 +113,7 @@ def action():
         raise packages.PackageError('请提供有效的任务编号。')
     version = body.get('version', '')
     actor = g.identity['username']
-    if action == 'import':
-        raise packages.PackageError('旧导入入口已停用，请在任务列表通过 GitLab 发布。', 410)
-    elif action == 'prepare':
+    if action == 'prepare':
         result = packages.prepare(pid, version, body.get('main_file', ''))
     elif action in ('publish', 'rollback', 'trash', 'restore'):
         revision = body.get('revision')

@@ -11,11 +11,13 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = {'app', 'frontend', 'scripts', 'deploy', 'docs', 'schema', 'examples', 'tests', '.github'}
-SOURCE_FILES = {'README.md', 'START-HERE.md', 'DATABASE.md', 'deploy.sh', 'run.py', 'run.sh', 'run.bat',
+SOURCE_FILES = {'README.md', 'START-HERE.md', 'DATABASE.md', 'deploy.sh', 'run.py',
                 'gunicorn.conf.py', 'backend_dev_runner.py', 'requirements.txt', 'requirements-test.txt',
                 'requirements-databases.txt', 'requirements-linux-py312.lock', '.gitattributes', '.gitignore',
                 '.gitlab-ci.yml', 'wfs.service'}
 BLOCKED = {'node_modules', '__pycache__', '.git', '.venv', 'test-results', 'playwright-report', '.pytest_cache'}
+# Older checkout leftovers must not restore retired release tooling or JDBC binaries.
+RETIRED_FILES = {'scripts/deploy_release.sh', 'app/config/driver/gsjdbc4.jar'}
 
 
 def permitted(name):
@@ -23,7 +25,7 @@ def permitted(name):
     return (not path.is_absolute() and '..' not in path.parts and '\\' not in name
             and not BLOCKED.intersection(path.parts)
             and not path.name.startswith('.env') and path.name != 'runtime.env'
-            and path.name != 'wfs-scheduler.service'
+            and path.name != 'wfs-scheduler.service' and name not in RETIRED_FILES
             and path.suffix not in ('.pyc', '.pyo', '.log', '.zip')
             and (path.parts[0] in SOURCE_DIRS or name in SOURCE_FILES)
             and not name.startswith('app/jobs/'))

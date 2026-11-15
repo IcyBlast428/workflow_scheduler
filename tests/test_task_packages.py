@@ -197,13 +197,15 @@ class PackageTests(unittest.TestCase):
         self.assertNotIn('pending',packages.task(pid))
 
 
-    def test_directory_scan_and_online_import_are_disabled(self):
+    def test_directory_scan_stays_disabled_and_import_is_an_unknown_action(self):
         with patch.object(task_loader, 'iter_task_directories', side_effect=AssertionError('Runtime directory scan')):
             task_loader.invalidate_task_cache()
             self.assertEqual(task_loader.discover_task_specs(), [])
         response = self.client.post('/api/taskinfo/packages/action', headers=self.headers,
                                     json={'action': 'import', 'pid': 'old_task'})
-        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json['message'], '无效操作。')
+        self.assertEqual(packages.registry(), {})
 
 
     def test_offline_dependency_failure_cannot_publish(self):
@@ -245,13 +247,14 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(core.execute_py(spec['main_file_path'], spec['pid'],
                                             python_executable=spec['python_executable']), 0)
 
-    def test_multipart_csrf_permissions_download_and_proxy(self):
+    def test_removed_upload_preserves_csrf_permissions_download_and_proxy(self):
         base = '/api/taskinfo/packages'
         response = self.client.post(base+'/upload', data={'package':(io.BytesIO(archive({'main.py':'print(1)'})),'demo.zip')})
         self.assertEqual(response.status_code,403)
         response = self.client.post(base+'/upload', headers=self.headers, data={'package':(io.BytesIO(archive({'main.py':'print(1)'})),'demo.zip'),
                                     'task_name':'Demo','group_name':'examples','folder_name':'api'})
-        self.assertEqual(response.status_code,410,response.json)
+        self.assertEqual(response.status_code,404,response.json)
+        self.assertEqual(response.json['message'], 'api not found')
         data = self.new(folder='api')
         download = self.client.get(base+'/download',query_string={'pid':data['pid'],'version':data['version']})
         self.assertEqual(download.status_code,200)
