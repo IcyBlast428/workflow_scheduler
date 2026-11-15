@@ -2,6 +2,9 @@
 
 当前版本只面向全新 GaussDB/DWS 部署，无旧数据迁移。
 
+- [架构图与新手使用说明（离线网页）](onboarding/index.html)
+- [新人讲解手册（12 页 PDF）](onboarding/workflow-scheduler-guide.pdf)
+- [系统架构图（PNG）](onboarding/architecture.png) · [可缩放 SVG](onboarding/architecture.svg)
 - [简化部署入口](../START-HERE.md)
 - [正式部署](systemd-deployment.md)
 - [固定目录测试部署](../deploy/root-test/README.md)

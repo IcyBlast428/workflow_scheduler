@@ -34,4 +34,4 @@ Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台
 
 ## 文档
 
-[文档索引](docs/README.md) · [任务发布](docs/task-packages.md) · [GitLab 联动](docs/gitlab-updates.md) · [DDL 与标签](docs/task-schema-and-tags.md) · [调度容量](docs/task-dispatch.md) · [新架构检查记录](docs/fresh-gauss-audit.md)
+[架构与新手指南](docs/onboarding/index.html) · [新人讲解手册 PDF](docs/onboarding/workflow-scheduler-guide.pdf) · [文档索引](docs/README.md) · [任务发布](docs/task-packages.md) · [GitLab 联动](docs/gitlab-updates.md) · [DDL 与标签](docs/task-schema-and-tags.md) · [调度容量](docs/task-dispatch.md) · [新架构检查记录](docs/fresh-gauss-audit.md)
