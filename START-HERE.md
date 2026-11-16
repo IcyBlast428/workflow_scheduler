@@ -2,6 +2,10 @@
 
 本包是当前平台代码、已构建前端和部署工具。使用 **root + `/data/workflow_scheduler` + Python 3.12 + systemd + GaussDB/DWS**。服务器不需要 Node、Git 或 Docker。
 
+也可将部署包内容提交到内网 GitLab 后再 clone 到服务器。新版校验清单同时记录 UTF-8 文本的原始哈希和 LF 换行哈希，允许 Git 转换 CRLF/LF；真实内容变化、缺失文件和二进制变化仍会拒绝部署。旧包没有 LF 哈希时仍严格校验，需使用对应原包的换行核对工具，不能直接删除或任意重算清单。
+
+部署包不包含 `.github/`：该目录仅用于源码仓库的 GitHub 自动检查，平台运行和内网 GitLab 部署均不依赖它。提交部署包到内网 GitLab 时，请完整保留 `app/dist/`、驱动文件和 `PACKAGE-MANIFEST.json`；在服务器执行 `bash deploy.sh verify`，通过后再继续部署。
+
 ## 首次安装：解压后执行一条命令
 
 先准备 Linux x86_64 服务器、Python 3.12（含 venv/pip）、unixODBC，以及可访问的 Nacos、GaussDB 和 Nexus。GaussDB 数据库由 DBA 提前建立，见 [数据库准备](deploy/root-test/DATABASE.md)。ZIP 不包含 Python 安装程序、操作系统软件包或完整离线 wheels。

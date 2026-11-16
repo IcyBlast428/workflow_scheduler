@@ -7,11 +7,46 @@ from unittest.mock import patch
 import zipfile
 
 from scripts import package_release as package
+from scripts import deploy
 
 
 class ReleasePackageTests(unittest.TestCase):
+    def test_git_line_endings_preserve_integrity_but_content_changes_fail(self):
+        for original in (b'first\r\nsecond\r\n', b'first\r\nsecond\n'):
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                entry = package.file_record('index.html', original)
+                (root/'PACKAGE-MANIFEST.json').write_text(json.dumps({'files': [entry]}))
+                for changed in (original, original.replace(b'\r\n', b'\n'),
+                                original.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')):
+                    (root/'index.html').write_bytes(changed)
+                    deploy.verify_package(root)
+                (root/'index.html').write_bytes(b'first\nmodified\n')
+                with self.assertRaises(ValueError):
+                    deploy.verify_package(root)
+
+    def test_binary_and_legacy_records_keep_exact_hash_checks(self):
+        for original in (b'\x00first\r\n', b'\xfffirst\r\n'):
+            entry = package.file_record('driver.so', original)
+            self.assertNotIn('sha256_lf', entry)
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root/'PACKAGE-MANIFEST.json').write_text(json.dumps({'files': [entry]}))
+                (root/'driver.so').write_bytes(original.replace(b'\r\n', b'\n'))
+                with self.assertRaises(ValueError):
+                    deploy.verify_package(root)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = package.file_record('legacy.txt', b'first\r\n')
+            del entry['sha256_lf']
+            (root/'PACKAGE-MANIFEST.json').write_text(json.dumps({'files': [entry]}))
+            (root/'legacy.txt').write_bytes(b'first\n')
+            with self.assertRaises(ValueError):
+                deploy.verify_package(root)
+
     def test_local_secrets_and_runtime_files_are_excluded(self):
         for name in ('data/environment.json', '.env.local', 'deploy/root-test/runtime.env',
+                     '.github/workflows/ci.yml', '.github/CODEOWNERS',
                      'frontend/node_modules/dep.js', 'app/__pycache__/test.pyc',
                      'frontend/test-results/output.png', 'wfs-scheduler.service', 'deploy/root-test/wfs-scheduler.service', 'deploy/root-test/wfs.service', '../app/run.py', 'app/jobs/private/main.py'):
             self.assertFalse(package.permitted(name), name)

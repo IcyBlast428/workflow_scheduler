@@ -10,7 +10,8 @@ import subprocess
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = {'app', 'frontend', 'scripts', 'deploy', 'docs', 'schema', 'examples', 'tests', '.github'}
+# GitHub automation belongs in the source repository, not the runtime release.
+SOURCE_DIRS = {'app', 'frontend', 'scripts', 'deploy', 'docs', 'schema', 'examples', 'tests'}
 SOURCE_FILES = {'README.md', 'START-HERE.md', 'DATABASE.md', 'deploy.sh', 'run.py',
                 'gunicorn.conf.py', 'backend_dev_runner.py', 'requirements.txt', 'requirements-test.txt',
                 'requirements-databases.txt', 'requirements-linux-py312.lock', '.gitattributes', '.gitignore',
@@ -81,6 +82,20 @@ def collect(root=ROOT):
     return payload, sanitized
 
 
+def file_record(name, blob):
+    record = {'path': name, 'size': len(blob), 'sha256': hashlib.sha256(blob).hexdigest()}
+    # Git can normalize CRLF (including mixed endings) when storing text files.
+    # Record this digest at build time, never from an unchecked deployment copy.
+    if b'\0' not in blob:
+        try:
+            blob.decode('utf-8')
+        except UnicodeDecodeError:
+            pass
+        else:
+            record['sha256_lf'] = hashlib.sha256(blob.replace(b'\r\n', b'\n')).hexdigest()
+    return record
+
+
 def package(output, root=ROOT):
     payload, sanitized = collect(root)
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
@@ -89,8 +104,7 @@ def package(output, root=ROOT):
                 'created_at':datetime.now(timezone.utc).isoformat(),
                 'kind':'root-gaussdb-working-tree-with-prebuilt-ui', 'includes_dependency_wheels':False,
                 'sanitized_templates':sanitized,
-                'files':[{'path':name, 'size':len(blob), 'sha256':hashlib.sha256(blob).hexdigest()}
-                         for name, blob in sorted(payload.items())]}
+                'files':[file_record(name, blob) for name, blob in sorted(payload.items())]}
     payload['PACKAGE-MANIFEST.json'] = (json.dumps(metadata, ensure_ascii=False, indent=2)+'\n').encode()
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)

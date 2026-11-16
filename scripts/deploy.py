@@ -67,8 +67,18 @@ def verify_package(project=ROOT):
         path = project.joinpath(*relative.parts)
         if not path.resolve().is_relative_to(project.resolve()) or not path.is_file():
             raise ValueError(f'部署包缺少文件或路径不安全：{relative}')
-        if hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
-            raise ValueError(f'部署包文件已改变或损坏：{relative}；请从原 ZIP 重新解压代码。')
+        blob = path.read_bytes()
+        if hashlib.sha256(blob).hexdigest() != item['sha256']:
+            text_match = False
+            if item.get('sha256_lf') and b'\0' not in blob:
+                try:
+                    blob.decode('utf-8')
+                except UnicodeDecodeError:
+                    pass
+                else:
+                    text_match = hashlib.sha256(blob.replace(b'\r\n', b'\n')).hexdigest() == item['sha256_lf']
+            if not text_match:
+                raise ValueError(f'部署包文件已改变或损坏：{relative}；请核对发布版本与文件内容。旧包经过 Git 转存时还需核对换行差异。')
     print(f'部署包校验通过：{len(files)} 个文件。')
 
 
