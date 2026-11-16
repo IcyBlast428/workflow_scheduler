@@ -1,7 +1,7 @@
 <template>
   <ModalShell :embedded="embedded" :open="Boolean(pid)" label="任务代码版本" panel-class="task-release-modal" @close="close">
     <header class="modal-head release-top"><div><h3>{{ record?.task_name || candidate?.task_name || pid }}</h3><p class="hint">当前版本 <strong>{{ short(record?.active_version) }}</strong> → 所选版本 <strong>{{ short(preview?.release.version) }}</strong></p></div><div class="filter-actions">
-      <button v-if="canPrepare" class="btn primary" :disabled="busy || !entry" @click="prepare">检查依赖环境</button>
+      <button v-if="canPrepare" class="btn primary" :disabled="busy || !entry" @click="prepare">识别并安装依赖</button>
       <button v-else-if="canPublish && !blockedChecks.length" class="btn primary" :disabled="busy" @click="publish">{{ preview.release.published_at ? '回滚到此版本' : '发布此版本' }}</button>
       <span v-else-if="preview?.release.status === 'preparing'" class="tag warning">{{ preview.release.prepare_stage || '正在准备依赖…' }}</span>
       <button v-else-if="blockedChecks.length" class="btn warning" @click="jump(checklist)">查看阻止项（{{ blockedChecks.length }}）</button>
@@ -23,12 +23,25 @@
         <label>发布 Python 入口<select class="select" v-model="sourceEntry" :disabled="busy"><option value="" disabled>请选择 Python 入口</option><option v-for="file in candidate.main_file_options" :key="file" :value="file">{{ file }}</option></select></label>
       </div><p v-if="candidate.recovery" class="hint">保留原任务编号 {{ candidate.recovery.pid }}、调度配置及历史记录。恢复后先重新获取代码并检查依赖，再发布和启用调度。</p><div class="filter-actions"><button v-if="candidate.kind === 'recover'" class="btn primary" :disabled="busy || candidate.blocked" @click="recoverIdentity">确认恢复原任务</button><button v-else-if="candidate.kind === 'delete'" class="btn danger" :disabled="busy || candidate.blocked" @click="remove">确认删除任务</button><button v-else class="btn primary" :disabled="busy || candidate.blocked || !taskName || !sourceEntry" @click="stage">{{ preview?.release.git_source?.sha === candidate.sha ? '重新获取 GitLab 版本' : '获取 GitLab 版本并查看差异' }}</button></div></section>
       <div v-if="record" class="release-overview"><span class="tag info">{{ record.deleted_at ? '回收站' : record.active_version ? '当前版本 ' + short(record.active_version) : '尚未发布' }}</span><span class="hint">{{ record.group_name }} / {{ record.folder_name }}</span><button v-if="record.deleted_at" class="btn" :disabled="busy" @click="restore">恢复任务（暂停）</button></div>
-      <section v-if="versions.length" class="release-history" aria-label="代码版本历史"><button v-for="version in versions" :key="version.version" class="btn" :class="preview?.release.version === version.version ? 'primary' : ''" :disabled="busy" @click="work('正在读取代码版本…', () => inspect(version.version))">{{ short(version.version) }} · {{ label(version.status) }}</button></section>
+      <section v-if="versions.length" class="release-history" aria-label="代码版本历史"><button v-for="version in versions" :key="version.version" class="btn" :class="preview?.release.version === version.version ? 'primary' : ''" :disabled="busy" @click="selectVersion(version.version)">{{ short(version.version) }} · {{ label(version.status) }}</button></section>
       <section v-if="preview" class="surface-card release-preview" aria-label="发布版本预览">
         <h3>版本 {{ short(preview.release.version) }}</h3><p class="hint">新增 {{ counts.added }} · 修改 {{ counts.modified }} · 删除 {{ counts.deleted }} 个文件</p>
         <p v-if="preview.release.task_name">发布任务名称：{{ preview.release.task_name }}</p><p v-if="preview.release.git_source" class="mono">GitLab 提交 {{ preview.release.git_source.sha }}</p><p class="hint">{{ preview.release.message || '先核对文件差异，再检查依赖并确认发布。' }}</p>
         <div ref="entryField" tabindex="-1" class="form-row"><label for="release-entry">Python 入口</label><select id="release-entry" v-model="entry" class="select" :disabled="busy || !['staged','failed'].includes(preview.release.status)"><option v-for="file in preview.release.manifest.filter(f => f.path.endsWith('.py'))" :key="file.path" :value="file.path">{{ file.path }}</option></select></div>
-        <p class="hint">依赖：{{ preview.release.requirements.join('，') || 'Python 标准库' }}。独立环境检查通过后才能发布；不会在检查期间运行任务。</p>
+        <section class="release-dependencies" aria-label="任务依赖">
+          <h4>运行依赖</h4>
+          <p>{{ dependencySource }}：{{ preview.release.requirements?.join('，') || '未识别到第三方依赖' }}</p>
+          <p class="hint">无需上传 requirements.txt；平台识别代码及引用的公共模块依赖。启用 Nexus 后可在线安装并锁定版本，已提供的依赖清单优先使用。检查期间不会运行任务。</p>
+          <details v-if="preview.release.dependency_report?.modules?.length" class="disclosure"><summary>查看识别依据</summary><ul><li v-for="item in preview.release.dependency_report.modules" :key="item.module"><code>{{ item.module }}</code> → {{ item.package }}<span class="hint"> · {{ item.sources.join('、') }}</span></li></ul></details>
+          <p v-for="warning in preview.release.dependency_report?.warnings || []" :key="warning" class="hint">{{ warning }}</p>
+          <details v-if="canPrepare" class="disclosure"><summary>补充或调整依赖（可选）</summary><div class="disclosure-body">
+            <label class="release-reason" for="release-dependencies">本版本完整依赖清单<textarea id="release-dependencies" v-model="dependencyText" class="input mono" rows="5" :disabled="busy" placeholder="requests&#10;pandas&#10;例如：openpyxl>=3.1" /></label>
+            <p class="hint">每行一个包名，可指定版本。动态导入、可选功能或包名不同的情况可在此补充；点击“识别并安装依赖”后保存。只影响本版本，无需修改 GitLab 代码。</p>
+          </div></details>
+          <button v-if="canRebuild" class="btn" :disabled="busy" @click="rebuild">用原代码重新准备依赖</button>
+          <p v-if="canRebuild" class="hint">执行时缺包可使用此入口。新建候选版本，检查通过并发布后生效。</p>
+          <details v-if="preview.release.installed_dependencies?.length" class="disclosure"><summary>已安装并锁定 {{ preview.release.installed_dependencies.length }} 个包</summary><p class="mono">{{ preview.release.installed_dependencies.map(item=>`${item.name}==${item.version}`).join('，') }}</p></details>
+        </section>
         <section v-if="preview.preflight" class="release-checklist" aria-label="发布前检查">
           <h4>发布前检查</h4>
           <p>当前 {{ short(preview.preflight.current_version) }} → 候选 {{ short(preview.preflight.candidate_version) }}</p>
@@ -71,6 +84,11 @@ const changedOnly = ref(true);
 const files = computed(() => { const changes = new Map((preview.value?.changes || []).map(f => [f.path, f.kind])); return [...new Set([...(preview.value?.release.manifest || []).map(f => f.path), ...changes.keys()])].sort().map(path => ({path,kind:changes.get(path)})).filter(file => !changedOnly.value || file.kind); });
 const canPublish = computed(() => preview.value && !record.value?.deleted_at && ['ready','applied'].includes(preview.value.release.status) && record.value?.active_version !== preview.value.release.version && preview.value.preflight?.entry_present !== false);
 const canPrepare=computed(()=>['staged','failed'].includes(preview.value?.release.status) && !record.value?.deleted_at);
+const canRebuild=computed(()=>['ready','applied'].includes(preview.value?.release.status) && record.value && !record.value.deleted_at && !record.value.pending);
+const dependencySource=computed(()=>({auto:'自动识别',file:'requirements.txt',manual:'页面配置'}[preview.value?.release.requirements_source] || '原版本依赖'));
+const dependencyText=ref('');
+let dependencyVersion='';
+const dependencyForm=useUnsavedChanges(()=>dependencyText.value,()=>Boolean(canPrepare.value && !loading.value));
 const checklist=ref(null),entryField=ref(null),gatesPanel=ref(null),trialSettings=ref(null);
 function jump(element){if(!element)return;if(element.tagName==='DETAILS')element.open=true;(element.tagName==='DETAILS'?element.querySelector('summary'):element)?.focus({preventScroll:true});element.scrollIntoView({block:'nearest'});}
 const checks=computed(()=>{
@@ -107,13 +125,16 @@ async function refresh() {
   record.value = detail.task || null;
   versions.value = detail.versions || [];
 }
-async function inspect(version) {
+async function inspect(version, resetDependencies=false) {
   if (!version) return; const token = generation, request = ++previewSequence; diffSequence++; path.value = ''; diff.value = ''; diffLoading.value = false;
   const data = await api.packagePreview(props.pid, version);
   if (!alive || token !== generation || request !== previewSequence) return;
+  const reset = resetDependencies || dependencyVersion!==version || !dependencyForm.dirty.value;
   preview.value = data; entry.value = data.release.main_file;
+  if(reset){dependencyVersion=version;dependencyText.value=(data.release.requirements || []).join('\n');dependencyForm.saved();}
 
 }
+async function selectVersion(version){if(version!==preview.value?.release.version && dependencyForm.dirty.value && !await confirmUnsaved(props.confirm))return;await work('正在读取代码版本…',()=>inspect(version));}
 async function work(text, action) {
   if (busy.value) return; const token = generation; busy.value = true; busyLabel.value = text; error.value = '';
   try { await action(); } catch (err) { if (alive && token === generation) error.value = err.message; return false; }
@@ -126,7 +147,8 @@ async function inspectFile(filename) {
   finally { if (alive && token === generation && request === diffSequence) diffLoading.value = false; }
 }
 async function stage() { await work('正在获取并校验 GitLab 代码…', async () => { const data = await api.gitlabTaskAction({action:'stage', id:candidate.value.id, configuration:{task_name:taskName.value, main_file:sourceEntry.value}}); await refresh(); await inspect(data.version); changed(); }); }
-async function prepare() { await work('正在准备独立依赖环境…', async () => { await api.packageAction({action:'prepare',pid:props.pid,version:preview.value.release.version,main_file:entry.value}); await inspect(preview.value.release.version); }); }
+async function prepare() { await work('正在识别并安装任务依赖…', async () => { const token=generation,fields={action:'prepare',pid:props.pid,version:preview.value.release.version,main_file:entry.value};if(dependencyForm.dirty.value)fields.requirements=dependencyText.value;await api.packageAction(fields);if(!alive || token!==generation)return;dependencyForm.saved();await inspect(fields.version,true); }); }
+async function rebuild() { await work('正在用原代码创建候选版本…', async () => { const token=generation;const data=await api.packageAction({action:'rebuild',pid:props.pid,version:preview.value.release.version,revision:record.value.revision});if(!alive || token!==generation)return;await refresh();if(!alive || token!==generation)return;await inspect(data.version);message.value='已使用原代码创建候选版本。核对依赖后点击“识别并安装依赖”，通过后再发布。';changed(); }); }
 async function publish() {
   if(!canPublish.value || blockedChecks.value.length)return;
   const { version, published_at: publishedAt } = preview.value.release;
@@ -180,6 +202,12 @@ onBeforeUnmount(() => { alive = false; generation++; });
 .release-preview { display: grid; gap: 16px; align-content: start; }
 .release-preview > h3, .release-preview > p { margin: 0; }
 .release-reason { display: grid; gap: 8px; min-width: 0; }
+.release-dependencies { display:grid; gap:12px; min-width:0; padding:16px; border:1px solid var(--line); border-radius:10px; }
+.release-dependencies > h4,.release-dependencies > p { margin:0; }
+.release-dependencies > .btn { justify-self:start; }
+.release-dependencies textarea { width:100%; resize:vertical; min-height:110px; }
+.release-dependencies ul { padding-left:20px; }
+.release-dependencies li { margin:8px 0; overflow-wrap:anywhere; }
 .release-checklist, .release-gates { display: grid; gap: 12px; min-width: 0; }
 .release-checklist > h4, .release-checklist > p,
 .release-gates > h4, .release-gates > p { margin: 0; }

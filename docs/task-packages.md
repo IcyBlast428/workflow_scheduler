@@ -43,13 +43,15 @@ daily_report/
   helpers.py
   sql/query.sql
   README.md
-  requirements.txt       # 有第三方依赖时必需
+  requirements.txt       # 可选；省略时自动识别，也可在页面补充
   wheels/*.whl           # 或通过服务端离线依赖库提供
 ```
 
 保留仓库内任务目录以下的所有层级。不要提交 `.git`、`.venv`、`__pycache__`、`.env` 等本地环境或凭据文件。没有 Python 文件的任务不能发布；单个 Python 文件最大 2 MiB。示例 ZIP 仍可下载，解压后只需提交代码，在平台设置名称与入口；任务编号自动生成。
 
-每个版本建立独立 Python 虚拟环境，**不会继承平台或原任务环境里的第三方包**。没有 requirements.txt 时只有标准库与环境自带的 pip。现有任务用到平台帮助模块时，也需要列出这些模块使用的第三方依赖。
+每个版本建立独立 Python 虚拟环境，**不会继承平台或原任务环境里的第三方包**。没有 requirements.txt 时，平台自动识别源码与所引用公共模块的依赖，在「识别并安装依赖」时从 Nexus 安装并锁定。页面支持补充完整清单；有 requirements.txt 则优先使用。动态导入和可选功能可能需要补充包名，详见[自动依赖与 Nexus](task-environments-and-nexus.md)。
+
+已发布版本遇到缺包，可点击「用原代码重新准备依赖」，使用同一份代码生成候选版本，检查并发布后生效。不会修改旧环境或自动重跑失败业务。
 
 「依赖仓库」选择 Nexus 后，从配置的私有 PyPI 安装直接及间接 wheel 依赖；不会自动切换到公网。离线模式要求 `package==version` 和全部间接依赖的兼容 wheels，使用 `--no-index --no-deps --only-binary=:all:`。两种模式都执行 `pip check`，拒绝直接 URL、路径和安装参数。依赖准备最多并行两个版本，失败不会改变生效版本。
 
@@ -87,6 +89,6 @@ Linux 上准备好的代码文件和目录设置为只读，并禁止运行时�
 - `GET /api/taskinfo/packages/gitlab`：获取缓存任务变更，不执行外部网络请求；`POST` 携带变更 `id` 和 `stage/delete` 操作。
 - `GET /api/taskinfo/packages/preview?pid=…&version=…`：清单、当前版本差异；加 `path` 返回受限文本差异。
 - `GET /api/taskinfo/packages/download?pid=…&version=…`：只下载该版本代码包，不包含虚拟环境和业务数据。
-- `POST /api/taskinfo/packages/action`：`prepare/publish/rollback/trash/restore`；切换或删除携带当前 `revision`，过期状态返回 409；不支持的操作返回 400。
+- `POST /api/taskinfo/packages/action`：`prepare/rebuild/publish/rollback/trash/restore`；`prepare` 可选 `requirements` 文本/列表，表示本版本完整清单；`rebuild`、切换或删除携带当前 `revision`，过期状态返回 409；不支持的操作返回 400。
 
 任务代码是管理员可信代码。本功能提供版本隔离和发布检查，不是执行不可信代码的安全沙箱。

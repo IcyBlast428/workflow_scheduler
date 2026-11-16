@@ -8,7 +8,7 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   await page.getByLabel('密码', {exact:true}).fill('browser-test-password');
   await page.getByRole('button', {name:'登录',exact:true}).click();
   const card = page.locator('.new-task-card').filter({hasText:'git_new'});
-  await expect(card).toContainText('GitLab 新任务');
+  await expect(card).toContainText('新任务 · 待发布');
   await page.screenshot({path:'../data/gitlab-task-new.png',fullPage:true});
   await card.getByRole('button', {name:'审查并发布',exact:true}).click();
   const dialog = page.getByRole('dialog', {name:'任务代码版本',exact:true});
@@ -25,7 +25,7 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   await dialog.getByRole('button', {name:'新增 helper.py',exact:true}).click();
   await expect(dialog.locator('.release-code')).toContainText('+value="GITLAB_V1"');
   const publish = async () => {
-    await dialog.getByRole('button', {name:'检查依赖环境',exact:true}).click();
+    await dialog.getByRole('button', {name:'识别并安装依赖',exact:true}).click();
     const checklist = dialog.getByLabel('发布检查摘要');
     await expect(checklist.locator('.passed')).toContainText('依赖环境：检查通过',{timeout:35000});
     const headers = {'X-CSRF-Token': await page.evaluate(() => sessionStorage.getItem('wfs_csrf_token'))};

@@ -258,13 +258,48 @@ class PackageTests(unittest.TestCase):
     def test_offline_dependency_failure_cannot_publish(self):
         data = self.new({'main.py':'print(1)','requirements.txt':'nonexistent_wfs_package==1.0.0'})
         packages.prepare(data['pid'],data['version'])
-        deadline = time.monotonic()+30
+        # Match ready(): Windows ensurepip/antivirus may take more than 30 seconds.
+        deadline = time.monotonic()+90
         while packages.release(data['pid'],data['version'])['status'] == 'preparing' and time.monotonic()<deadline:
             time.sleep(.05)
         self.assertEqual(packages.release(data['pid'],data['version'])['status'],'failed')
         with self.assertRaises(packages.PackageError):
             self.activate(data)
         self.assertFalse(task_loader.discover_task_specs())
+
+    def test_retry_clears_interrupted_installation_metadata(self):
+        data = self.new({'main.py': 'print("stdlib")'})
+        root = packages.release_dir(data['pid'], data['version'])
+        data.update(status='failed', dependency_bundle_sha256='stale', shared_sdk_package='old',
+                    installed_dependencies=[{'name': 'stale', 'version': '1'}], python='old/bin/python')
+        packages._write_release(data)
+        for filename in ('dependency-bundle.json', 'dependencies.lock.txt', 'dependencies.requested.txt'):
+            (root / filename).write_text('old failed attempt', encoding='utf-8')
+        ready = self.ready(data)
+        self.assertNotIn('dependency_bundle_sha256', ready)
+        self.assertNotIn('installed_dependencies', ready)
+        self.assertNotIn('shared_sdk_package', ready)
+        self.assertFalse((root / 'dependency-bundle.json').exists())
+        self.assertEqual(json.loads((root / '.release.json').read_text())['dependency_bundle_sha256'], 'stdlib')
+
+    def test_legacy_empty_environment_rebuilds_with_auto_dependencies_and_git_identity(self):
+        data = self.new({'main.py': 'import requests\nimport pandas'})
+        data.update(status='applied', requirements=[], task_name='原邮件任务',
+                    git_source=dict(project_key='project', path='app/jobs/mailPush/mail', sha='a' * 40,
+                                    fingerprint='original', group_name='mailPush', folder_name='mail'))
+        data.pop('requirements_source')
+        data.pop('dependency_report')
+        packages._write_release(data)
+        record = packages.task(data['pid'])
+        record = packages._write_task({**record, 'active_version': data['version']}, expected=record['revision'])
+        rebuilt = packages.rebuild(data['pid'], data['version'], record['revision'], 'admin')
+        self.assertEqual(rebuilt['requirements'], ['pandas', 'requests'])
+        self.assertEqual(rebuilt['requirements_source'], 'auto')
+        self.assertEqual(rebuilt['git_source'], data['git_source'])
+        self.assertEqual(rebuilt['task_name'], '原邮件任务')
+        self.assertEqual(rebuilt['checksum'], data['checksum'])
+        self.assertEqual(packages.task(data['pid'])['active_version'], data['version'])
+        self.assertEqual(packages.release(data['pid'], data['version']), data)
 
     def test_bundled_offline_wheel_is_installed_in_version_environment(self):
         wheel_files = {

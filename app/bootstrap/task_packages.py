@@ -206,7 +206,7 @@ def _manifest(code):
     return result
 
 def _requirements(code):
-    from packaging.requirements import Requirement, InvalidRequirement
+    from app.bootstrap.task_dependencies import parse_requirements
     path = code / 'requirements.txt'
     if not path.exists():
         if any(code.rglob('requirements.txt')):
@@ -215,24 +215,25 @@ def _requirements(code):
     if path.stat().st_size > 65536:
         raise PackageError('requirements.txt 太大。')
     try:
-        lines = path.read_text(encoding='utf-8-sig').splitlines()
+        content = path.read_text(encoding='utf-8-sig')
     except UnicodeError as exc:
         raise PackageError('requirements.txt 必须使用 UTF-8。') from exc
-    requirements = []
-    for line in lines:
-        line = line.split('#', 1)[0].strip()
-        if not line:
-            continue
-        try:
-            requirement = Requirement(line)
-        except InvalidRequirement:
-            raise PackageError('依赖应逐行填写包名和版本；不接受安装参数、脚本或文件路径。') from None
-        if requirement.url or len(line) > 1000:
-            raise PackageError('依赖不接受直接下载地址；请使用管理员配置的仓库。')
-        requirements.append(line)
-        if len(requirements) > 500:
-            raise PackageError('最多声明 500 项直接依赖。')
-    return requirements
+    try:
+        return parse_requirements(content)
+    except ValueError as exc:
+        raise PackageError(str(exc)) from exc
+
+def _dependency_plan(data, code, *, sdk=None):
+    from app.bootstrap.task_dependencies import inspect
+    try:
+        data['dependency_report'] = inspect(code, data['main_file'], sdk=sdk)
+    except ValueError as exc:
+        raise PackageError(str(exc)) from exc
+    source = data.get('requirements_source')
+    if source != 'manual':
+        source = 'file' if (code / 'requirements.txt').exists() else 'auto'
+        data['requirements'] = _requirements(code) if source == 'file' else data['dependency_report']['requirements']
+    data['requirements_source'] = source
 
 def _checksum(manifest):
     return hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
@@ -296,6 +297,7 @@ def _create(record, blob=None, source=None, entry='', actor='admin', note='', ar
         requirements = _requirements(code)
         selected = _entry(manifest, entry)
         data = {'pid': record['pid'], 'version': version, 'created_at': str(business_now()), 'actor': actor, 'note': str(note)[:1000], 'status': 'staged', 'message': '', 'main_file': selected, 'manifest': manifest, 'checksum': _checksum(manifest), 'requirements': requirements, 'base_version': record.get('active_version'), 'base_revision': record['revision'], 'archive_layout': archive_layout, 'database_access': database_access}
+        _dependency_plan(data, code)
         # 目录就绪后才登记版本；登记失败仍清理这个新版本，不触碰旧版本目录。
         temporary.rename(destination)
         _write_release(data, insert=True)
@@ -339,7 +341,30 @@ def stage(blob, fields, actor):
                 raise
         return data
 
-def prepare(pid, version, entry=''):
+def rebuild(pid, version, revision, actor):
+    """Keep the active code/environment immutable while preparing its dependencies anew."""
+    from app.bootstrap.core import _configuration_lock
+    with _configuration_lock:
+        record, original = task(pid), release(pid, version)
+        if record['revision'] != revision or record.get('deleted_at') or record.get('pending'):
+            raise PackageError('任务状态已变化，请刷新后重试。', 409)
+        if original['status'] not in ('ready', 'applied'):
+            raise PackageError('此版本尚未就绪，请直接准备依赖。', 409)
+        code = release_dir(pid, version) / 'code'
+        if _checksum(_manifest(code)) != original['checksum']:
+            raise PackageError('原版本代码校验失败，请重新获取代码。', 409)
+        data = _create(record, source=code, entry=original['main_file'], actor=actor,
+                       note='使用原代码重新准备依赖：' + version, archive_layout='preserve')
+        for key in ('git_source', 'task_name'):
+            if key in original:
+                data[key] = original[key]
+        if original.get('requirements_source') == 'manual':
+            data.update(requirements_source='manual', requirements=original['requirements'])
+        data['rebuilt_from'] = version
+        _write_release(data)
+        return data
+
+def prepare(pid, version, entry='', requirements=None):
     from app.bootstrap.core import _configuration_lock
     with _configuration_lock, _prepare_lock:
         record, data = (task(pid), release(pid, version))
@@ -355,6 +380,17 @@ def prepare(pid, version, entry=''):
             data['main_file'] = _entry(data['manifest'], entry or data['main_file'])
             if not data['main_file']:
                 raise PackageError('请先选择 Python 入口。')
+            if requirements is not None:
+                from app.bootstrap.task_dependencies import parse_requirements
+                try:
+                    data['requirements'] = parse_requirements(requirements)
+                except ValueError as exc:
+                    raise PackageError(str(exc)) from exc
+                data['requirements_source'] = 'manual'
+            _dependency_plan(data, release_dir(pid, version) / 'code')
+            for key in ('python', 'installed_dependencies', 'dependency_bundle_sha256', 'shared_sdk_package',
+                        'shared_sdk_sha256', 'dependency_source', 'prepare_started_at'):
+                data.pop(key, None)
             data.update(status='preparing', message='正在创建独立环境并检查任务依赖。', prepare_token=uuid.uuid4().hex)
             _write_release(data)
             _preparing[pid, version] = data['prepare_token']
@@ -385,7 +421,9 @@ def _command(command, root, timeout, *, environment=None, secrets=()):
             with (root / 'prepare.log').open('a', encoding='utf-8') as log:
                 log.write(output)
     if result.returncode:
-        raise PackageError('依赖准备失败，请检查仓库连通性、依赖版本及 wheel 与 Python/系统的兼容性。管理员可查看版本目录中的 prepare.log。')
+        error = PackageError('依赖准备失败，请检查仓库连通性、依赖版本及 wheel 与 Python/系统的兼容性。管理员可查看版本目录中的 prepare.log。')
+        error.command_output = output
+        raise error
     return output
 
 def _install_requirements(python, code, root, requirements, repository, timeout):
@@ -395,6 +433,8 @@ def _install_requirements(python, code, root, requirements, repository, timeout)
     common = [str(python), '-I', '-m', 'pip', '--isolated', '--disable-pip-version-check', '--no-input']
     bundle = root / ('dependency-wheels-' + Path(python).parent.parent.name)
     bundle.mkdir(exist_ok=False)
+    effective = root / 'dependencies.requested.txt'
+    effective.write_text('\n'.join(requirements) + '\n', encoding='utf-8')
     with tempfile.TemporaryDirectory(prefix='wfs-pip-auth-') as temporary:
         netrc = Path(temporary) / 'credentials'
         username, password = (repository.get('username', ''), repository.get('password', ''))
@@ -406,7 +446,7 @@ def _install_requirements(python, code, root, requirements, repository, timeout)
         if repository['mode'] == 'offline':
             for line in requirements:
                 if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]*(?:\\[[A-Za-z0-9_,.-]+\\])?==[A-Za-z0-9][A-Za-z0-9.!+_-]*', line):
-                    raise PackageError('离线模式要求全部直接及间接依赖使用 package==version。')
+                    raise PackageError('当前使用离线模式；自动安装请管理员在「依赖仓库」启用 Nexus。离线安装需全部直接及间接依赖使用 package==version，并提供 wheel。')
             arguments = ['--no-index', '--no-deps']
             for wheelhouse in (code / 'wheels', Path(os.environ.get('WFS_TASK_WHEELHOUSE', ''))):
                 if wheelhouse.is_dir() and str(wheelhouse) != '.':
@@ -417,7 +457,11 @@ def _install_requirements(python, code, root, requirements, repository, timeout)
                 arguments += ['--trusted-host', urlsplit(repository['index_url']).netloc]
             if repository.get('ca_bundle'):
                 arguments += ['--cert', repository['ca_bundle']]
-        _command(common + ['download', '--only-binary=:all:', '--no-cache-dir', '--dest', str(bundle), *arguments, '-r', str(code / 'requirements.txt')], root, timeout, environment={'NETRC': str(netrc)}, secrets=redactions)
+        try:
+            _command(common + ['download', '--only-binary=:all:', '--no-cache-dir', '--dest', str(bundle), *arguments, '-r', str(effective)], root, timeout, environment={'NETRC': str(netrc)}, secrets=redactions)
+        except PackageError as exc:
+            from app.bootstrap.task_dependencies import download_error
+            raise PackageError(download_error(getattr(exc, 'command_output', ''), repository['mode'])) from exc
     if sum((p.stat().st_size for p in bundle.iterdir())) > limits()['expanded_bytes']:
         raise PackageError('依赖下载超过版本大小限制。')
     records = []
@@ -465,6 +509,14 @@ def _prepare_worker(pid, version, token):
             raise PackageError(str(exc)) from exc
         if _checksum(_manifest(code)) != data['checksum']:
             raise PackageError('暂存代码校验不一致，请重新上传。')
+        # A failed attempt may already have written an installation summary.
+        # Retry metadata must describe the new interpreter, even with no dependencies.
+        for filename in ('dependencies.requested.txt', 'dependencies.lock.txt', 'dependencies.reproducible.txt',
+                         'dependency-bundle.json', '.release.json'):
+            (root / filename).unlink(missing_ok=True)
+        from app.bootstrap.shared_sdk import freeze
+        sdk_hash = freeze(root)
+        _dependency_plan(data, code, sdk=root / 'shared-sdk')
         env = root / ('environment-' + token)
         timeout = max(30, min(int(os.environ.get('WFS_PACKAGE_PREPARE_SECONDS', '300')), 1800))
         stage('创建独立环境')
@@ -477,6 +529,7 @@ def _prepare_worker(pid, version, token):
             _command([str(python), '-I', '-m', 'ensurepip', '--default-pip'], root, timeout)
             stage('从 Nexus 安装依赖' if source['mode'] == 'nexus' else '安装离线依赖')
             data['dependency_bundle_sha256'] = _install_requirements(python, code, root, data['requirements'], source, timeout)
+            data['installed_dependencies'] = json.loads((root / 'dependency-bundle.json').read_text(encoding='utf-8'))['wheels']
         from packaging.requirements import Requirement
         from packaging.utils import canonicalize_name
         external_sdk = any((canonicalize_name(Requirement(line).name) == 'workflow-scheduler-task-sdk' for line in data['requirements']))
@@ -484,8 +537,15 @@ def _prepare_worker(pid, version, token):
             data['shared_sdk_package'] = _command([str(python), '-I', '-c', "import importlib.metadata as m; print(m.version('workflow-scheduler-task-sdk'))"], root, timeout).strip()
             data['shared_sdk_sha256'] = data.get('dependency_bundle_sha256', '')
         else:
-            from app.bootstrap.shared_sdk import freeze
-            data['shared_sdk_sha256'] = freeze(root)
+            data['shared_sdk_sha256'] = sdk_hash
+        if data['requirements_source'] in ('auto', 'manual'):
+            stage('检查导入模块是否可用')
+            modules = [item['module'] for item in data['dependency_report']['modules']]
+            # find_spec on a top-level name locates files without importing task or dependency code.
+            probe = 'import importlib.util,json; print(json.dumps([m for m in ' + repr(modules) + ' if importlib.util.find_spec(m) is None]))'
+            missing = json.loads(_command([str(python), '-I', '-c', probe], root, timeout))
+            if missing:
+                raise PackageError('安装后仍缺少导入模块：' + '、'.join(missing) + '。导入名可能与包名不同，请在依赖清单中补充正确的包名后重试。')
         marker = {'task_release': version, 'package_sha256': data['checksum'], 'pid': pid, 'shared_sdk_sha256': data['shared_sdk_sha256'], 'shared_sdk_package': data.get('shared_sdk_package', ''), 'dependency_bundle_sha256': data.get('dependency_bundle_sha256', 'stdlib')}
         (root / '.release.json').write_text(json.dumps(marker), encoding='utf-8')
         if os.name != 'nt':
@@ -705,6 +765,9 @@ def preview(pid, version, filename=None):
     config = _record_maps().get(pid) or {}
     selected = config.get('main_file') or data['main_file']
     result['preflight'] = dict(active_instances=runnings.count(pid), entry=selected, entry_present=selected in new, entry_changed=bool(base and base['main_file'] != data['main_file']), shared_sdk_changed=bool(base and base.get('shared_sdk_sha256') != data.get('shared_sdk_sha256')), shared_sdk_current=(base or {}).get('shared_sdk_sha256', ''), shared_sdk_candidate=data.get('shared_sdk_sha256', ''), dependencies_changed=any((c['path'] in ('requirements.txt', 'requirements.lock', 'pyproject.toml') or c['path'].startswith('wheels/') for c in changes)), environment_ready=data['status'] in ('ready', 'applied'), schedule_enabled=str(config.get('enabled', '')).lower() in ('1', 'true', 'yes', 'on'), current_version=record.get('active_version'), candidate_version=version, business_verified=False)
+    result['preflight']['dependencies_changed'] |= (base or {}).get('requirements', []) != data['requirements']
+    if base and base['version'] != version:
+        result['preflight']['dependencies_changed'] |= base.get('dependency_bundle_sha256') != data.get('dependency_bundle_sha256')
     from app.bootstrap.business_db_policy import inspect_tree as inspect_database_access
     result['preflight']['database_access'] = inspect_database_access(release_dir(pid, version) / 'code')
     if filename is None:

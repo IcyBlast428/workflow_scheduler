@@ -138,7 +138,7 @@ def _dispatch(recover=False):
         if recover:
             # dispatching 可能已经启动业务，重启后只能标为待核对，不能重放。
             db.execute("UPDATE work_requests SET status='unknown',message='重启前派发未确认；请核对执行记录，不会自动重放。' WHERE status='dispatching'")
-        db.execute("UPDATE work_requests SET status='expired',message='已超过允许启动的时间，未派发；请核对业务是否需要补跑。' WHERE status='pending' AND expires_at<>'' AND expires_at<=?", (str(now),))
+        db.execute("UPDATE work_requests SET status='expired',message='已超过允许启动的时间，未派发；请核对业务是否需要补跑。' WHERE status='pending' AND LENGTH(expires_at)>0 AND expires_at<=?", (str(now),))
         db.execute("DELETE FROM work_requests WHERE id IN (SELECT id FROM work_requests WHERE status IN ('accepted','expired','rejected','cancelled') AND created_at<? LIMIT 1000)", (str(now - dt.timedelta(days=7)),))
     if admission.maintenance()['enabled'] or dispatch_control.reason(include_interval=False):
         return
@@ -158,7 +158,7 @@ def _dispatch(recover=False):
             continue
         with admission.store() as db:
             # 条件更新是领取请求的边界；状态已被取消或领取时跳过。
-            cursor = db.execute("UPDATE work_requests SET status='dispatching',message='' WHERE id=? AND status='pending'", (identifier,))
+            cursor = db.execute("UPDATE work_requests SET status='dispatching',message=NULL WHERE id=? AND status='pending'", (identifier,))
             if not cursor.rowcount:
                 continue
         try:
@@ -168,7 +168,7 @@ def _dispatch(recover=False):
                     raise ValueError('重试策略已停用或改变。')
             from app.bootstrap.core import call_task_once
             result = admission.manual_request(context['actor'], pid, identifier, lambda: call_task_once(pid, actor=context['actor'], context={**context, 'request_id': identifier, 'expires_at': expiry}))
-            status, run_id, message = ('accepted', result['run_id'], '')
+            status, run_id, message = ('accepted', result['run_id'], None)
             dispatched += 1
             from app.bootstrap.runtime_metrics import record_delay
             record_delay('queue:dispatch_wait', created, business_now())
@@ -180,9 +180,9 @@ def _dispatch(recover=False):
                 break
             continue
         except admission.PlanCancelled as exc:
-            status, run_id, message = ('cancelled', '', str(exc)[:500])
+            status, run_id, message = ('cancelled', None, str(exc)[:500])
         except Exception as exc:
-            status, run_id, message = ('unknown', '', str(exc)[:500])
+            status, run_id, message = ('unknown', None, str(exc)[:500])
         with admission.store() as db:
             db.execute('UPDATE work_requests SET status=?,run_id=?,message=? WHERE id=?', (status, run_id, message, identifier))
 

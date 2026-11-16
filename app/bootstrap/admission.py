@@ -188,9 +188,13 @@ def manual_request(actor, pid, key, submit):
                 raise RuntimeError(row[3] or '原请求结果待核对，请查看执行记录；不会重复启动。')
             if closed:
                 raise MaintenanceClosed('平台处于维护模式，暂不接受新的执行。')
-            db.execute('INSERT INTO receipts VALUES(?,?,?,?,?,?,?)', (actor, key, pid, 'pending', '', '', str(business_now())))
+            # No execution ID exists before submit. GaussDB A mode treats '' as
+            # NULL, so these optional fields must be nullable in every backend.
+            db.execute('INSERT INTO receipts VALUES(?,?,?,?,?,?,?)', (actor, key, pid, 'pending', None, None, str(business_now())))
         try:
             run_id = submit()
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise RuntimeError('未返回执行编号，请核对执行记录；不会自动重复启动。')
         # 只有明确尚未接收的拒绝才释放请求号；结果不明确时必须保留证据。
         except (CapacityUnavailable, MaintenanceClosed, PlanCancelled):
             with store() as db:

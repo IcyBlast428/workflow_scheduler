@@ -1,4 +1,4 @@
-"""Initialize an empty platform schema; existing installations are only validated."""
+"""Initialize an empty schema or validate and correct compatible existing fields."""
 
 import os
 from pathlib import Path
@@ -69,6 +69,8 @@ def initialize():
                     else:
                         db.execute_sql(sql)
                 validate(db)
+            from scripts.schema_compatibility import upgrade_optional_execution_fields
+            corrected = upgrade_optional_execution_fields(db)
             db.set_commit()
         except BaseException:
             db.set_rollback()
@@ -76,6 +78,8 @@ def initialize():
     print(
         "Platform schema ready:", len(table_names()), "tables; fresh baseline", VERSION
     )
+    if corrected:
+        print('Optional execution fields corrected; existing records retained.')
 
 
 if __name__ == "__main__":

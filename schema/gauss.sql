@@ -214,8 +214,8 @@ CREATE TABLE wfs_state_admission_receipts (
  key VARCHAR(1024) NOT NULL DEFAULT '',
  pid VARCHAR(1024) NOT NULL DEFAULT '',
  status VARCHAR(1024) NOT NULL DEFAULT '',
- run_id VARCHAR(1024) NOT NULL DEFAULT '',
- message VARCHAR(1024) NOT NULL DEFAULT '',
+ run_id VARCHAR(1024),
+ message VARCHAR(1024),
  created_at VARCHAR(1024) NOT NULL DEFAULT '',
  PRIMARY KEY(actor,key)
 );
@@ -228,8 +228,8 @@ CREATE TABLE wfs_state_admission_work_requests (
  payload TEXT NOT NULL DEFAULT '{}',
  created_at VARCHAR(1024) NOT NULL DEFAULT '',
  due_at VARCHAR(1024) NOT NULL DEFAULT '',
- run_id VARCHAR(1024) NOT NULL DEFAULT '',
- message VARCHAR(1024) NOT NULL DEFAULT '',
+ run_id VARCHAR(1024),
+ message VARCHAR(1024),
  expires_at VARCHAR(1024) NOT NULL DEFAULT '',
  PRIMARY KEY(id)
 );
@@ -295,7 +295,7 @@ CREATE TABLE wfs_state_journal_journal (
  pending INTEGER NOT NULL DEFAULT 0,
  retry_at DOUBLE PRECISION NOT NULL DEFAULT 0,
  payload TEXT NOT NULL DEFAULT '{}',
- log_path VARCHAR(1024) NOT NULL DEFAULT '',
+ log_path VARCHAR(1024),
  PRIMARY KEY(run_id)
 );
 

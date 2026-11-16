@@ -48,9 +48,9 @@ class NexusPackageTests(unittest.TestCase):
         self.settings_env.stop()
         package_tests.PackageTests.tearDown(self)
 
-    def wheel(self, name, source, requires=''):
+    def wheel(self, name, source, requires='', module=None):
         info = name+'-1.0.0.dist-info'
-        files = {name+'/__init__.py':source,
+        files = {(module or name)+'/__init__.py':source,
                  info+'/METADATA':f'Metadata-Version: 2.1\nName: {name.replace("_","-")}\nVersion: 1.0.0\n'+(f'Requires-Dist: {requires}\n' if requires else ''),
                  info+'/WHEEL':'Wheel-Version: 1.0\nGenerator: acceptance\nRoot-Is-Purelib: true\nTag: py3-none-any\n'}
         files[info+'/RECORD'] = ''.join(path+',,\n' for path in [*files,info+'/RECORD'])
@@ -122,3 +122,91 @@ class NexusPackageTests(unittest.TestCase):
         value=subprocess.check_output([str(interpreter),'-c','from guide_parent import value;print(value)'],text=True)
         self.assertIn('NEXUS_TRANSITIVE_OK',value)
         self.assertEqual(len(self.requests),before)
+
+    def wait_prepared(self, data):
+        import time
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            result = packages.release(data['pid'], data['version'])
+            if result['status'] != 'preparing':
+                return result
+            time.sleep(.05)
+        self.fail('dependency preparation timed out')
+
+    def test_no_requirements_discovers_installs_and_locks_without_running_business_code(self):
+        self.configure()
+        self.wheel('guide_parent', 'from guide_leaf import value\n', requires='guide-leaf>=1,<2')
+        data = self.new({'main.py': 'import guide_parent\nfrom helper import value\nraise RuntimeError("do not run during prepare")',
+                         'helper.py': 'import json\nvalue=1'})
+        self.assertEqual(data['requirements_source'], 'auto')
+        self.assertEqual(data['requirements'], ['guide-parent'])
+        result = self.ready(data)
+        root = packages.release_dir(data['pid'], data['version'])
+        self.assertFalse((root / 'code/requirements.txt').exists())
+        self.assertEqual(data['checksum'], result['checksum'])
+        self.assertEqual({item['name'] for item in result['installed_dependencies']}, {'guide-leaf', 'guide-parent'})
+        self.assertIn('guide-parent', (root / 'dependencies.requested.txt').read_text())
+        self.assertTrue(all(path.startswith('/repository/pypi-hosted/') for path in self.requests))
+
+    def test_missing_package_can_be_mapped_in_page_and_installed_without_code_changes(self):
+        self.configure()
+        self.wheel('company_helpers', "value='ok'", module='corporate_client')
+        data = self.new({'main.py': 'import corporate_client'})
+        packages.prepare(data['pid'], data['version'])
+        failed = self.wait_prepared(data)
+        self.assertEqual(failed['status'], 'failed')
+        self.assertIn('Nexus 中未找到可用依赖：corporate-client', failed['message'])
+        response = self.client.post('/api/taskinfo/packages/action', headers=self.headers,
+                                    json=dict(action='prepare', pid=data['pid'], version=data['version'], requirements='company-helpers==1.0.0'))
+        self.assertEqual(response.status_code, 200, response.json)
+        ready = self.wait_prepared(data)
+        self.assertEqual(ready['status'], 'ready', ready['message'])
+        self.assertEqual(ready['requirements_source'], 'manual')
+        self.assertEqual(ready['checksum'], data['checksum'])
+        self.assertFalse((packages.release_dir(data['pid'], data['version']) / 'code/requirements.txt').exists())
+
+    def test_wrong_same_name_package_is_rejected_when_import_module_still_missing(self):
+        self.configure()
+        self.wheel('corporate_client', '', module='different_module')
+        data = self.new({'main.py': 'import corporate_client'})
+        packages.prepare(data['pid'], data['version'])
+        result = self.wait_prepared(data)
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('仍缺少导入模块：corporate_client', result['message'])
+        with self.assertRaises(packages.PackageError):
+            self.activate(result)
+
+    def test_rebuild_creates_candidate_keeps_published_interpreter_and_changes_dependency_preview(self):
+        self.configure()
+        data = self.ready(self.new({'main.py': 'from guide_parent import value\nprint(value)'}))
+        self.activate(data)
+        original = packages.release(data['pid'], data['version'])
+        record = packages.task(data['pid'])
+        with self.assertRaises(packages.PackageError):
+            packages.rebuild(data['pid'], data['version'], record['revision'] - 1, 'admin')
+        response = self.client.post('/api/taskinfo/packages/action', headers=self.headers,
+                                    json=dict(action='rebuild', pid=data['pid'], version=data['version'], revision=record['revision']))
+        self.assertEqual(response.status_code, 200, response.json)
+        candidate = response.json['data']
+        self.assertNotEqual(candidate['version'], data['version'])
+        self.assertEqual(candidate['checksum'], data['checksum'])
+        self.assertEqual(candidate['base_version'], data['version'])
+        packages.prepare(candidate['pid'], candidate['version'], requirements='guide-parent==1.0.0')
+        ready = self.wait_prepared(candidate)
+        self.assertEqual(ready['status'], 'ready', ready['message'])
+        self.assertEqual(packages.release(data['pid'], data['version']), original)
+        self.assertEqual(packages.task(data['pid'])['active_version'], data['version'])
+        self.assertTrue(packages.preview(candidate['pid'], candidate['version'])['preflight']['dependencies_changed'])
+        self.activate(ready)
+        self.assertEqual(packages.task(data['pid'])['active_version'], candidate['version'])
+
+    def test_explicit_requirements_are_preserved_and_invalid_page_overrides_do_not_start_work(self):
+        self.configure()
+        data = self.new({'main.py': 'from guide_parent import value', 'requirements.txt': 'guide-parent==1.0.0'})
+        self.assertEqual(data['requirements_source'], 'file')
+        self.assertEqual(data['requirements'], ['guide-parent==1.0.0'])
+        response = self.client.post('/api/taskinfo/packages/action', headers=self.headers,
+                                    json=dict(action='prepare', pid=data['pid'], version=data['version'], requirements='guide-parent @ https://outside.invalid/evil.whl'))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(packages.release(data['pid'], data['version'])['status'], 'staged')
+        self.assertEqual(self.requests, [])

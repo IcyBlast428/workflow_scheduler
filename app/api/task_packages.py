@@ -112,22 +112,26 @@ def gitlab_tasks():
 @blueprint.post(BASE + '/action')
 def action():
     body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        raise packages.PackageError('请求内容必须为对象。')
     pid, action = (body.get('pid'), body.get('action'))
     if not isinstance(pid, str) or not packages.IDENTIFIER.fullmatch(pid):
         raise packages.PackageError('请提供有效的任务编号。')
     version = body.get('version', '')
     actor = g.identity['username']
     if action == 'prepare':
-        result = packages.prepare(pid, version, body.get('main_file', ''))
-    elif action in ('publish', 'rollback', 'trash', 'restore'):
+        result = packages.prepare(pid, version, body.get('main_file', ''), body.get('requirements'))
+    elif action in ('publish', 'rollback', 'trash', 'restore', 'rebuild'):
         revision = body.get('revision')
         if type(revision) is not int or revision < 1:
             raise packages.PackageError('请携带当前任务状态版本号。', 409)
-        if action in ('publish', 'rollback'):
+        if action == 'rebuild':
+            result = packages.rebuild(pid, version, revision, actor)
+        elif action in ('publish', 'rollback'):
             result = packages.publish(pid, version, revision, actor, rollback=action == 'rollback', reason=body.get('reason', ''))
         else:
             result = packages.recycle(pid, revision, actor, restore=action == 'restore')
     else:
         raise packages.PackageError('无效操作。')
-    _audit(action, pid, version)
+    _audit(action, pid, result.get('version', version))
     return success_msg(result)

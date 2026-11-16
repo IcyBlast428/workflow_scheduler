@@ -106,7 +106,7 @@ def write(directory, record, terminal):
     _spool(directory, record)
     try:
         with connection(directory) as db:
-            db.replace('journal',('run_id','pid','status','created_at','pending','retry_at','payload','log_path'),(run_id,record['pid'],record['status'],record['created_at'],int(pending),0,json.dumps(record,ensure_ascii=False),'' if record.get('log_cleaned_at') else path))
+            db.replace('journal',('run_id','pid','status','created_at','pending','retry_at','payload','log_path'),(run_id,record['pid'],record['status'],record['created_at'],int(pending),0,json.dumps(record,ensure_ascii=False),None if record.get('log_cleaned_at') else path))
     except Exception:
         logger.warning('GaussDB journal write deferred; recovery file retained', exc_info=True)
         return

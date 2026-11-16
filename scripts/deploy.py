@@ -235,7 +235,7 @@ def install(args):
         (ROOT/folder).mkdir(exist_ok=True, mode=0o700)
     configure()
     environment = production_environment()
-    print('[4/5] 检查驱动并初始化空 schema；已有本版表只做校验', flush=True)
+    print('[4/5] 检查驱动并初始化空 schema；已有表保留数据并校验兼容性', flush=True)
     check_database(python, environment, initialize=True)
     print('[5/5] 安装并启动 wfs.service（Web 与单实例 Scheduler）', flush=True)
     run([python, ROOT/'scripts/setup_root_test.py', '--install'], env=environment)

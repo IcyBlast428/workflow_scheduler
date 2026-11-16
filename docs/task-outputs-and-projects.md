@@ -42,7 +42,7 @@ output = Path(os.environ['WFS_OUTPUT_DIR'])
 在 GitLab 的任务目录内保留完整 Python 模块、SQL、配置模板和资源。例如 `app/jobs/reports/daily_report/` 内的文件结构：
 
 ```text
-requirements.txt             # 有第三方依赖时放在包根目录
+requirements.txt             # 可选；如提供，放在包根目录
 report_job/
   __init__.py
   main.py                    # 可以选择此文件作为入口
@@ -56,7 +56,7 @@ README.md
 
 发布步骤：代码合并到配置的 GitLab 目标分支 → 在「任务列表」审查新增或更新 → 获取固定提交并核对文件差异 → 检查依赖环境 → 确认发布。任务根目录以内的层级原样保留，不再需要选择 ZIP 外层目录处理方式。「任务示例」可下载完整示例 ZIP，解压后将文件提交到 GitLab；平台不再接收 ZIP 上传。版本发布与保护规则见[任务发布手册](task-packages.md)。
 
-工作目录统一为处理后的包根目录。平台将包根目录、入口所在目录和常见 `src/` 目录加入模块搜索路径；对于带 `__init__.py` 的包入口，按 Python 模块方式执行，支持 `from .helpers import ...`。普通脚本仍按文件执行。`src/report_job/main.py` 这种布局也可以使用；选择对应的实际入口，`requirements.txt` 仍放在整个任务包根目录。
+工作目录统一为处理后的包根目录。平台将包根目录、入口所在目录和常见 `src/` 目录加入模块搜索路径；对于带 `__init__.py` 的包入口，按 Python 模块方式执行，支持 `from .helpers import ...`。普通脚本仍按文件执行。`src/report_job/main.py` 这种布局也可以使用；选择对应的实际入口，如提供 `requirements.txt`，仍放在整个任务包根目录。省略时平台自动识别代码依赖，也可在版本页补充包名。
 
 读取资源推荐明确从 `WFS_TASK_ROOT` 定位，或用 `Path(__file__)` 定位相邻资源，不依赖服务器上的绝对路径。任务根目录只维护一份 requirements.txt；仅在子目录发现依赖文件时会拒绝准备该版本并提示合并，防止环境检查漏装依赖。依赖经 Nexus 或离线 wheels 安装到本版本独立环境，不继承平台包。
 
