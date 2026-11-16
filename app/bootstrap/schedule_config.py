@@ -412,6 +412,35 @@ def save_schedule(pid, form):
     _save_schedule_record(spec, trigger, rules, schedule_type, form)
     return load_schedule(spec.get('pid'))
 
+def disable_saved_schedule_for_recycle(pid, actor='system'):
+    """Stop a saved schedule without requiring runnable code or a valid trigger."""
+    from app.bootstrap.database import GaussDB
+    with GaussDB() as db:
+        db.begin_transaction()
+        try:
+            rows = db.execute_query_sql(
+                'SELECT version,schedule_json FROM wfs_task_config WHERE pid=? FOR UPDATE',
+                params=(pid,))
+            if rows:
+                version = int(rows[0][0] or 1) + 1
+                form = _json_loads(rows[0][1], {})
+                form = dict(form) if isinstance(form, dict) else {}
+                form['enabled'] = False
+                now = business_now()
+                db.execute_sql(
+                    'UPDATE wfs_task_config SET enabled=?,schedule_json=?,version=?,updated_by=?,updated_at=? WHERE pid=?',
+                    params=('false', _json_dumps(form), version, actor, now, pid))
+                db.execute_sql(
+                    'INSERT INTO wfs_config_versions(pid,version,changed_at,changed_by,payload) VALUES(?,?,?,?,?)',
+                    params=(pid, version, now, actor, _json_dumps(form)))
+            db.set_commit()
+        except Exception:
+            db.set_rollback()
+            raise
+    from app.bootstrap.task_loader import invalidate_task_cache
+    invalidate_task_cache()
+
+
 def set_schedule_enabled(pid, enabled, group_name=None, folder_name=None, actor='system'):
     spec = resolve_task_spec(pid=pid)
     record = _load_schedule_record(spec.get('pid'))

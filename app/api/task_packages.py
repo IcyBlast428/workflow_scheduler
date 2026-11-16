@@ -98,6 +98,10 @@ def gitlab_tasks():
             result = tasks.stage(body.get('id'), actor, body.get('configuration'))
         elif body.get('action') == 'delete':
             result = tasks.remove(body.get('id'), actor)
+        elif body.get('action') == 'recover':
+            if g.identity['role'] != 'admin':
+                raise packages.PackageError('仅管理员可以恢复任务目录关联。', 403)
+            result = tasks.recover(body.get('id'), actor)
         else:
             raise packages.PackageError('无效的 GitLab 任务操作。')
         _audit('gitlab_' + body['action'], result['pid'], result.get('version', ''))

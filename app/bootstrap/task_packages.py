@@ -595,9 +595,8 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
         return record
 
 def recycle(pid, revision, actor, restore=False):
-    from app.bootstrap.core import _configuration_lock, aps_start
-    from app.bootstrap.schedule_config import set_schedule_enabled
-    from app.bootstrap.task_loader import discover_task_specs
+    from app.bootstrap.core import _configuration_lock
+    from app.bootstrap.schedule_config import disable_saved_schedule_for_recycle
     from app.extensions import scheduler
     with _configuration_lock:
         record = task(pid)
@@ -606,17 +605,16 @@ def recycle(pid, revision, actor, restore=False):
         if bool(record.get('deleted_at')) != bool(restore):
             raise PackageError('任务已删除或已恢复，请刷新。', 409)
         if not restore:
-            spec = next((s for s in discover_task_specs() if s['pid'] == pid), None)
-            if spec and spec.get('schedule_configured'):
-                set_schedule_enabled(pid, False, actor=actor)
+            disable_saved_schedule_for_recycle(pid, actor=actor)
             if scheduler.get_job(pid):
                 scheduler.remove_job(pid)
             record.update(deleted_at=str(business_now()), deleted_by=actor)
         else:
+            disable_saved_schedule_for_recycle(pid, actor=actor)
+            if scheduler.get_job(pid):
+                scheduler.remove_job(pid)
             record.update(deleted_at=None, restored_by=actor)
         record = _write_task(record, expected=revision)
-        if restore and (record.get('active_version')):
-            aps_start(task_pid=pid, action='refresh')
         return record
 
 def recover():

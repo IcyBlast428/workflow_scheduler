@@ -110,6 +110,17 @@ def _context():
     return config, snapshot
 
 
+def _local_release_available(record):
+    if not record or not record.get('active_version'):
+        return False
+    try:
+        data = packages.release(record['pid'], record['active_version'])
+        root = packages.release_dir(record['pid'], data['version'])
+        return (root / 'code' / data['main_file']).is_file() and (root / data['python']).is_file()
+    except (KeyError, packages.PackageError):
+        return False
+
+
 def changes():
     config, snapshot = _context()
     inventory = snapshot.get('task_catalog', {})
@@ -135,15 +146,13 @@ def changes():
         if not remote['discoverable'] and not record:
             continue
         source = (record or {}).get('git_source') or {}
-        if record and record.get('deleted_at'):
-            continue  # An explicit local deletion must not silently restore a task.
         explicitly_bound = any(t['pid'] == remote['pid'] and t['path'] == remote['path'] for t in config['tasks'])
         # Directory bindings may attach an existing platform task, but must not
         # steal an identity already associated with a different repository.
         foreign_identity = bool(record and (
             (bool(source) and source.get('project_key') != key)
             or (source.get('path') != remote['path'] and not explicitly_bound)))
-        if not foreign_identity and source.get('fingerprint') == remote['fingerprint'] and source.get('path') == remote['path']:
+        if record and not record.get('deleted_at') and not foreign_identity and source.get('fingerprint') == remote['fingerprint'] and source.get('path') == remote['path'] and _local_release_available(record):
             continue
         collision = next((r for r in managed.values() if r['pid'] != remote['pid'] and
                           r['group_name'] == remote['group_name'] and r['folder_name'] == remote['folder_name']), None)
@@ -160,7 +169,20 @@ def changes():
         if foreign_identity:
             item['error'] = '自动任务标识已被另一来源占用，禁止覆盖。请检查平台目录绑定。'
         if collision:
-            item['error'] = '该目录已属于另一任务，请核对稳定任务编号或目录绑定。'
+            item['error'] = (f'该目录已属于任务 {collision["pid"]}（'
+                             + ('已在回收站' if collision.get('deleted_at') else '已有任务')
+                             + '）。新建独立任务请更换目录；沿用旧任务请先恢复旧任务，再在连接设置中绑定原任务编号。')
+        owner = collision or (record if record and record.get('deleted_at') else None)
+        owner_source = (owner or {}).get('git_source') or {}
+        # Recovery is explicit and cannot take ownership from another repository/path.
+        if owner and (record is None or owner is record) and not foreign_identity and not remote.get('error') and (
+                not owner_source or (owner_source.get('project_key') == key and owner_source.get('path') == remote['path'])):
+            item['recovery'] = dict(pid=owner['pid'], revision=owner['revision'],
+                                    task_name=owner['task_name'], deleted=bool(owner.get('deleted_at')))
+            item['kind'] = 'recover'
+            item['error'] = ''
+        elif record and not record.get('deleted_at') and not foreign_identity and not _local_release_available(record):
+            item['recovery_required'] = True
         items.append(item)
     if complete:
         for record in managed.values():
@@ -242,6 +264,8 @@ def _archive(client, item, remote):
 
 def stage(identifier, actor, fields=None):
     item = _candidate(identifier)
+    if item['kind'] == 'recover':
+        raise packages.PackageError('请先确认关联原任务，再获取代码版本。', 409)
     if item['kind'] == 'delete':
         raise packages.PackageError('此变更应执行删除操作。')
     fields = {} if fields is None else fields
@@ -326,3 +350,32 @@ def remove(identifier, actor):
         client.close()
     _candidate(identifier)
     return packages.recycle(item['pid'], item['revision'], actor)
+
+
+def recover(identifier, actor):
+    """Rebind only an explicitly confirmed existing identity; never run old code."""
+    from app.bootstrap.core import _configuration_lock
+    from app.bootstrap.schedule_config import disable_saved_schedule_for_recycle
+    from app.extensions import scheduler
+    with _configuration_lock:
+        item = _candidate(identifier)
+        config = updates.configuration()
+        _candidate(identifier)  # Bind against this configuration revision only.
+        owner = item.get('recovery')
+        if item['kind'] != 'recover' or not owner:
+            raise packages.PackageError('此变更不需要恢复关联，请刷新。', 409)
+        record = packages.task(owner['pid'])
+        if record['revision'] != owner['revision'] or record.get('pending'):
+            raise packages.PackageError('原任务状态已变化，请刷新后重试。', 409)
+        if record.get('deleted_at'):
+            record = packages.recycle(record['pid'], record['revision'], actor, restore=True)
+        else:
+            disable_saved_schedule_for_recycle(record['pid'], actor=actor)
+            if scheduler.get_job(record['pid']):
+                scheduler.remove_job(record['pid'])
+            record = packages._write_task(record, expected=record['revision'])
+        bindings = [binding for binding in config['tasks']
+                    if binding['pid'] != record['pid'] and binding['path'] != item['path']]
+        bindings.append(dict(pid=record['pid'], path=item['path'], commit=''))
+        updates.save_configuration({**config, 'tasks': bindings})
+        return record

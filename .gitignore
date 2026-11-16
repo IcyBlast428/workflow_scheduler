@@ -136,3 +136,6 @@ frontend/playwright-report/
 # Machine-specific deployment secrets and concurrent installer lock
 deploy/root-test/runtime.env
 .deploy.lock
+
+# Local conversation screenshots; never part of source or deployment artifacts
+.codex-attachments/

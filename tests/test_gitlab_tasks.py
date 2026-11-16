@@ -321,6 +321,84 @@ class GitLabTaskTests(unittest.TestCase):
         with self.assertRaises(packages.PackageError):tasks.stage(item['id'],'admin')
         self.assertEqual(packages.task(item['pid'])['task_name'],'Unrelated')
 
+    def test_directory_collision_identifies_active_and_recycled_owner(self):
+        self.connect()
+        item = self.candidate()
+        record = packages._write_task(dict(pid='legacy-task', group_name=item['group_name'],
+            folder_name=item['folder_name'], task_name='Legacy', active_version=None,
+            deleted_at=None, revision=0), expected=0)
+        for deleted in (None, '2026-11-16 12:00:00'):
+            record['deleted_at'] = deleted
+            record = packages._write_task(record, expected=record['revision'])
+            candidate = self.candidate()
+            self.assertFalse(candidate['blocked'])
+            self.assertEqual(candidate['kind'], 'recover')
+            self.assertEqual(candidate['recovery']['pid'], 'legacy-task')
+            self.assertEqual(candidate['recovery']['deleted'], bool(deleted))
+            with self.assertRaises(packages.PackageError):
+                tasks.stage(candidate['id'], 'admin')
+        self.assertEqual(packages.task('legacy-task')['task_name'], 'Legacy')
+
+    def test_redeploy_recovers_recycled_legacy_task_at_original_path_and_id(self):
+        from app.bootstrap.database import GaussDB
+        from app.bootstrap.schedule_config import save_schedule
+        old = packages.stage(package_tests.archive({'main.py': 'print("old")\n'}),
+            {'task_name': 'Original task', 'group_name': 'acceptance', 'folder_name': 'git_new'}, 'admin')
+        self.activate(self.ready(old))
+        pid = old['pid']
+        save_schedule(pid, {'schedule_type': 'every_hour', 'main_file': 'main.py', 'enabled': True})
+        packages.recycle(pid, packages.task(pid)['revision'], 'admin')
+        (packages.release_dir(pid, old['version'])/'code/main.py').unlink()
+        self.connect()
+        item = self.candidate()
+        self.assertEqual(item['kind'], 'recover')
+        response = self.client.post('/api/taskinfo/packages/gitlab',
+            json={'action': 'recover', 'id': item['id']}, headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['data']['pid'], pid)
+        self.assertIsNone(packages.task(pid)['deleted_at'])
+        with self.assertRaises(packages.PackageError):
+            tasks.recover(item['id'], 'admin')  # stale recovery cannot be replayed
+        self.scan()
+        item = self.candidate(pid)
+        self.assertEqual(item['kind'], 'update')
+        version = tasks.stage(item['id'], 'admin')
+        self.activate(self.ready(version))
+        self.assertEqual(set(packages.registry()), {pid})
+        self.assertEqual(packages.task(pid)['group_name'], 'acceptance')
+        self.assertEqual(packages.task(pid)['folder_name'], 'git_new')
+        self.assertEqual(packages.task(pid)['task_name'], 'Original task')
+        self.assertEqual(packages.release(pid, old['version'])['version'], old['version'])
+        with GaussDB() as db:
+            row = db.execute_query_sql('SELECT enabled,schedule_type FROM wfs_task_config WHERE pid=?', params=(pid,))[0]
+        self.assertEqual(tuple(row), ('false', 'every_hour'))
+        self.assertFalse(task_loader.discover_task_specs()[0]['error'])
+
+    def test_same_remote_commit_with_missing_local_code_can_be_republished(self):
+        self.connect()
+        data = tasks.stage(self.candidate()['id'], 'admin')
+        self.activate(self.ready(data))
+        self.assertFalse(any(i['pid'] == self.pid for i in tasks.changes()['items']))
+        (packages.release_dir(self.pid, data['version'])/'code/main.py').unlink()
+        task_loader.invalidate_task_cache()
+        item = self.candidate()
+        self.assertEqual(item['kind'], 'update')
+        self.assertTrue(item['recovery_required'])
+        self.activate(self.ready(tasks.stage(item['id'], 'admin')))
+        self.assertFalse(task_loader.discover_task_specs()[0]['error'])
+
+    def test_recovery_cannot_reassign_a_foreign_repository_directory(self):
+        self.connect()
+        item = self.candidate()
+        packages._write_task(dict(pid='foreign', group_name=item['group_name'], folder_name=item['folder_name'],
+            task_name='Foreign', active_version=None, deleted_at='2026-11-16', revision=0,
+            git_source={'project_key': 'other-project', 'path': item['path']}), expected=0)
+        item = self.candidate()
+        self.assertTrue(item['blocked'])
+        self.assertNotIn('recovery', item)
+        with self.assertRaises(packages.PackageError):
+            tasks.recover(item['id'], 'admin')
+
 
 if __name__ == '__main__':
     unittest.main()

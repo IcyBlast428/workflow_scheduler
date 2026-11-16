@@ -1,14 +1,13 @@
 <template>
-  <section class="gitlab-task-changes" :class="{'is-compact':!newTasks.length && !error && !state.error}" aria-label="GitLab 任务变更">
-    <div class="changes-summary"><span>{{ state.enabled ? (state.items.length ? `${state.items.length} 项 GitLab 变更待处理` : 'GitLab · 暂无待发布变更') : 'GitLab · 未连接' }}</span><button class="btn" :aria-expanded="expanded || needsAttention" @click="expanded=!expanded">{{ expanded ? '收起' : '查看连接与检查状态' }}</button></div>
-    <div v-show="expanded || needsAttention" class="changes-content">
-    <div class="changes-heading"><div><strong>GitLab 任务变更</strong><p class="hint">{{ state.enabled ? '目标分支合并后，可在此审查并发布。已发布任务的更新与删除标记在下方列表。' : '配置 GitLab 后，新任务会在首页置顶展示。' }}</p></div><button class="btn" :disabled="loading" @click="refresh">{{ loading ? '检查中…' : '刷新列表' }}</button><button v-if="canConfigure" class="btn" :disabled="scanning || !state.enabled" @click="scan">{{ scanning ? '已请求检查…' : '立即检查 GitLab' }}</button><button v-if="canConfigure" class="btn" @click="$emit('settings')">连接设置</button></div>
-    <p v-if="newTasks.length || error || state.error" class="hint">最近完成检查：{{ state.checked_at || '尚未检查' }} · {{ state.complete ? '扫描完整' : '等待检查或结果不完整' }}</p>
+  <section class="gitlab-task-changes" :class="{'is-compact':!expanded}" aria-label="GitLab 任务变更">
+    <div class="changes-summary"><span>{{ state.enabled ? (state.items.length ? `${state.items.length} 项 GitLab 变更待处理` : 'GitLab · 暂无待发布变更') : 'GitLab · 未连接' }}</span><button class="btn" :aria-expanded="expanded" @click="toggleExpanded">{{ expanded ? '收起' : pendingTasks.length ? '查看待处理变更' : '查看连接与检查状态' }}</button></div>
+    <div v-show="expanded" class="changes-content">
+    <div class="changes-heading"><div><strong>GitLab 任务变更</strong><p class="hint">{{ state.enabled ? '全部待处理变更均在此展示，不受任务列表筛选和分页影响。' : '配置 GitLab 后，可在此审查新增、更新、恢复和删除变更。' }}</p></div><button class="btn" :disabled="loading" @click="refresh">{{ loading ? '检查中…' : '刷新列表' }}</button><button v-if="canConfigure" class="btn" :disabled="scanning || !state.enabled" @click="scan">{{ scanning ? '已请求检查…' : '立即检查 GitLab' }}</button><button v-if="canConfigure" class="btn" @click="$emit('settings')">连接设置</button></div>
+    <p v-if="pendingTasks.length || error || state.error" class="hint">最近完成检查：{{ scanTime }} · {{ state.complete ? '扫描完整' : '等待检查或结果不完整' }}</p>
     <p v-if="error || state.error" class="inline-alert warning" role="alert">{{ error || state.error }}</p>
-    <div v-if="firstPage && newTasks.length" class="new-task-grid">
-      <article v-for="item in newTasks" :key="item.id" class="new-task-card"><div><span class="tag success">GitLab 新任务 · 待发布</span><h3>{{ item.task_name }}</h3><p class="hint">{{ item.group_name }} / {{ item.folder_name }}</p><small class="mono">{{ item.sha.slice(0, 8) }} · {{ item.file_count }} 个文件</small><p v-if="item.error" class="danger-text">{{ item.error }}</p></div><button class="btn primary" :disabled="item.blocked" @click="$emit('open', item.pid)">审查并发布</button></article>
+    <div v-if="pendingTasks.length" class="new-task-grid">
+      <article v-for="item in pendingTasks" :key="item.id" class="new-task-card"><div><span :class="['tag',item.kind === 'delete' ? 'danger' : item.kind === 'new' ? 'success' : 'warning']">{{ {new:'新任务 · 待发布',recover:'原任务 · 待恢复关联',update:'原任务 · 待更新',delete:'原任务 · 待确认删除'}[item.kind] || '任务变更 · 待处理' }}</span><h3>{{ item.recovery?.task_name || item.task_name }}</h3><p v-if="item.recovery" class="hint">保留原任务编号 {{ item.recovery.pid }}、调度配置和历史记录。</p><p class="hint">{{ item.group_name }} / {{ item.folder_name }}</p><small class="mono">{{ item.sha.slice(0, 8) }} · {{ item.file_count }} 个文件</small><p v-if="item.error" class="danger-text">{{ item.error }}</p></div><button class="btn primary" :disabled="item.blocked" @click="$emit('open', item.pid)">{{ item.kind === 'recover' ? '恢复原任务' : item.kind === 'delete' ? '查看删除变更' : '审查并发布' }}</button></article>
     </div>
-    <p v-else-if="!firstPage && newTasks.length" class="hint">有 {{ newTasks.length }} 个新任务待发布，请返回任务列表首页查看。</p>
     <p v-else-if="state.enabled && state.complete && !state.items.length" class="hint">已发布任务与 GitLab 一致。</p>
     </div>
   </section>
@@ -17,12 +16,16 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
-const props=defineProps({ firstPage: Boolean,canConfigure:{type:Boolean,default:true} });
+const props=defineProps({ canConfigure:{type:Boolean,default:true} });
 const emit = defineEmits(['state', 'open', 'settings']);
 const state = ref({ enabled: false, items: [] }), error = ref(''), loading = ref(false);
-const newTasks = computed(() => state.value.items.filter(item => item.kind === 'new'));
-const scanning = ref(false), expanded=ref(false);
-const needsAttention=computed(()=>Boolean(state.value.items.length || error.value || state.value.error));
+const pendingTasks = computed(() => state.value.items || []);
+const scanning = ref(false), expansionChoice=ref(null);
+const scanTime=computed(()=>state.value.checked_at ? new Date(state.value.checked_at * 1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}) : '尚未检查');
+const needsAttention=computed(()=>Boolean(pendingTasks.value.length || error.value || state.value.error));
+// Auto-open until the user chooses; polling must not override a manual collapse.
+const expanded=computed(()=>expansionChoice.value ?? needsAttention.value);
+function toggleExpanded(){expansionChoice.value=!expanded.value;}
 async function scan() { scanning.value = true; try { await api.scanGitlab(); await refresh(); } catch(err) { error.value = err.message; scanning.value = false; } }
 let alive = true, pending = null, sequence = 0;
 function refresh() {

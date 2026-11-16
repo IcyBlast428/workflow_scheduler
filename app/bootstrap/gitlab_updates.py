@@ -308,7 +308,7 @@ def scan(config, previous=None):
         baselines = [('platform', config['platform_commit'], None)] + [('task', item['commit'], item) for item in task_baselines.values()]
         for kind, base, task in baselines:
             if not base:
-                warnings.append('尚未确认平台已部署提交，仅检查平台待合并分支。' if kind == 'platform' else '任务 ' + task['pid'] + ' 尚未确认已发布提交。')
+                warnings.append('未设置平台部署基线，暂不比较平台已部署版本；任务发现与发布不受影响。' if kind == 'platform' else '任务 ' + task['pid'] + ' 尚未确认已发布提交。')
                 continue
             if base == target_sha:
                 continue

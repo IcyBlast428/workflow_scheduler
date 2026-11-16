@@ -5,7 +5,7 @@
   </div>
     <button v-if="canManage" class="btn" @click="$emit('packages')">任务示例</button></div>
     <div class="task-service-strip"><slot name="maintenance" />
-    <GitlabTaskChanges v-if="canManage || canPublish" :can-configure="canManage" :first-page="tasks.params.currentPage === 1" @state="gitlabChanges = $event.items" @open="$emit('release', $event)" @settings="$emit('gitlab')" /></div>
+    <GitlabTaskChanges v-if="canManage || canPublish" :can-configure="canManage" @state="gitlabChanges = $event.items" @open="$emit('release', $event)" @settings="$emit('gitlab')" /></div>
     <form class="task-search" @submit.prevent="$emit('search')">
       <div class="task-search-basic">
         <label>任务名称<input id="taskname" v-model.trim="tasks.params.taskname" class="input" placeholder="搜索名称关键字"></label>

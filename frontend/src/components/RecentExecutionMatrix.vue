@@ -34,7 +34,8 @@ import {ref,computed,onMounted,onBeforeUnmount,watch,nextTick} from 'vue';
 import {api} from '../api';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import {statusLabel} from '../executionLabels';
-const props=defineProps({active:Boolean});
+import {readPreference,writePreference} from '../workspacePreferences.js';
+const props=defineProps({active:Boolean,userKey:{type:String,default:''}});
 const emit=defineEmits(['task','record','history']);
 const scroll=ref(null);
 let scrollLeft=0,scrollTop=0;
@@ -43,7 +44,9 @@ watch(()=>props.active,async active=>{if(active){await nextTick();scroll.value?.
 function openRecord(task,index){if(!task.records[index])return;selected.value={...task.records[index],name:task.name};emit('record',selected.value);}
 const data=ref(null),loading=ref(false),error=ref(''),category=ref(''),selected=ref(null),pending=ref(null),hovering=ref(false),focused=ref(false);
 const limits=[10,25];
-const limit=ref(25);
+const preferenceKey=()=>`wfs:recent-results:v1:${props.userKey || 'anonymous'}`;
+function savedLimit(){const value=readPreference(preferenceKey(),{});return limits.includes(value?.limit)?value.limit:10;}
+const limit=ref(savedLimit());
 const displayedLimit=computed(()=>data.value?.limit ?? limit.value);
 // The API stays newest-first; only display order is reversed, including empty slots.
 const slots=computed(()=>Array.from({length:displayedLimit.value},(_,index)=>displayedLimit.value-index));
@@ -86,7 +89,8 @@ async function load(silent=true,replace=false) {
   if(alive && id===requestId){inFlight=false;loading.value=false;}
  }
 }
-watch(limit,()=>{pending.value=null;load(false,true);});
+watch(limit,()=>{writePreference(preferenceKey(),{limit:limit.value});pending.value=null;load(false,true);},{flush:'sync'});
+watch(()=>props.userKey,()=>{limit.value=savedLimit();},{flush:'sync'});
 function refresh(event){if(props.active)load(event?.detail?.silent===true);}
 useRefreshLoop({load,enabled:()=>props.active});
 onMounted(()=>{window.addEventListener('wfs:matrix-refresh',refresh);});onBeforeUnmount(()=>{alive=false;window.removeEventListener('wfs:matrix-refresh',refresh);});

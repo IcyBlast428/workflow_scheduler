@@ -1,9 +1,9 @@
 <template>
 <section class="operational-workbench" aria-label="发布与运维设置">
 <h3>{{ section==='release' ? '发布设置' : section==='storage' ? '备份与恢复' : '分组配额与通知' }}</h3><p v-if="error" class="inline-alert danger" role="alert">{{ error }}</p><p v-if="message" role="status">{{ message }}</p>
-<details v-show="section==='release'" class="disclosure"><summary>发布环境、流水线与时间窗口</summary><div class="disclosure-body"><form class="operational-stack" @submit.prevent="saveRelease"><fieldset :disabled="busy || !release.revision && !loaded">
+<details v-show="section==='release'" class="disclosure"><summary>发布环境与时间窗口</summary><div class="disclosure-body"><form class="operational-stack" @submit.prevent="saveRelease"><fieldset :disabled="busy || !loaded">
 <label>发布环境标记<select v-model="release.environment" class="select"><option value="development">开发</option><option value="test">测试</option><option value="production">生产</option></select></label>
-<label class="checkbox-row"><input v-model="release.require_ci" type="checkbox">发布提交必须通过 GitLab 流水线</label><label>必须通过的流水线作业（每行一个名称）<textarea v-model="jobs" class="input" rows="3" /></label><label class="checkbox-row"><input v-model="release.require_trial" type="checkbox">候选版本必须有成功试运行记录</label>
+<label class="checkbox-row"><input v-model="release.require_trial" type="checkbox">候选版本必须有成功试运行记录</label>
 <label>关注分支规则（每行一项，支持 *）<textarea v-model="branches" class="input" rows="3" /></label>
 <div class="filter-grid"><label>发布窗口开始<input v-model="release.window_start" class="input" type="time"></label><label>发布窗口结束<input v-model="release.window_end" class="input" type="time"></label></div><p class="hint">环境标记不切换数据库或服务配置。时间窗口按 Asia/Shanghai 判断；留空表示不限。门禁由服务端在实际发布时重新核对，发布与回滚均遵守窗口。</p><p class="hint">GitLab 推送通知接收地址：/api/integrations/gitlab/webhook。管理员需在服务配置中设置独立令牌，再到 GitLab 配置事件与同一令牌；页面不显示令牌。</p><button class="btn primary" type="submit">保存发布策略</button></fieldset></form></div></details>
 <details v-show="section==='runtime'" class="disclosure"><summary>任务分组执行配额</summary><div class="disclosure-body"><div class="operational-stack"><p class="hint">限制同组同时占用的名额，给其他分组保留运行机会；未配置的分组沿用全局上限。</p><div v-for="(row,index) in quotas" :key="index" class="filter-actions"><input v-model.trim="row.group" class="input" aria-label="配额分组" placeholder="分组名称"><input v-model.number="row.limit" class="input" aria-label="分组并发名额" type="number" min="1" max="100"><button class="btn" @click="quotas.splice(index,1)">移除</button></div><div class="filter-actions"><button class="btn" @click="quotas.push({group:'',limit:1})">添加分组</button><button class="btn primary" :disabled="busy || !loaded" @click="saveQuotas">保存配额</button></div></div></div></details>
@@ -12,20 +12,51 @@
 </section>
 </template>
 <script setup>
-import { ref,onMounted,onBeforeUnmount } from 'vue';import { api } from '../api';
+import { ref,watch,onBeforeUnmount } from 'vue';import { api } from '../api';
 import {useUnsavedChanges} from '../composables/useUnsavedChanges';
-defineProps({section:{type:String,default:'runtime'}});
-const release=ref({}),groups=ref({}),quotas=ref([]),jobs=ref(''),branches=ref('*'),alerts=ref([]),backup=ref({}),error=ref(''),message=ref(''),busy=ref(false),loaded=ref(false);let alive=true;
-const {saved:releaseSaved}=useUnsavedChanges(()=>({release:release.value,jobs:jobs.value,branches:branches.value}),()=>loaded.value);
+const props=defineProps({section:{type:String,default:'runtime'}});
+const release=ref({}),groups=ref({}),quotas=ref([]),branches=ref('*'),alerts=ref([]),backup=ref({}),error=ref(''),message=ref(''),busy=ref(false),loaded=ref(false);let alive=true;
+const {saved:releaseSaved}=useUnsavedChanges(()=>({release:release.value,branches:branches.value}),()=>loaded.value);
 const {saved:quotasSaved}=useUnsavedChanges(()=>quotas.value,()=>loaded.value);
-async function load(){try{const [r,g]=await Promise.all([api.operationalPolicy('release'),api.operationalPolicy('groups')]);if(!alive)return;release.value=r;groups.value=g;quotas.value=Object.entries(g.quotas).map(([group,limit])=>({group,limit}));jobs.value=r.required_jobs.join('\n');branches.value=r.branches.join('\n');loaded.value=true;releaseSaved();quotasSaved();}catch(e){if(alive)error.value=e.message;}}
+let loadSequence=0;
+async function load(){
+  const sequence=++loadSequence,section=props.section;
+  loaded.value=false;error.value='';message.value='';
+  try{
+    if(section==='release'){
+      const value=await api.operationalPolicy('release');
+      if(!alive || sequence!==loadSequence)return;
+      release.value=value;
+      branches.value=(Array.isArray(value.branches) ? value.branches : ['*']).join('\n');
+      loaded.value=true;releaseSaved();
+    }else if(section==='runtime'){
+      const value=await api.operationalPolicy('groups');
+      if(!alive || sequence!==loadSequence)return;
+      groups.value=value;
+      quotas.value=Object.entries(value.quotas || {}).map(([group,limit])=>({group,limit}));
+      loaded.value=true;quotasSaved();
+    }
+  }catch(e){if(alive && sequence===loadSequence)error.value=e.message;}
+}
 async function work(action){if(busy.value)return;busy.value=true;error.value='';try{await action();if(alive){message.value='设置已保存。';}}catch(e){if(alive)error.value=e.message;}finally{if(alive)busy.value=false;}}
 const lines=text=>text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-function saveRelease(){work(async()=>{release.value=await api.saveOperationalPolicy('release',{...release.value,required_jobs:lines(jobs.value),branches:lines(branches.value)});releaseSaved();});}
+function saveRelease(){work(async()=>{release.value=await api.saveOperationalPolicy('release',{...release.value,branches:lines(branches.value)});releaseSaved();});}
 function saveQuotas(){work(async()=>{if(new Set(quotas.value.map(r=>r.group)).size!==quotas.value.length)throw new Error('分组名称不能重复。');groups.value=await api.saveOperationalPolicy('groups',{...groups.value,quotas:Object.fromEntries(quotas.value.map(r=>[r.group,r.limit]))});quotasSaved();});}
-async function loadAlerts(){try{alerts.value=(await api.notificationQueue()).map(a=>({...a,note:a.resolution?.note || '',outcome:a.resolution?.outcome || 'confirmed_sent'}));}catch(e){error.value=e.message;}}
+async function loadAlerts(){
+  const sequence=loadSequence;
+  try{
+    const value=await api.notificationQueue();
+    if(alive && sequence===loadSequence && props.section==='runtime')alerts.value=value.map(a=>({...a,note:a.resolution?.note || '',outcome:a.resolution?.outcome || 'confirmed_sent'}));
+  }catch(e){if(alive && sequence===loadSequence && props.section==='runtime')error.value=e.message;}
+}
 function resolveAlert(alert){work(async()=>{await api.resolveNotification({id:alert.id,outcome:alert.outcome,note:alert.note});await loadAlerts();});}
-async function loadBackup(){try{backup.value=await api.backupStatus();}catch(e){error.value=e.message;}}
-onMounted(()=>{load();loadAlerts();loadBackup();});onBeforeUnmount(()=>alive=false);
+async function loadBackup(){
+  const sequence=loadSequence;
+  try{
+    const value=await api.backupStatus();
+    if(alive && sequence===loadSequence && props.section==='storage')backup.value=value;
+  }catch(e){if(alive && sequence===loadSequence && props.section==='storage')error.value=e.message;}
+}
+watch(()=>props.section,()=>{load();if(props.section==='runtime')loadAlerts();if(props.section==='storage')loadBackup();},{immediate:true});onBeforeUnmount(()=>{alive=false;loadSequence++;});
 </script>
 <style scoped>.operational-workbench,.operational-stack{display:grid;gap:16px}.operational-workbench h3,.operational-workbench p{margin:0}.operational-workbench fieldset{border:0;padding:0;margin:0;min-width:0;display:grid;gap:14px}.operational-workbench label{display:grid;gap:8px}.operational-workbench .checkbox-row{display:flex}.operational-workbench .filter-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}.operational-workbench .surface-card{display:grid;gap:12px}.operational-workbench p{overflow-wrap:anywhere}</style>

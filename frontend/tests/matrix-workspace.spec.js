@@ -35,8 +35,9 @@ test('recent results group columns horizontally, preserve selection and buffer h
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'test-results/recent-result-matrix-mobile.png',fullPage:true});
 });
 
-test('recent result depth defaults to 25, supports 10 and ignores an older response',async({page})=>{
+test('saved recent result depth supports 10 and 25 and ignores an older response',async({page})=>{
  await page.setViewportSize({width:390,height:844});
+ await page.addInitScript(()=>localStorage.setItem('wfs:recent-results:v1:admin',JSON.stringify({limit:25})));
  let release10;
  await page.route(/\/api\/taskinfo\/matrix-recent(?:\?|$)/,async route=>{
   const limit=Number(new URL(route.request().url()).searchParams.get('limit'));

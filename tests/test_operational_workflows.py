@@ -119,15 +119,15 @@ class OperationalTests(unittest.TestCase):
         from app.bootstrap.release_controls import trial_evidence
         self.assertTrue(trial_evidence(pid,data['version'])['passed'])
 
-    def test_ci_trial_and_release_window_gates_are_server_enforced(self):
+    def test_trial_and_release_window_gates_are_server_enforced_without_ci(self):
         data=self.ready(self.new());pid=data['pid']
         p=policy.save('release','',{**policy.load('release'),'require_trial':True},'admin')
         with self.assertRaises(packages.PackageError):self.activate(data)
         p=policy.save('release','',{**p,'require_trial':False,'require_ci':True,'required_jobs':['tests']},'admin')
-        from app.bootstrap import release_controls
-        with patch.object(release_controls,'evidence',return_value={'status':'success','jobs':[]}):
-            with self.assertRaises(packages.PackageError):self.activate(data)
-        with patch.object(release_controls,'evidence',return_value={'status':'success','jobs':[{'name':'tests','status':'success'}]}):self.activate(data)
+        self.assertNotIn('require_ci', p)
+        self.assertNotIn('required_jobs', p)
+        with patch('app.bootstrap.gitlab_updates.Client', side_effect=AssertionError('CI must not be queried')):
+            self.activate(data)
         with patch.object(policy,'in_window',return_value=False):
             with self.assertRaises(packages.PackageError):self.activate(data)
 
@@ -146,16 +146,29 @@ class OperationalTests(unittest.TestCase):
         self.activate(data)
         self.assertEqual(packages.task(pid)['active_version'],data['version'])
 
-    def test_policy_changes_during_ci_validation_block_activation(self):
+    def test_policy_changes_during_trial_validation_block_activation(self):
         from app.bootstrap import release_controls
         data=self.ready(self.new())
-        policy.save('release','',{**policy.load('release'),'require_ci':True},'admin')
-        def changed(_):
-            policy.save('release','',{**policy.load('release'),'require_trial':True},'admin')
-            return {'status':'success','jobs':[]}
-        with patch.object(release_controls,'evidence',side_effect=changed):
+        policy.save('release','',{**policy.load('release'),'require_trial':True},'admin')
+        def changed(*_):
+            policy.save('release','',{**policy.load('release'),'environment':'test'},'admin')
+            return {'passed':True}
+        with patch.object(release_controls,'trial_evidence',side_effect=changed):
             with self.assertRaises(packages.PackageError):self.activate(data)
         self.assertFalse(packages.task(data['pid'])['active_version'])
+
+    def test_legacy_ci_settings_do_not_block_release_or_query_gitlab(self):
+        from app.bootstrap import release_controls
+        old = {**policy.RELEASE_DEFAULT, 'revision': 1, 'require_ci': True, 'required_jobs': ['old-job']}
+        with admission.store() as db:
+            db.replace('settings', ('key', 'payload'), ('release:', json.dumps(old)))
+        admission.invalidate_policy_cache()
+        with patch('app.bootstrap.gitlab_updates.Client', side_effect=AssertionError('CI must not be queried')):
+            gates = release_controls.preview({'pid': 'legacy-task', 'version': 'a'*32})
+            current = release_controls.enforce({'pid': 'legacy-task', 'version': 'a'*32})
+        self.assertNotIn('ci', gates)
+        self.assertNotIn('require_ci', current)
+        self.assertNotIn('required_jobs', current)
 
     def test_shared_sdk_is_frozen_and_tampering_blocks_publication(self):
         data=self.ready(self.new());root=packages.release_dir(data['pid'],data['version'])

@@ -6,7 +6,7 @@ import { renderToString } from '@vue/server-renderer';
 const compiledPath = new URL(`.package-workspace-test-${process.pid}.mjs`, import.meta.url);
 const mockPath = new URL(`.package-api-test-${process.pid}.mjs`, import.meta.url);
 const { descriptor } = parse(await readFile(new URL('../src/components/TaskReleaseDialog.vue', import.meta.url), 'utf8'));
-await writeFile(mockPath, `export const requests=[]; export const api={packagePreview:(pid,version)=>new Promise((resolve,reject)=>requests.push({pid,version,resolve,reject}))};`);
+await writeFile(mockPath, `export const requests=[],actions=[]; export const api={packagePreview:(pid,version)=>new Promise((resolve,reject)=>requests.push({pid,version,resolve,reject})),gitlabTaskAction:async value=>actions.push(value),scanGitlab:async()=>actions.push('scan')};`);
 const compiled = compileScript(descriptor, {id:'release-regression'}).content
   .replace("'../api'", JSON.stringify(mockPath.href))
   .replace("'../composables/useRefreshLoop.js'", "'../src/composables/useRefreshLoop.js'")
@@ -16,10 +16,11 @@ const compiled = compileScript(descriptor, {id:'release-regression'}).content
 await writeFile(compiledPath, compiled);
 try {
   const { default: Component } = await import(compiledPath.href);
-  const { requests } = await import(mockPath.href);
+  const { requests, actions } = await import(mockPath.href);
+  const emitted=[];
   let workspace;
   await renderToString(createSSRApp({setup() {
-    workspace = Component.setup({confirm:async()=>true,pid:''}, {expose(){},emit(){}});
+    workspace = Component.setup({confirm:async()=>true,pid:''}, {expose(){},emit(name){emitted.push(name);}});
     return ()=>null;
   }}));
   workspace.preview.value = {release:{version:'v1'}};
@@ -31,5 +32,17 @@ try {
   assert.equal(workspace.diff.value, '+new');
   assert.equal(workspace.error.value, '');
   assert.equal(workspace.diffLoading.value, false);
+  const previousWindow=globalThis.window;
+  try {
+    globalThis.window={dispatchEvent(){}};
+    workspace.candidate.value={id:'recover-original',path:'app/jobs/group/original',recovery:{pid:'original-id'}};
+    await workspace.recoverIdentity();
+    assert.deepEqual(actions,[{action:'recover',id:'recover-original'},'scan']);
+    assert.ok(emitted.includes('changed'));
+    assert.ok(emitted.includes('close'));
+  } finally {
+    if(previousWindow===undefined)delete globalThis.window;
+    else globalThis.window=previousWindow;
+  }
   console.log('GitLab release viewer ignores stale file responses and failures.');
 } finally { await Promise.all([unlink(compiledPath), unlink(mockPath)]); }

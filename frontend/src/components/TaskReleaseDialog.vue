@@ -16,12 +16,12 @@
         </div>
         <p class="hint">{{ scheduleImpact }}。已排队或运行中的执行继续使用原版本。</p>
       </section>
-      <section v-if="candidate" class="surface-card release-candidate" :class="candidate.kind"><span class="tag" :class="candidate.kind === 'delete' ? 'danger' : candidate.kind === 'new' ? 'success' : 'warning'">{{ {new:'新任务待发布',update:'有更新待发布',delete:'GitLab 已删除'}[candidate.kind] }}</span><p class="mono">{{ candidate.path }} @ {{ candidate.sha.slice(0, 8) }}</p><p v-if="candidate.error" class="danger-text">{{ candidate.error }}</p><p v-if="candidate.kind === 'delete'" class="hint">确认后停止后续调度，任务移入回收站。历史版本、运行日志和输出文件保留；已排队或运行的实例继续完成。</p><div v-if="candidate.kind !== 'delete'" class="gitlab-task-configuration">
+      <section v-if="candidate" class="surface-card release-candidate" :class="candidate.kind"><span class="tag" :class="candidate.kind === 'delete' ? 'danger' : candidate.kind === 'new' ? 'success' : 'warning'">{{ {new:'新任务待发布',update:'有更新待发布',delete:'GitLab 已删除',recover:'原任务待恢复关联'}[candidate.kind] }}</span><p class="mono">{{ candidate.path }} @ {{ candidate.sha.slice(0, 8) }}</p><p v-if="candidate.error" class="danger-text">{{ candidate.error }}</p><p v-if="candidate.kind === 'delete'" class="hint">确认后停止后续调度，任务移入回收站。历史版本、运行日志和输出文件保留；已排队或运行的实例继续完成。</p><div v-if="!['delete','recover'].includes(candidate.kind)" class="gitlab-task-configuration">
         <label>任务标识（自动生成）<input class="input mono" :value="candidate.pid" readonly /></label>
         <p class="hint">任务标识由平台生成且不可修改。无需 .wfs-task.json；名称与入口在此配置。</p><p v-if="candidate.kind==='update'" class="hint">已有调度配置中的名称与入口优先；如需调整，请到任务配置页修改。</p>
         <label>发布任务名称<input class="input" v-model.trim="taskName" maxlength="200" :disabled="busy" /></label>
         <label>发布 Python 入口<select class="select" v-model="sourceEntry" :disabled="busy"><option value="" disabled>请选择 Python 入口</option><option v-for="file in candidate.main_file_options" :key="file" :value="file">{{ file }}</option></select></label>
-      </div><div class="filter-actions"><button v-if="candidate.kind === 'delete'" class="btn danger" :disabled="busy || candidate.blocked" @click="remove">确认删除任务</button><button v-else class="btn primary" :disabled="busy || candidate.blocked || !taskName || !sourceEntry" @click="stage">{{ preview?.release.git_source?.sha === candidate.sha ? '重新获取 GitLab 版本' : '获取 GitLab 版本并查看差异' }}</button></div></section>
+      </div><p v-if="candidate.recovery" class="hint">保留原任务编号 {{ candidate.recovery.pid }}、调度配置及历史记录。恢复后先重新获取代码并检查依赖，再发布和启用调度。</p><div class="filter-actions"><button v-if="candidate.kind === 'recover'" class="btn primary" :disabled="busy || candidate.blocked" @click="recoverIdentity">确认恢复原任务</button><button v-else-if="candidate.kind === 'delete'" class="btn danger" :disabled="busy || candidate.blocked" @click="remove">确认删除任务</button><button v-else class="btn primary" :disabled="busy || candidate.blocked || !taskName || !sourceEntry" @click="stage">{{ preview?.release.git_source?.sha === candidate.sha ? '重新获取 GitLab 版本' : '获取 GitLab 版本并查看差异' }}</button></div></section>
       <div v-if="record" class="release-overview"><span class="tag info">{{ record.deleted_at ? '回收站' : record.active_version ? '当前版本 ' + short(record.active_version) : '尚未发布' }}</span><span class="hint">{{ record.group_name }} / {{ record.folder_name }}</span><button v-if="record.deleted_at" class="btn" :disabled="busy" @click="restore">恢复任务（暂停）</button></div>
       <section v-if="versions.length" class="release-history" aria-label="代码版本历史"><button v-for="version in versions" :key="version.version" class="btn" :class="preview?.release.version === version.version ? 'primary' : ''" :disabled="busy" @click="work('正在读取代码版本…', () => inspect(version.version))">{{ short(version.version) }} · {{ label(version.status) }}</button></section>
       <section v-if="preview" class="surface-card release-preview" aria-label="发布版本预览">
@@ -38,7 +38,7 @@
           <p>活动实例 {{ preview.preflight.active_instances }} · 调度{{ preview.preflight.schedule_enabled ? '保持启用' : '保持暂停 / 未配置' }}</p>
           <p class="hint">检查通过代表语法和依赖可用，业务逻辑仍需验证。发布不替换已排队或运行中的版本。</p>
         </section>
-        <section v-if="preview.gates" ref="gatesPanel" tabindex="-1" class="surface-card release-gates"><h4>发布门禁 · {{ preview.gates.environment }}</h4><button class="btn" :disabled="busy" @click="work('正在刷新发布检查…',()=>inspect(preview.release.version))">刷新发布检查</button><p>发布窗口：{{ preview.gates.window_open ? '允许发布' : '当前窗口外' }}</p><p>CI：{{ preview.gates.ci.message }} · {{ preview.gates.ci.status }}</p><p v-if="missingJobs.length" class="hint">未通过的必需作业：{{ missingJobs.join('、') }}</p><p>试运行：{{ preview.gates.trial.passed ? '已有成功记录' : '尚无成功记录' }}{{ preview.gates.require_trial ? '（发布必需）' : '（可选）' }}</p><button v-if="allowOperations && ['ready','applied'].includes(preview.release.status)" class="btn" :disabled="busy" @click="trial">使用测试连接试运行此版本</button><p class="hint">试运行不会自动发布。请在任务的运行策略中配置测试连接，查看执行结果后再决定是否上线。</p></section>
+        <section v-if="preview.gates" ref="gatesPanel" tabindex="-1" class="surface-card release-gates"><h4>发布门禁 · {{ preview.gates.environment }}</h4><button class="btn" :disabled="busy" @click="work('正在刷新发布检查…',()=>inspect(preview.release.version))">刷新发布检查</button><p>发布窗口：{{ preview.gates.window_open ? '允许发布' : '当前窗口外' }}</p><p>试运行：{{ preview.gates.trial.passed ? '已有成功记录' : '尚无成功记录' }}{{ preview.gates.require_trial ? '（发布必需）' : '（可选）' }}</p><button v-if="allowOperations && ['ready','applied'].includes(preview.release.status)" class="btn" :disabled="busy" @click="trial">使用测试连接试运行此版本</button><p class="hint">试运行不会自动发布。请在任务的运行策略中配置测试连接，查看执行结果后再决定是否上线。</p></section>
         <label class="release-reason">本次发布说明<input v-model="publishReason" class="input" maxlength="500" placeholder="说明本次变更与验证结果"></label>
         <p class="hint">版本创建：{{ preview.release.actor }} · {{ preview.release.created_at }}<template v-if="preview.release.published_at">；最近发布：{{ preview.release.published_by || '历史记录' }} · {{ preview.release.published_at }} · {{ preview.release.publish_reason || '未填写说明' }}</template></p>
         <label class="checkbox-row"><input v-model="changedOnly" type="checkbox">仅显示变更文件</label>
@@ -73,16 +73,13 @@ const canPublish = computed(() => preview.value && !record.value?.deleted_at && 
 const canPrepare=computed(()=>['staged','failed'].includes(preview.value?.release.status) && !record.value?.deleted_at);
 const checklist=ref(null),entryField=ref(null),gatesPanel=ref(null),trialSettings=ref(null);
 function jump(element){if(!element)return;if(element.tagName==='DETAILS')element.open=true;(element.tagName==='DETAILS'?element.querySelector('summary'):element)?.focus({preventScroll:true});element.scrollIntoView({block:'nearest'});}
-const missingJobs=computed(()=>{const gates=preview.value?.gates;const states=new Map((gates?.ci?.jobs || []).map(job=>[job.name,job.status]));return (gates?.required_jobs || []).filter(name=>states.get(name)!=='success');});
 const checks=computed(()=>{
   const p=preview.value?.preflight,g=preview.value?.gates;
   if(!preview.value)return [];
   const items=[];
   if(p){items.push({label:'任务入口',state:p.entry_present?'passed':'blocked',message:p.entry_present?p.entry:'缺少调度使用的入口文件',target:'entry',action:'查看入口'});items.push({label:'依赖环境',state:p.environment_ready?'passed':'pending',message:p.environment_ready?'检查通过':'请完成依赖环境检查',target:'entry',action:'查看依赖'});}
   if(g){
-    const ciOk=g.ci?.status==='success' && !missingJobs.value.length;
     items.push({label:'发布窗口',state:g.window_open?'passed':'blocked',message:g.window_open?'允许发布':'请等待允许发布的时间段',target:'gates',action:'查看发布窗口'});
-    if(g.require_ci)items.push({label:'GitLab 流水线',state:ciOk?'passed':'blocked',message:ciOk?'必需检查已通过':missingJobs.value.length?`未通过：${missingJobs.value.join('、')}`:g.ci?.message || '流水线尚未通过',target:'gates',action:'查看 CI 结果'});
     if(g.require_trial)items.push({label:'候选版本试运行',state:g.trial?.passed?'passed':'blocked',message:g.trial?.passed?'已有成功记录':'需要同一版本的成功试运行',target:allowTrialSettings.value?'trial':'gates',action:allowTrialSettings.value?'打开试运行设置':'查看试运行条件'});
   }
   return items;
@@ -99,7 +96,7 @@ const scheduleImpact = computed(() => {
 async function close() { if (!busy.value && await confirmUnsaved(props.confirm)) emit('close'); }
 function changed() { emit('changed'); window.dispatchEvent(new Event('wfs:task-releases-refresh')); }
 const taskName=ref(''),sourceEntry=ref('');
-const publicationForm=useUnsavedChanges(()=>({taskName:taskName.value,main_file:sourceEntry.value}),()=>Boolean(candidate.value && candidate.value.kind!=='delete' && !loading.value));
+const publicationForm=useUnsavedChanges(()=>({taskName:taskName.value,main_file:sourceEntry.value}),()=>Boolean(candidate.value && !['delete','recover'].includes(candidate.value.kind) && !loading.value));
 let configurationId='';
 async function refresh() {
   const token = generation, pid = props.pid;
@@ -145,6 +142,16 @@ async function trial(){if(!await props.confirm({title:'试运行候选版本',me
 async function remove() {
   if (!await props.confirm({title:'确认删除任务',message:`GitLab 已删除 ${candidate.value.task_name}，确认停止后续调度并移入回收站？`,details:['代码历史、日志和输出文件保留，不清理运行中的目录。','已排队或运行的实例继续完成。'],confirmText:'确认删除',danger:true})) return;
   await work('正在删除任务…', async () => { await api.gitlabTaskAction({action:'delete',id:candidate.value.id}); await refresh(); message.value = '任务已移入回收站，输出文件已保留。'; changed(); });
+}
+async function recoverIdentity() {
+  const item=candidate.value;
+  if(!item?.recovery || !await props.confirm({title:'恢复原任务',message:`将 ${item.path} 重新关联到原任务 ${item.recovery.pid}？`,details:['保留原任务编号、调度配置、历史版本、日志和输出。','自动调度先暂停。恢复关联后重新获取代码、检查依赖并发布，再手动启用调度。'],confirmText:'确认恢复关联'}))return;
+  await work('正在恢复原任务关联…',async()=>{
+    await api.gitlabTaskAction({action:'recover',id:item.id});
+    changed();
+    await api.scanGitlab();
+    emit('close');
+  });
 }
 async function restore() { await work('正在恢复任务…', async () => { await api.packageAction({action:'restore',pid:props.pid,revision:record.value.revision,reason:publishReason.value}); await refresh(); message.value = '任务已恢复，自动调度保持暂停。'; changed(); }); }
 watch(() => props.pid, async pid => {

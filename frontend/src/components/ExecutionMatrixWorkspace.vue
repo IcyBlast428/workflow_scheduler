@@ -3,7 +3,7 @@
   <nav class="matrix-workspace-tabs surface-card" aria-label="任务执行分栏">
    <button v-for="item in tabs" :key="item.id" class="btn" :class="{primary:tab===item.id}" :aria-pressed="tab===item.id" @click="$emit('select',item.id)">{{ item.label }}</button>
   </nav>
-  <RecentExecutionMatrix v-if="visited.has('recent')" v-show="tab==='recent'" :active="tab==='recent'" @task="$emit('task',$event)" @record="$emit('record',$event)" @history="$emit('history',$event)" />
+  <RecentExecutionMatrix v-if="visited.has('recent')" v-show="tab==='recent'" :active="tab==='recent'" :user-key="userKey" @task="$emit('task',$event)" @record="$emit('record',$event)" @history="$emit('history',$event)" />
   <ExecutionMatrix v-if="visited.has('timeline')" v-show="tab==='timeline'" :active="tab==='timeline'" :user-key="userKey" @task="$emit('task',$event)" @execution="$emit('execution',$event)" @logs="$emit('logs',$event)" />
   <div v-if="visited.has('logs')" v-show="tab==='logs'" class="execution-records-pane"><slot name="logs" /></div>
   <ExecutionQueue v-if="visited.has('queue') && canManage" v-show="tab==='queue'" :active="tab==='queue'" :confirm="confirm" @detail="$emit('task',$event)" @execution="$emit('execution',$event)" @settings="$emit('settings')" />

@@ -141,6 +141,46 @@ class PackageTests(unittest.TestCase):
         self.assertIsNone(scheduler.get_job(pid))
         self.assertTrue(read_run(run['run_id']))
 
+    def test_gitlab_delete_with_missing_code_and_statistics_preserves_history(self):
+        version = self.ready(self.new())
+        current = self.activate(version)
+        pid = current['pid']
+        save_schedule(pid, {'schedule_type': 'every_hour', 'main_file': 'main.py', 'enabled': True})
+        core.aps_start(task_pid=pid)
+        with GaussDB() as db:
+            previous = db.execute_query_sql('SELECT version FROM wfs_task_config WHERE pid=?', params=(pid,))[0][0]
+            db.execute_sql('DELETE FROM wfs_job_stats WHERE pid=?', params=(pid,))
+        code = packages.release_dir(pid, version['version']) / 'code'
+        (code/'main.py').unlink()
+        task_loader.invalidate_task_cache()
+        self.assertIn('MAIN_FILE does not exist', task_loader.discover_task_specs()[0]['error'])
+        candidate = {'kind': 'delete', 'pid': pid, 'revision': current['revision'], 'sha': 'a'*40}
+        with patch('app.bootstrap.gitlab_tasks._candidate', return_value=candidate), \
+             patch('app.bootstrap.gitlab_updates.configuration', return_value={}), \
+             patch('app.bootstrap.gitlab_updates.Client'), patch('app.bootstrap.gitlab_tasks._target'):
+            response = self.client.post('/api/taskinfo/packages/gitlab',
+                json={'action': 'delete', 'id': 'confirmed-remote-deletion'}, headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertTrue(packages.task(pid)['deleted_at'])
+        self.assertIsNone(scheduler.get_job(pid))
+        self.assertFalse(task_loader.discover_task_specs())
+        self.assertTrue((code/'sql/query.sql').is_file())
+        self.assertEqual(packages.release(pid, version['version'])['version'], version['version'])
+        with GaussDB() as db:
+            row = db.execute_query_sql('SELECT enabled,version,schedule_json FROM wfs_task_config WHERE pid=?', params=(pid,))[0]
+            self.assertEqual(row[0], 'false')
+            self.assertEqual(row[1], previous + 1)
+            self.assertFalse(json.loads(row[2])['enabled'])
+            self.assertTrue(db.execute_query_sql('SELECT version FROM wfs_config_versions WHERE pid=? AND version=?', params=(pid, row[1])))
+
+    def test_recycle_without_saved_schedule_does_not_create_one(self):
+        staged = self.new()
+        pid = staged['pid']
+        packages.recycle(pid, packages.task(pid)['revision'], 'admin')
+        self.assertTrue(packages.task(pid)['deleted_at'])
+        with GaussDB() as db:
+            self.assertFalse(db.execute_query_sql('SELECT pid FROM wfs_task_config WHERE pid=?', params=(pid,)))
+
     def test_reject_unsafe_packages_without_registry_side_effects(self):
         bad = [archive({'../escaped.py': 'print(1)'}), archive({'/tmp/escaped.py': 'print(1)'}),
                archive({'Main.py':'print(1)','main.py':'print(2)'}), archive({'main.py':'invalid syntax ?'}),

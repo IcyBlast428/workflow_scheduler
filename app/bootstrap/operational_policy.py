@@ -6,14 +6,19 @@ import re
 from app.bootstrap import admission
 from app.bootstrap.timebase import business_now
 TASK_DEFAULT = dict(revision=0, idempotent=False, retry_enabled=False, retry_limit=0, retry_delay=60, stagger_seconds=0, expected_by='', slow_minutes=60, parameters={}, declared_connections=[], test_connections={}, isolation='process', resources={'memory_mb': 512, 'processes': 64, 'cpu_percent': 100})
-RELEASE_DEFAULT = dict(revision=0, require_ci=False, required_jobs=[], branches=['*'], window_start='', window_end='', require_trial=False, environment='development')
+RELEASE_DEFAULT = dict(revision=0, branches=['*'], window_start='', window_end='', require_trial=False, environment='development')
 DISPATCH_DEFAULT = dict(revision=0, max_active=4, start_interval_ms=1000, max_pending=1000, max_pending_per_task=10, max_wait_seconds=600, load_protection=False, cpu_high=85, memory_high=90)
 
 def load(kind, identifier=''):
     default = TASK_DEFAULT if kind == 'task' else RELEASE_DEFAULT if kind == 'release' else DISPATCH_DEFAULT if kind == 'dispatch' else {'revision': 0, 'quotas': {}}
     # 默认策略含嵌套字典/列表，必须复制后返回，防止表单修改污染后续请求。
     baseline = json.loads(json.dumps(default))
-    return {**baseline, **admission.policy(kind + ':' + identifier, baseline)}
+    value = {**baseline, **admission.policy(kind + ':' + identifier, baseline)}
+    if kind == 'release':
+        # Old database settings must not silently reactivate retired CI gates.
+        value.pop('require_ci', None)
+        value.pop('required_jobs', None)
+    return value
 
 def save(kind, identifier, form, actor):
     previous = load(kind, identifier)
@@ -96,9 +101,8 @@ def validate_task(form):
 
 def validate_release(form):
     value = {k: form.get(k, v) for k, v in RELEASE_DEFAULT.items() if k != 'revision'}
-    if any((type(value[k]) is not bool for k in ('require_ci', 'require_trial'))):
+    if type(value['require_trial']) is not bool:
         raise ValueError('发布门禁开关无效。')
-    value['required_jobs'] = string_list(value['required_jobs'], 50)
     value['branches'] = string_list(value['branches'], 100)
     if not value['branches']:
         raise ValueError('至少保留一个关注分支规则。')

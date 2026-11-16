@@ -2,7 +2,7 @@
   <div class="gitlab-workspace">
     <section class="surface-card gitlab-intro">
       <div class="gitlab-heading">
-        <div><h2>GitLab 代码更新</h2><p class="hint">查看待合并分支，以及与已部署提交的差异。合并操作在 GitLab 完成，任务和平台分别发布。</p></div>
+        <div><h2>GitLab 代码更新</h2><p class="hint">比较待合并分支及已部署版本的代码差异。新任务在任务列表审查发布；这里没有版本差异，不代表没有待发布任务。</p></div>
         <div class="gitlab-actions">
           <button class="btn" :disabled="loading" @click="refresh">刷新列表</button>
           <button class="btn primary" :disabled="!settings?.enabled || state?.scanning || checking" @click="scan">{{ state?.scanning || checking ? '正在检查…' : '立即检查' }}</button>
@@ -11,10 +11,13 @@
       <p v-if="error" class="inline-alert danger" role="alert">{{ error }}</p>
       <p v-if="message" class="inline-alert success" role="status">{{ message }}</p>
       <div v-if="state" class="gitlab-status">
-        <span class="badge">待合并 {{ state.pending_merge }}</span><span class="badge">待部署 / 发布 {{ state.pending_release }}</span>
+        <span class="badge">待合并 {{ state.pending_merge }}</span><span class="badge">已部署版本差异 {{ state.pending_release }}</span>
         <span class="hint">最近检查：{{ timeLabel(state.checked_at) }}</span>
+        <button class="btn" @click="$emit('tasks')">{{ taskSummaryLabel }} · 前往任务列表</button>
         <button v-if="state.unread" class="btn" @click="acknowledge">标记本批已读</button>
       </div>
+      <p v-if="taskError || taskChanges?.error" class="inline-alert warning" role="alert">任务检查：{{ taskError || taskChanges.error }}</p>
+      <p class="hint">任务新增、更新、恢复和删除单独统计，请到任务列表审查发布；不需要填写平台部署基线。</p>
       <p v-if="state?.error" class="inline-alert danger" role="alert">{{ state.error }}<span v-if="state.count"> 当前保留上次结果，请检查恢复后再核对。</span></p>
       <ul v-if="state?.warnings?.length" class="gitlab-warnings"><li v-for="warning in state.warnings" :key="warning">{{ warning }}</li></ul>
     </section>
@@ -40,8 +43,8 @@
           </div>
           <div class="gitlab-baseline">
             <label for="gitlab-platform-commit">平台当前已部署提交（完整 SHA，可稍后填写）</label>
-            <div class="gitlab-actions"><input id="gitlab-platform-commit" v-model.trim="form.platform_commit" class="input" maxlength="64" placeholder="留空时仅检查待合并分支"><button v-if="settings.running_commit" class="btn" type="button" @click="form.platform_commit = settings.running_commit">使用当前程序提交</button></div>
-            <small class="hint">请确认提交属于此 GitLab 项目。“已读”不会改变部署基线；平台升级后再核对更新。</small>
+            <div class="gitlab-actions"><input id="gitlab-platform-commit" v-model.trim="form.platform_commit" class="input" maxlength="64" placeholder="留空时不比较平台已部署版本"><button v-if="settings.running_commit" class="btn" type="button" @click="form.platform_commit = settings.running_commit">使用当前程序提交</button></div>
+            <small class="hint">请确认提交属于此 GitLab 项目。留空不影响新任务发现与发布。“已读”不会改变部署基线；平台升级后再核对更新。</small>
           </div>
           <div class="gitlab-binding-head"><strong>任务目录与已发布提交</strong><button class="btn" type="button" @click="form.tasks.push({ pid: '', path: '', commit: '' })">添加任务绑定</button></div>
           <p class="hint">任务列表会自动发现目标分支中的任务。任务目录改名或移动时，可选择平台已有任务绑定新目录，保留原编号；GitLab 发布后自动记录任务来源。任务标识由平台自动生成；已发布提交用于补充差异审查。</p>
@@ -59,8 +62,8 @@
 
     <p v-if="loading && !state" role="status">正在读取更新列表…</p>
     <section v-if="state && !state.count" class="surface-card gitlab-empty">
-      <h3>{{ !state.enabled ? '连接 GitLab，集中查看代码更新' : state.scanning ? '正在获取分支与差异' : state.error || state.warnings?.length ? '当前没有可展示的更新，请先核对上方检查状态' : !state.checked_at ? '等待首次检查' : '本次检查没有发现代码差异' }}</h3>
-      <p class="hint">配置保存在本机服务的数据目录。第一版不会自动合并、拉取覆盖运行代码或触发发布。</p>
+      <h3>{{ !state.enabled ? '连接 GitLab，集中查看代码更新' : state.scanning ? '正在获取分支与差异' : state.error ? '版本差异检查失败，请查看上方原因' : !state.checked_at ? '等待首次检查' : '暂无可比较的版本差异' }}</h3>
+      <p class="hint">新任务请到任务列表审查发布。仅在存在待合并分支，或已部署版本与目标分支存在代码差异时，这里才展示差异内容。</p>
     </section>
     <div v-if="state?.count" class="gitlab-review-layout">
       <section class="surface-card gitlab-update-list" aria-label="代码更新列表">
@@ -92,13 +95,15 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 import { useUnsavedChanges } from '../composables/useUnsavedChanges';
-const emit = defineEmits(['state']);
+const emit = defineEmits(['state','tasks']);
+const taskChanges=ref(null),taskError=ref('');
+const taskSummaryLabel=computed(()=>taskError.value || taskChanges.value?.error ? '任务检查异常' : !taskChanges.value?.enabled ? '任务检查未就绪' : state.value?.scanning ? '任务检查中' : taskChanges.value.complete ? `任务待处理 ${taskChanges.value.items.length}` : '任务检查未完成');
 const settings = ref(null), state = ref(null), tasks = ref([]), loading = ref(false), saving = ref(false), checking = ref(false);
 const error = ref(''), message = ref(''), selected = ref(null), fileDiff = ref(null), fileIndex = ref(-1), diffLoading = ref(false), diffError = ref('');
 const form = reactive({ tasks: [] }), taskRoots = ref(''), sharedPaths = ref(''), filter = ref('all');
 const {saved:settingsSaved}=useUnsavedChanges(()=>({form,roots:taskRoots.value,paths:sharedPaths.value}),()=>Boolean(settings.value));
 let sequence = 0, stateSequence = 0, alive = true,refreshInFlight=0,visibleRefreshes=0;
-const filters = [{ id: 'all', label: '全部' }, { id: 'branch', label: '待合并' }, { id: 'release', label: '待部署 / 发布' }];
+const filters = [{ id: 'all', label: '全部' }, { id: 'branch', label: '待合并' }, { id: 'release', label: '已部署版本差异' }];
 const filtered = computed(() => (state.value?.items || []).filter(item => filter.value === 'all' || (filter.value === 'branch' ? item.kind === 'branch' : item.kind !== 'branch')));
 const diffLines = computed(() => (fileDiff.value?.diff || '').split('\n'));
 const short = value => value?.slice(0, 8) || '—';
@@ -129,7 +134,15 @@ async function refresh(silent=false) {
   const current = ++stateSequence;
   refreshInFlight++;
   if(silent!==true){visibleRefreshes++;loading.value = true;}
-  try { const value = await api.gitlabState(); if (alive && current === stateSequence) {applyState(value);error.value='';} }
+  try {
+    const [platform,tasks]=await Promise.allSettled([api.gitlabState(),api.gitlabTasks()]);
+    if(alive && current===stateSequence){
+      if(tasks.status==='fulfilled'){taskChanges.value=tasks.value;taskError.value='';}
+      else{taskChanges.value=null;taskError.value=tasks.reason.message;}
+      if(platform.status==='rejected')throw platform.reason;
+      applyState(platform.value);error.value='';
+    }
+  }
   catch (exc) { if (alive && current === stateSequence) error.value = exc.message; return false; }
   finally { refreshInFlight--;if(silent!==true)visibleRefreshes--;if(alive)loading.value=visibleRefreshes>0; }
 }

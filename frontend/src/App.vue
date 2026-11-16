@@ -310,7 +310,7 @@
 
         <template v-else-if="view === 'packages' && canManage"
           ><TaskExamples /></template>
-        <template v-else-if="view === 'gitlab' && canManage"><GitlabUpdates @state="acceptGitlabState" /></template>
+        <template v-else-if="view === 'gitlab' && canManage"><GitlabUpdates @state="acceptGitlabState" @tasks="switchView('tasks')" /></template>
         <template v-else-if="['admin','connections','repository'].includes(view) && canManage"
           ><AdminPanel :confirm="requestConfirm"
         /></template>
