@@ -331,7 +331,21 @@ def validate_release(data):
         raise packages.PackageError('GitLab 项目配置已变化，请重新获取版本。', 409)
     client = updates.Client(config)
     try:
-        _target(config, source['sha'], client)
+        if data.get('rebuilt_from'):
+            # Dependency rebuilds retain the original, immutable source SHA.
+            # Unrelated commits must not prevent repairing that environment.
+            target, _ = client.get('/repository/branches/' + quote(config['target'], safe=''))
+            head = updates._sha(target['commit']['id'])
+            inventory = catalog(client, config, head)
+            remote = next((item for item in inventory['tasks'] if item['path'] == source['path']), None)
+            if (not inventory.get('complete') or not remote or remote.get('error')
+                    or remote['pid'] != data['pid'] or not source.get('fingerprint')
+                    or remote['fingerprint'] != source['fingerprint']):
+                raise packages.PackageError('GitLab 中此任务的目录、文件或绑定已变化，请立即检查 GitLab 并重新获取代码版本，再准备依赖。', 409)
+            # Fail closed if the branch or configuration moves during validation.
+            _target(config, head, client)
+        else:
+            _target(config, source['sha'], client)
     except updates.GitLabError as exc:
         raise packages.PackageError(str(exc), exc.status) from None
     finally:

@@ -121,6 +121,45 @@ class GitLabTaskTests(unittest.TestCase):
         with self.assertRaises(packages.PackageError): self.activate(data)
         self.assertIsNone(packages.task(self.pid)['active_version'])
 
+    def test_dependency_rebuild_allows_unrelated_commit_and_preserves_source(self):
+        self.connect()
+        original = self.ready(tasks.stage(self.candidate()['id'], 'admin'))
+        self.activate(original)
+        rebuilt = packages.rebuild(self.pid, original['version'], packages.task(self.pid)['revision'], 'admin')
+        self.server.repository['README.md'] = b'Unrelated platform update'
+        self.server.head = 'd' * 40
+        self.activate(self.ready(rebuilt))
+        self.assertEqual(packages.task(self.pid)['active_version'], rebuilt['version'])
+        self.assertEqual(packages.release(self.pid, rebuilt['version'])['git_source'], original['git_source'])
+
+    def test_dependency_rebuild_rejects_task_changes_and_validation_races(self):
+        self.connect()
+        original = self.ready(tasks.stage(self.candidate()['id'], 'admin'))
+        rebuilt = packages.rebuild(self.pid, original['version'], packages.task(self.pid)['revision'], 'admin')
+        saved = dict(self.server.repository)
+        self.server.head = 'd' * 40
+        for change in ('modified', 'deleted', 'added'):
+            self.server.repository = dict(saved)
+            if change == 'modified':
+                self.server.repository['app/jobs/acceptance/git_new/helper.py'] = b'changed = True'
+            elif change == 'deleted':
+                self.server.repository = {p: c for p, c in saved.items() if not p.startswith('app/jobs/acceptance/git_new/')}
+            else:
+                self.server.repository['app/jobs/acceptance/git_new/resource.json'] = b'{}'
+            with self.subTest(change=change), self.assertRaisesRegex(packages.PackageError, '文件或绑定已变化'):
+                tasks.validate_release(rebuilt)
+        self.server.repository = saved
+        original_catalog = tasks.catalog
+        def moving_catalog(*args, **kwargs):
+            result = original_catalog(*args, **kwargs)
+            self.server.head = 'e' * 40
+            return result
+        with patch.object(tasks, 'catalog', side_effect=moving_catalog), self.assertRaises(packages.PackageError):
+            tasks.validate_release(rebuilt)
+        original_configuration = updates.configuration
+        with patch.object(updates, 'configuration', side_effect=[original_configuration(), {**original_configuration(), 'revision': 999}]), self.assertRaises(packages.PackageError):
+            tasks.validate_release(rebuilt)
+
     def test_archive_content_must_match_confirmed_tree(self):
         self.connect()
         candidate = self.candidate()
