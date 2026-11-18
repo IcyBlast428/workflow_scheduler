@@ -356,13 +356,41 @@ def _snapshot(db):
     row = db.execute('SELECT payload FROM snapshot WHERE id=1').fetchone()
     return json.loads(row[0]) if row else dict(items=[], warnings=[], error='', checked_at=None, comparisons={})
 
+def _summarize_snapshot(config, data):
+    items = data['items']
+    fingerprint = hashlib.sha256(
+        json.dumps([config['revision'], sorted(item['id'] for item in items)]).encode()
+    ).hexdigest()
+    pending_merge = sum(item['kind'] == 'branch' for item in items)
+    return dict(revision=config['revision'], checked_at=data['checked_at'], error=data['error'],
+                warnings=data['warnings'], fingerprint=fingerprint, count=len(items),
+                pending_merge=pending_merge, pending_release=len(items) - pending_merge)
+
+def _read_snapshot_summary(db, revision):
+    # A second row keeps the frequently read fields separate without a schema migration.
+    row = db.execute('SELECT payload FROM snapshot WHERE id=2').fetchone()
+    if row:
+        summary = json.loads(row[0])
+        if summary['revision'] == revision:
+            return summary
+    return None
+
+def _write_snapshot_summary(db, summary):
+    db.replace('snapshot', ('id', 'payload'), (2, json.dumps(summary)))
+
 def state(username, brief=False):
     with store() as db:
-        config, data = (_config(db), _snapshot(db))
+        config = _config(db)
+        summary = _read_snapshot_summary(db, config['revision']) if brief else None
+        if summary is None:
+            data = _snapshot(db)
+            summary = _summarize_snapshot(config, data)
         lease = db.execute('SELECT expires FROM scan_lease WHERE id=1').fetchone()
         acknowledged = db.execute('SELECT fingerprint FROM acknowledgements WHERE username=?', (username,)).fetchone()
-    fingerprint = hashlib.sha256(json.dumps([config['revision'], sorted((item['id'] for item in data['items']))]).encode()).hexdigest()
-    result = dict(enabled=config['enabled'], checked_at=data['checked_at'], error=data['error'], warnings=data['warnings'], scanning=bool(lease and lease[0] > time.time()), fingerprint=fingerprint, unread=bool(data['items'] and (not acknowledged or acknowledged[0] != fingerprint)), count=len(data['items']), pending_merge=sum((i['kind'] == 'branch' for i in data['items'])), pending_release=sum((i['kind'] != 'branch' for i in data['items'])))
+    result = {key: value for key, value in summary.items() if key != 'revision'}
+    result.update(enabled=config['enabled'], scanning=bool(lease and lease[0] > time.time()),
+                  unread=bool(summary['count'] and
+                              (not acknowledged or acknowledged[0] != summary['fingerprint'])))
     if not brief:
         result['items'] = [{**{key: value for key, value in item.items() if key != 'files'}, 'files': [{key: value for key, value in file.items() if key != 'diff'} for file in item['files']]} for item in data['items']]
     return result
@@ -397,19 +425,41 @@ def _worker(token, config):
         if not lease or lease[0] != token or _config(db)['revision'] != config['revision']:
             return
         db.replace('snapshot', ('id', 'payload'), (1, json.dumps(result)))
+        _write_snapshot_summary(db, _summarize_snapshot(config, result))
         db.execute('DELETE FROM scan_lease')
+
+def _scan_is_due(summary, now, interval):
+    checked_at = summary and summary['checked_at']
+    return not checked_at or now - checked_at >= interval
 
 def request_scan(force=False):
     with store() as db:
-        db.execute('BEGIN')
-        config, previous = (_config(db), _snapshot(db))
+        config = _config(db)
         if not config['enabled']:
             raise GitLabError('请先保存并启用 GitLab 连接。')
         now = time.time()
         lease = db.execute('SELECT expires FROM scan_lease WHERE id=1').fetchone()
         if lease and lease[0] > now:
             return False
-        if previous['checked_at'] and now - previous['checked_at'] < (10 if force else config['interval']):
+        summary = _read_snapshot_summary(db, config['revision'])
+        if not _scan_is_due(summary, now, 10 if force else config['interval']):
+            return False
+
+        # Only contenders for a scan take the shared writer lock. Recheck after
+        # taking it because another process may have reserved or completed a scan.
+        db.execute('BEGIN')
+        config = _config(db)
+        if not config['enabled']:
+            raise GitLabError('请先保存并启用 GitLab 连接。')
+        now = time.time()
+        lease = db.execute('SELECT expires FROM scan_lease WHERE id=1').fetchone()
+        if lease and lease[0] > now:
+            return False
+        summary = _read_snapshot_summary(db, config['revision'])
+        if summary is None:
+            summary = _summarize_snapshot(config, _snapshot(db))
+            _write_snapshot_summary(db, summary)
+        if not _scan_is_due(summary, now, 10 if force else config['interval']):
             return False
         token = uuid.uuid4().hex
         db.replace('scan_lease', ('id', 'token', 'expires'), (1, token, now + 180))

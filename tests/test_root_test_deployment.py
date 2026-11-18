@@ -30,7 +30,7 @@ class RootTestDeploymentTests(unittest.TestCase):
             self.assertNotIn('a-strong-test-password', content)
             self.assertNotEqual(values['WFS_SECRET_KEY'], values['WFS_CONNECTIONS_KEY'])
             self.assertNotIn('WFS_LOCAL_DB_PATH', values)
-            self.assertEqual(values['WFS_DB_ID'], 'wfsscheduler_wfs')
+            self.assertEqual(values['WFS_DB_ID'], 'immpdb_wfs')
             self.assertEqual(values['WFS_DB_DRIVER'], 'DWS')
             self.assertFalse(setup.initialize(Path(temporary), 'replacement-password')[1])
             self.assertEqual(content, config.read_text())

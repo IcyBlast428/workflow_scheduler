@@ -12,10 +12,9 @@
     />
     <QueueOverview v-if="canManage" @queue="$emit('queue')" /></div>
     <DashboardSummary
+      :loaded="dashboard.loaded"
       :summary="dashboard.summary"
       :failures="dashboard.failure_rank"
-      :recent="dashboard.recent_runs"
-      @execution="$emit('execution', $event)"
       @tasks="$emit('tasks', $event)"
       @detail="$emit('detail', $event)"
     />

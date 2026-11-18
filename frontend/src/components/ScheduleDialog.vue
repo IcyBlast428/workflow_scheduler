@@ -57,7 +57,7 @@
             <SchedulePreview :preview="preview" :preview-loading="previewLoading" :preview-error="previewError" :source="schedule.source" />
           </ScheduleTimingEditor>
           <section v-if="changes.length" class="schedule-change-review" aria-label="保存前变更摘要"><strong>本次将修改 {{ changes.length }} 项</strong><p class="hint">保存后由调度器应用新配置；请结合上方未来执行时间核对。</p><dl><div v-for="change in changes" :key="change.key"><dt>{{ change.label }}</dt><dd><span class="muted">{{ change.before }}</span><span aria-label="改为"> → </span><strong>{{ change.after }}</strong></dd></div></dl></section>
-          <p v-else class="hint">尚未修改配置。</p>
+          <p v-else class="hint">{{ firstConfiguration ? '可以保存当前默认配置。' : '尚未修改配置。' }}</p>
         </div>
 
         <footer class="confirm-footer schedule-footer">
@@ -65,7 +65,7 @@
           <button
             class="btn primary"
             type="submit"
-            :disabled="saving || loading"
+            :disabled="!canSave"
           >
             {{ saving ? '保存中...' : '保存配置' }}
           </button>
@@ -100,15 +100,20 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save', 'preview', 'reload']);
 
 const form = reactive(defaultForm());
-let initialForm = '';
 const baseline=ref({});
 const fieldLabels={enabled:'自动调度',task_name:'任务名称',main_file:'执行入口',max_instances:'同时执行上限',timeout_seconds:'超时（秒）',owner:'负责人',description:'任务说明',memory_mb:'内存（MiB）',cpu_seconds:'CPU 时间（秒）',file_mb:'单文件（MiB）',misfire_grace_seconds:'延迟容忍（秒）',schedule_type:'策略类型',interval_minutes:'间隔（分钟）',interval_hours:'间隔（小时）',fixed_time:'执行时间',daily_times:'每日时间点',weekday:'星期',month_day:'每月日期',window_start:'窗口开始',window_end:'窗口结束',window_interval_minutes:'窗口间隔（分钟）',window_day_of_week:'窗口星期',run_datetime:'单次执行时间',cron_minute:'Cron 分钟',cron_hour:'Cron 小时',cron_day:'Cron 日期',cron_month:'Cron 月份',cron_day_of_week:'Cron 星期'};
 function displayChange(key,value){if(key==='enabled')return value?'启用':'暂停';if(key==='schedule_type')return Object.values(typeOptions).flat().find(item=>item.value===value)?.label || value;if(Array.isArray(value))return value.join('、') || '未设置';return value===undefined || value===''?'未填写':String(value);}
 const changes=computed(()=>Object.entries(fieldLabels).filter(([key])=>JSON.stringify(form[key])!==JSON.stringify(baseline.value[key])).map(([key,label])=>({key,label,before:displayChange(key,baseline.value[key]),after:displayChange(key,form[key])})));
+const firstConfiguration = computed(() => Boolean(props.schedule)
+  && props.schedule.source !== 'database'
+  && !props.schedule.configured
+  && Number(props.schedule.version ?? props.schedule.form?.version ?? 0) === 0);
+const canSave = computed(() => props.open && props.schedule && !props.loading
+  && !props.saving && (firstConfiguration.value || changes.value.length > 0));
 function requestClose() {
   if (!props.saving)
     emit('close', {
-      dirty: Boolean(initialForm) && initialForm !== JSON.stringify(form),
+      dirty: changes.value.length > 0,
     });
 }
 let previewTimer = null;
@@ -120,8 +125,7 @@ watch(
     resetScheduleForm(form, defaultForm(), schedule?.form || {});
     form.schedule_family = familyForType(form.schedule_type);
     ensureOnceAtDateTime();
-    initialForm = JSON.stringify(form);
-    baseline.value=JSON.parse(initialForm);
+    baseline.value = JSON.parse(JSON.stringify(form));
   },
   { immediate: true },
 );
@@ -178,6 +182,7 @@ function canPreview() {
 }
 
 function submit() {
+  if (!canSave.value) return;
   ensureOnceAtDateTime();
   emit('save', JSON.parse(JSON.stringify(form)));
 }

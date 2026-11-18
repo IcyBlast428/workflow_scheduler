@@ -23,7 +23,6 @@ export function useDashboardWorkspace({
       failed_jobs: 0,
     },
     failure_rank: [],
-    recent_runs: [],
     cpu_timeline: {
       samples: [],
       markers: [],
@@ -56,7 +55,6 @@ export function useDashboardWorkspace({
       markBackendHealthy('后端连接正常');
       Object.assign(dashboard.summary, data.summary || {});
       dashboard.failure_rank = data.failure_rank || [];
-      dashboard.recent_runs = data.recent_runs || [];
       const incoming = data.cpu_timeline || {};
       if (incoming.incremental) {
         const cutoff = Date.now() - 6 * 60 * 60 * 1000;

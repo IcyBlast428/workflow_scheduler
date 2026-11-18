@@ -26,7 +26,7 @@ def initialize(project, password):
         'WFS_CONNECTIONS_KEY': secrets.token_urlsafe(48),
         'WFS_ADMIN_USERNAME': 'admin',
         'WFS_ADMIN_PASSWORD_HASH': generate_password_hash(password),
-        'WFS_DB_ID': 'wfsscheduler_wfs',
+        'WFS_DB_ID': 'immpdb_wfs',
         'WFS_DB_DRIVER': 'DWS',
         'WFS_STATE_BACKEND': 'gauss',
         'WFS_NACOS_URL': 'CHANGE_ME',

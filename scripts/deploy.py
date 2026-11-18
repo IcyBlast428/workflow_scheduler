@@ -92,7 +92,7 @@ def validate_values(values):
     if any(values.get(key) for key in ('WFS_POSTGRES_TEST', 'WFS_LOCAL_DB_PATH', 'WFS_DB_DIALECT')):
         raise ValueError('部署配置不能包含本机测试数据库开关。')
     if not re.fullmatch(r'[A-Za-z][A-Za-z0-9]*_[A-Za-z_][A-Za-z0-9_]*', values['WFS_DB_ID']):
-        raise ValueError('连接标识使用 数据库名_schema，例如 wfsscheduler_wfs；数据库名不要包含下划线。')
+        raise ValueError('连接标识使用 数据库名_schema，例如 immpdb_wfs；数据库名不要包含下划线。')
     parsed = urlsplit(values['WFS_NACOS_URL'])
     if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError('Nacos 地址应为 http(s)://主机:端口/nacos，不在地址中填写密码。')
@@ -165,7 +165,7 @@ def pip_options(index, wheelhouse=None):
         return ['--no-index', '--find-links', str(path)]
     parsed = urlsplit(index)
     if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError('依赖索引须为不含账号密码的 HTTP(S) 地址。认证请使用服务器 pip 配置。')
+        raise ValueError('依赖索引须为不含账号密码的 HTTP(S) 地址。认证请使用受限的 .netrc 文件；安装器不读取 pip 配置文件。')
     result = ['--index-url', index]
     if parsed.scheme == 'http':
         result += ['--trusted-host', parsed.hostname]
@@ -217,10 +217,35 @@ def ready(python, project=ROOT):
     print('\n部署完成：浏览器访问 http://<服务器IP>:8008/ ，登录名 admin，密码为刚才设置的密码。')
 
 
+def verify_frontend(project=ROOT):
+    """Also check source/Git installs without a release manifest before mutation."""
+    dist = project/'app/dist'
+    def asset(name):
+        path = PurePosixPath(name)
+        if (not name or path.is_absolute() or '..' in path.parts or '\\' in name or ':' in name
+                or not (dist/name).resolve().is_relative_to(dist.resolve())
+                or not (dist/name).is_file()):
+            raise ValueError('前端资源缺失或路径无效：' + name + '；请使用同一版本的完整 app/dist，无需在生产运行 npm。')
+    for name in ('index.html', '.vite/manifest.json', 'unsupported-browser.html'):
+        asset(name)
+    try:
+        manifest = json.loads((dist/'.vite/manifest.json').read_text(encoding='utf-8'))
+        if not isinstance(manifest, dict) or not manifest:
+            raise ValueError('empty manifest')
+        for item in manifest.values():
+            for name in [item['file'], *item.get('css', []), *item.get('assets', [])]:
+                asset(name)
+            for reference in [*item.get('imports', []), *item.get('dynamicImports', [])]:
+                if reference not in manifest:
+                    raise ValueError('missing chunk reference')
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError('前端构建清单无效，请使用同一版本的完整 app/dist。') from exc
+    print('前端构建资源检查通过。')
+
+
 def install(args):
     verify_package()
-    if not (ROOT/'app/dist/index.html').is_file():
-        raise ValueError('缺少已构建前端，请使用完整部署 ZIP。')
+    verify_frontend(ROOT)
     python = ensure_venv()
     if not args.skip_dependencies:
         print('[2/5] 从内网索引或离线目录安装锁定依赖', flush=True)
@@ -285,6 +310,7 @@ def main():
         if args.action == 'configure':
             configure(edit=True)
         elif args.action == 'check':
+            verify_frontend(ROOT)
             run([python, '-m', 'pip', 'check'])
             check_database(python, production_environment())
             print('依赖、配置、驱动和平台表检查通过；未修改数据库。')

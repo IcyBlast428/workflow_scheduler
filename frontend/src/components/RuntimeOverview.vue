@@ -1,6 +1,6 @@
 <template>
   <section class="panel attention-panel" :class="{'is-clear': loaded && !error && data.scheduler?.healthy && !data.issues?.length}">
-    <div class="panel-head"><div><h2>{{ healthy ? '✓ 系统运行正常' : '需要处理' }}</h2><p>配置、执行和服务维护的待处理事项。</p></div><div class="filter-actions"><button v-if="healthy" class="btn" :aria-expanded="expanded" @click="expanded=!expanded">{{ expanded ? '收起状态' : '查看状态' }}</button><button class="btn" :disabled="loading" @click="load">刷新</button></div></div>
+    <div class="panel-head"><div><h2>{{ title }}</h2><p>配置、执行和服务维护的待处理事项。</p></div><div class="filter-actions"><button v-if="healthy" class="btn" :aria-expanded="expanded" @click="expanded=!expanded">{{ expanded ? '收起状态' : '查看状态' }}</button><button class="btn" :disabled="loading" @click="load">刷新</button></div></div>
     <div v-show="!healthy || expanded" class="panel-body">
       <div class="runtime-alerts"><span class="tag" :class="data.scheduler?.healthy ? 'success' : 'warning'">调度器：{{ data.scheduler?.healthy ? '正常' : data.scheduler?.message || '检测中' }}</span><span class="tag info">业务时区：Asia/Shanghai · UTC+8</span><span class="tag info">数据库：{{ data.database || '-' }}</span></div>
       <p v-if="error" class="inline-alert danger" role="alert">{{ error }}</p>
@@ -19,6 +19,11 @@ const expanded=ref(false);
 const healthy=computed(()=>loaded.value && !error.value && data.value.scheduler?.healthy && !data.value.issues?.length);
 const resolving=ref(''),note=ref('');
 const data = ref({}), error = ref(''), loading = ref(false), loaded = ref(false); let stopped = false;
+const title = computed(() => {
+  if (error.value) return '运行状态读取失败';
+  if (!loaded.value) return '正在检查运行状态';
+  return healthy.value ? '✓ 系统运行正常' : '需要处理';
+});
 async function load() {
   if (loading.value || stopped || document.visibilityState === 'hidden') return;
   loading.value = true;

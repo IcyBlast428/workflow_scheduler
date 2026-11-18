@@ -1,43 +1,38 @@
 # Workflow Scheduler
 
-Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。平台正式部署采用 **systemd + GaussDB/DWS**；任务代码由现有 GitLab 管理，依赖从私有 PyPI 准备。
+Python 任务调度与运维平台，使用 Flask、APScheduler 和 Vue。当前稳定版本采用 **root + `/data/workflow_scheduler` + Python 3.12 + systemd + GaussDB/DWS**，业务任务通过 GitLab 审查和显式发布。
 
-## 快速部署
+## 全新投产
 
-内网 root 固定目录安装请先阅读 [START-HERE.md](START-HERE.md)。解压到 `/data/workflow_scheduler` 后运行 `bash deploy.sh`，自动完成环境准备、配置引导、建表和服务启动。生产只使用根目录 `wfs.service`，统一以 root 用户和组运行，无需创建 wfs 系统账户。
+从 [START-HERE.md：全新投产操作手册](START-HERE.md) 开始，按顺序准备数据库和 Nacos、交付代码、安装依赖、启动服务、配置代理和发布首个任务。
 
-## 当前架构
+- 新安装默认连接 `immpdb` 数据库、`wfs` schema，连接标识 `immpdb_wfs`；可以在引导中修改。已有配置保持原值。
+- DBA 确认数据库与专用空 schema、账号权限；安装器按 `schema/gauss.sql` 初始化 32 张平台表。非空且没有当前基线标记的 schema 会拒绝初始化，不清空或导入旧数据。
+- 完整部署包已带前端，不在生产执行 npm。交付可直接解压，也可经 GitLab 转存；保留完整构建文件和发布校验清单。
+- 在目标目录运行 `bash deploy.sh`，引导创建环境、安装依赖、保存配置、初始化并启动唯一的 `wfs.service`。
+- 直连端口 8008，Scheduler 控制端口仅绑定本机 8009；独立 Nginx/Docker 示例见 [代理部署](docs/nginx-deployment.md)。
 
-- Web 与单实例 Scheduler 分离，由 systemd 管理。
-- 平台数据统一存入 GaussDB：账户、会话、任务配置、执行历史、队列、授权、业务连接、GitLab 配置、发布记录、DDL 修改记录和标签。
-- 共享文件目录保存任务代码版本、独立 Python 环境、业务输出、日志、指标，以及数据库故障时的临时恢复文件。
-- 任务默认无业务库授权，只能使用管理员明确授权的连接。业务库统一通过 `NewDB` 访问，提供 MySQL/PolarDB/MariaDB、PostgreSQL、GaussDB/DWS ODBC 和 ClickHouse 适配器；目标服务端仍须实库验收。
-- 平台连接支持服务配置/Nacos或加密保存的自定义连接，完整重启后生效；不自动迁移平台数据。全新安装使用唯一基线 `schema/gauss.sql`，现有本版架构可按升级说明补齐性能索引。
+`deploy/root-test/` 和 `scripts/setup_root_test.py` 是沿用的路径名称，实际用于生产配置与安装。保留这些路径是为了兼容已运行实例，无需改名或新建其他服务。数据库账号与 Linux root 账号相互独立。
 
-## 功能
+## 稳定版功能与边界
 
-任务发布采用 GitLab 扫描、源码分类、差异审查、显式发布和回收流程。任务执行支持参数、独立依赖、资源限制、并发配额、限速、错峰、持久排队、超时与取消。只有管理员声明可重复执行的任务才可开启自动重试与业务日期补跑，默认关闭。
+- 一个 systemd 服务管理 Web 与单实例 Scheduler。平台账户、配置、历史、队列、授权和发布记录保存在 GaussDB；共享文件目录保存版本源码、独立 Python 环境、日志、输出和临时恢复文件。
+- 每个任务版本建立独立环境，不继承平台或其他任务的包。没有 requirements.txt 时识别 import；可选功能包在页面补充，例如 pandas `.style` 使用的 Jinja2。暂不启用 pandas 功能用法自动推断。
+- GitLab 推送不等于平台部署或任务发布。新任务在任务列表审查并发布；原代码重新准备依赖时保留任务身份和源码来源，任务目录未变可容许仓库其他提交前进。
+- 支持参数、资源上限、并发配额、限速、错峰、队列、超时取消、执行矩阵、日志和输出预览下载。重试和补跑默认关闭，只对明确可重复执行的任务启用。
+- 任务默认无业务数据库权限。管理员配置并授权后，通过公共 NewDB 接口访问业务库；数据库操作示例位于任务示例与文档。DDL 编辑不会直接执行数据库语句。
+- GitLab 流水线当前停用，`.gitlab-ci.yml` 禁止创建流水线；生产不依赖 `.github/`。
 
-页面提供任务列表与标签搜索、执行矩阵、增量日志、输出预览和下载、DDL 编辑与修改记录、GitLab 联动、角色权限、业务连接授权、私有依赖源、维护模式及备份状态。DDL 编辑不会直接执行数据库语句；ZIP 示例可下载，但不支持通过 ZIP 上传发布任务。
+用户已反馈本版在生产成功发布并执行任务；新环境仍需现场验证驱动、权限、网络和业务结果。详细边界见 [验证说明](deploy/root-test/VALIDATION.md)。
 
-业务数据库 `NewDB` 的增删改查、批量、事务与异步示例位于「左下角管理员菜单 → 任务示例与文档」；平台内部 `GaussDB` 示例保留在「平台设置 → 连接与依赖 → 数据库连接 → 平台数据库」。示例可查看和复制，页面不会执行 SQL，详见 [数据库使用说明](docs/database-usage.md)。
+## 运维与开发
 
-## 全新部署
+现有生产实例更新、备份和恢复见 [systemd 运维手册](docs/systemd-deployment.md)，不将全新安装流程用作重置操作。固定密钥、数据库和 `data/` 需要配套备份；重新生成密钥不能恢复原有加密配置。
 
-请按 [systemd 部署手册](docs/systemd-deployment.md) 或固定目录的 [root 测试部署手册](deploy/root-test/README.md) 操作。不要复用旧平台库/schema，也不要复制旧数据目录。
+本机开发使用独立 PostgreSQL 测试库，不能替代目标 GaussDB/DWS 验收。后端回归入口为 `python scripts/test_backend.py`，每次创建隔离 schema，禁止连接生产数据库。前端开发在 `frontend` 执行测试和构建，不在生产编译。参见 [本机测试](docs/local-postgres-windows.md)。
 
-初始化前由 DBA 建立独立数据库与账号，配置 Nacos 和 DWS ODBC。执行 `scripts/init_database.py` 创建全新 schema 的 32 张平台表；重复执行只检查当前基线。发现非空且没有本版标记的 schema 会拒绝初始化，不会升级、清空或导入。
+## 文档入口
 
-## 当前部署的性能升级
+[文档索引](docs/README.md) · [数据库与 32 张表](deploy/root-test/DATABASE.md) · [任务发布](docs/task-packages.md) · [任务依赖 / Nexus](docs/task-environments-and-nexus.md) · [GitLab](docs/gitlab-updates.md) · [多层目录与输出](docs/task-outputs-and-projects.md) · [业务连接](docs/business-database-connections.md)
 
-已有 GaussDB/DWS 部署请阅读 [性能与数据库连接升级说明](docs/performance-and-connections.md)，其中包含索引预览/升级、平台连接备份与重启、业务 NewDB 访问规范、连接池与日志归档的配置边界。升级不会自动扩大任务并发，也不会自动删除历史数据。
-
-## 本机开发与测试
-
-生产仅使用 GaussDB/DWS。本机缺少生产服务器时，可显式使用独立 PostgreSQL 测试库验证协议、事务与界面；它不代表已通过实际 GaussDB 验收。应用仍以 systemd 运行，Docker 仅承载独立测试数据库。
-
-参见 [本机数据库测试](docs/local-postgres-windows.md)。后端回归统一运行 `python scripts/test_backend.py`，每次创建独立 schema，每个用例重置测试表；禁止把此命令连接到生产数据库。前端在 `frontend` 中执行 `npm test`、`npm run build`、`npm run test:e2e`。
-
-## 文档
-
-[架构与新手指南](docs/onboarding/index.html) · [新人讲解手册 PDF](docs/onboarding/workflow-scheduler-guide.pdf) · [文档索引](docs/README.md) · [任务发布](docs/task-packages.md) · [GitLab 联动](docs/gitlab-updates.md) · [DDL 与标签](docs/task-schema-and-tags.md) · [调度容量](docs/task-dispatch.md) · [性能与连接升级](docs/performance-and-connections.md) · [业务 NewDB](docs/business-database-connections.md) · [Nacos 配置管理](docs/nacos-connections.md) · [数据库使用示例](docs/database-usage.md) · [日志与历史存储](docs/performance-storage.md) · [新架构检查记录](docs/fresh-gauss-audit.md)
+历史架构图、PDF 和审查记录作为补充资料保留；首次投产以 START-HERE.md 和当前脚本为准。

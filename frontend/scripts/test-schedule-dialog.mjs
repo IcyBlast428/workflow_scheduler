@@ -32,7 +32,7 @@ try {
   assert.match(savedError,/class="schedule-form"/,'A failed save must retain the form');
   assert.match(savedError,/value="保留的修改"/);
   assert.match(savedError,/id="interval-minutes"[^>]*value="3"/);
-  assert.match(savedError,/保存配置/);
+  assert.match(savedError,/type="submit" disabled>保存配置<\/button>/);
   assert.match(savedError,/重新加载配置/);
   const loadError=await renderDialog({...props,schedule:null});
   assert.match(loadError,/配置加载失败/);
@@ -44,6 +44,11 @@ try {
   assert.match(multiple,/id="task-memory"[^>]*value="512"/);
   assert.match(multiple,/数据库配置 · 1 个后续时间点/);
   assert.match(multiple,/05:05:00/);
+  const unsavedDefaults=await renderDialog({...props,error:'',schedule:{
+    source:'unconfigured',configured:false,form:{version:0,task_name:'首次配置'},
+  }});
+  assert.match(unsavedDefaults,/可以保存当前默认配置/);
+  assert.match(unsavedDefaults,/type="submit">保存配置<\/button>/);
   const previewError=await renderDialog({...props,error:'',previewError:'规则尚未填写完整'});
   assert.match(previewError,/预览失败/);
   assert.match(previewError,/规则尚未填写完整/);

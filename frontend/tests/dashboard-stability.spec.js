@@ -34,3 +34,47 @@ test('health indicators live above Admin without normal labels or an effects swi
  await page.getByRole('button',{name:'收起导航',exact:true}).click();await expect(status).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.setViewportSize({width:390,height:844});await expect(status).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'test-results/dashboard-health-mobile.png',fullPage:true});
 });
+
+test('overview counters wait for data and open tasks using their own filters', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const waitForDashboard = async route => {
+    await gate;
+    await route.continue();
+  };
+  await page.route('**/api/taskinfo/dashboard*', waitForDashboard);
+  await page.route('**/api/taskinfo/attention', waitForDashboard);
+  await login(page);
+  const cards = page.locator('.dashboard-summary .metric-card');
+  try {
+    await expect(cards.locator('strong')).toHaveText(['—', '—', '—', '—']);
+    await expect(cards.first()).toBeDisabled();
+    await expect(page.getByRole('heading', { name: '最近执行记录' })).toHaveCount(0);
+    await expect(page.locator('.attention-panel h2')).toHaveText('正在检查运行状态');
+  } finally {
+    release();
+  }
+  await expect(cards.first().locator('strong')).toHaveText(/^[1-9]/);
+  await expect(page.getByRole('heading', { name: '最近执行记录' })).toHaveCount(0);
+
+  const nav = page.getByRole('navigation', { name: '工作区导航' });
+  await nav.getByRole('button', { name: '任务列表', exact: true }).click();
+  await expect(page.locator('.task-name-link').first()).toBeVisible();
+  await page.locator('#taskname').fill('ui-review-no-match');
+  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  await expect(page.getByText('没有匹配的任务', { exact: true })).toBeVisible();
+  await nav.getByRole('button', { name: '总览', exact: true }).click();
+  const total = await cards.first().locator('strong').innerText();
+  await cards.first().click();
+  await expect(page.locator('#taskname')).toHaveValue('');
+  await expect(page.locator('.task-summary-strip').getByText('匹配任务')).toContainText(total);
+  await expect(page.locator('.task-name-link').first()).toBeVisible();
+  await page.reload();
+  await expect(page.locator('#taskname')).toHaveValue('');
+  await expect(page.locator('.task-name-link').first()).toBeVisible();
+
+  await nav.getByRole('button', { name: '任务列表', exact: true }).click();
+  await expect(page.locator('#taskname')).toHaveValue('ui-review-no-match');
+  await expect(page.getByText('没有匹配的任务', { exact: true })).toBeVisible();
+});

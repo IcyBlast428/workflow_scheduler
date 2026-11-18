@@ -103,22 +103,24 @@ def enqueue_scheduled(job, planned):
     except ValueError:
         pass
     context = dict(source='scheduled', actor='scheduler', scheduled_time=str(planned), version=version, schedule_revision=(job.kwargs.get('limits') or {}).get('_schedule_revision', 0), parameters=task_policy['parameters'], scheduled_args=list(job.args), scheduled_limits=job.kwargs.get('limits') or {})
-    with admission.lock:
-        closed = admission.maintenance()['enabled']
-        with admission.store() as db:
-            db.execute('BEGIN')
-            if db.execute('SELECT 1 FROM work_requests WHERE id=?', (identifier,)).fetchone():
-                return identifier
-            status, message = ('pending', '等待错峰时间。' if offset else '等待执行名额。')
-            if now >= expiry:
-                status, message = ('expired', '错过允许启动的时间，未执行。')
-            elif due >= expiry:
-                status, message = ('rejected', '错峰偏移超过允许启动窗口，请调整任务错峰设置。')
-            elif closed:
-                status, message = ('cancelled', '维护期间的自动计划不补跑。')
-            elif _full(db, pid, policy):
-                status, message = ('rejected', '执行队列已满，此次计划未接收；请核对业务是否需要补跑。')
-            db.execute('INSERT INTO work_requests(id,pid,kind,status,payload,created_at,due_at,expires_at,message) VALUES(?,?,?,?,?,?,?,?,?)', (identifier, pid, 'scheduled', status, json.dumps(context, ensure_ascii=False), str(now), str(due), str(expiry), message))
+    # APScheduler calls this while holding its job-store lock. Serialize with
+    # set_maintenance in the same admission-store transaction, so this thread
+    # never waits for a process lock held by a caller of scheduler.add_job().
+    with admission.store() as db:
+        db.execute('BEGIN')
+        if db.execute('SELECT 1 FROM work_requests WHERE id=?', (identifier,)).fetchone():
+            return identifier
+        maintenance = db.execute("SELECT payload FROM settings WHERE key='maintenance'").fetchone()
+        status, message = ('pending', '等待错峰时间。' if offset else '等待执行名额。')
+        if now >= expiry:
+            status, message = ('expired', '错过允许启动的时间，未执行。')
+        elif due >= expiry:
+            status, message = ('rejected', '错峰偏移超过允许启动窗口，请调整任务错峰设置。')
+        elif maintenance and json.loads(maintenance[0])['enabled']:
+            status, message = ('cancelled', '维护期间的自动计划不补跑。')
+        elif _full(db, pid, policy):
+            status, message = ('rejected', '执行队列已满，此次计划未接收；请核对业务是否需要补跑。')
+        db.execute('INSERT INTO work_requests(id,pid,kind,status,payload,created_at,due_at,expires_at,message) VALUES(?,?,?,?,?,?,?,?,?)', (identifier, pid, 'scheduled', status, json.dumps(context, ensure_ascii=False), str(now), str(due), str(expiry), message))
     if status != 'pending':
         logger.warning('scheduled request %s %s: %s', identifier, status, message)
     return identifier

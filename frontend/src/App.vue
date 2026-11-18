@@ -211,7 +211,7 @@
 
       <section
         class="content"
-        :class="{ 'dashboard-content': view === 'dashboard' }"
+        :class="{ 'dashboard-content': view === 'dashboard', 'task-content-with-footer': view === 'tasks' && canPublish }"
       >
         <div v-if="showGitlabReminder && view !== 'gitlab'" class="inline-alert content-alert gitlab-reminder" role="status">
           <strong>GitLab 有新的代码更新</strong>
@@ -260,7 +260,9 @@
             <template #logs>
               <ExecutionLogsView
                 :task-logs="taskLogs" :matrix-log-range="matrixLogRange"
+                :user-key="user.name"
                 @range="setLogRange" @search="searchTaskLogs" @reset="resetTaskLogFilters"
+                @expand-dates="expandTaskLogDates"
                 @open="openTaskLog" @page="setTaskLogPage" @page-size="setTaskLogPageSize"
                 @updates="loadTaskLogs(true)" @tasks="switchView('tasks')"
                 @clear-filter="clearTaskLogFilter"
@@ -272,6 +274,7 @@
         <template v-else-if="view === 'tasks'">
           <TaskWorkspaceView
             :tasks="tasks" :user-key="user.name"
+            :confirm="requestConfirm"
             :selected-tasks="selectedTasks"
             :favorites="favorites"
             :only-favorites="onlyFavorites"
@@ -280,7 +283,7 @@
             :pending-actions="pendingActions"
             :can-manage="canManage"
             :can-operate="canOperate"
-            :can-publish="canManage || user.taskAccess.capabilities.includes('publish')"
+            :can-publish="canPublish"
             @release="openPackages"
             @gitlab="switchView('gitlab')"
             @search="loadTasks(true)"
@@ -303,9 +306,7 @@
               onlyFavorites = $event;
               loadTasks(true);
             "
-          >
-            <template #maintenance><MaintenanceControl v-if="canManage" :confirm="requestConfirm" compact /></template>
-          </TaskWorkspaceView>
+          />
         </template>
 
         <template v-else-if="view === 'packages' && canManage"
@@ -351,6 +352,11 @@
       </div>
     </header>
     <div class="modal-body">
+      <dl v-if="modal.record" class="task-metadata" aria-label="任务信息">
+        <div v-if="modal.record.id"><dt>任务 ID</dt><dd class="mono">{{ modal.record.id }}</dd></div>
+        <div v-if="modal.record.group_name"><dt>组名</dt><dd>{{ modal.record.group_name }}</dd></div>
+        <div v-if="modal.record.folder_name"><dt>任务目录</dt><dd class="mono">{{ modal.record.folder_name }}</dd></div>
+      </dl>
       <pre class="log-pre" :class="{ nowrap: !modal.wrap }">{{
         modal.content
       }}</pre>
@@ -387,6 +393,7 @@
     :confirm="requestConfirm"
     :can-manage="canManage"
     @close="detailPid = ''"
+    @schedule="openScheduleDialog"
     @execution="openExecution"
     @confirm-restore="confirmRestore"
     @packages="openPackages"
@@ -499,6 +506,7 @@ const token = ref(getToken());
 const workspaceReady = ref(false);
 const refreshToken = computed(() => workspaceReady.value ? token.value : '');
 const view = ref(readRoute(window.location.hash).view);
+let acceptedHash = window.location.hash;
 const matrixTab = ref(readRoute(window.location.hash).params.get('tab') || 'recent');
 const packagePid = ref('');
 const mobileNavOpen = ref(false);
@@ -531,6 +539,7 @@ const user = reactive({
   taskAccess:{capabilities:[]},
 });
 const canManage = computed(() => user.roles.includes('admin'));
+const canPublish = computed(() => canManage.value || user.taskAccess.capabilities.includes('publish'));
 const gitlabEnabled = computed(() => Boolean(token.value) && canManage.value);
 const { summary: gitlabSummary, showReminder: showGitlabReminder, accept: acceptGitlabState, dismiss: dismissGitlabReminder } = useGitlabUpdates(gitlabEnabled);
 const canOperate = computed(() => canManage.value || user.roles.includes('maintainer'));
@@ -551,6 +560,7 @@ const {
   loadTasks,
   loadGroups,
   resetTaskFilters,
+  setTaskOverview,
   setTaskPage,
   setTaskPageSize,
   batchTaskAction,
@@ -570,7 +580,8 @@ const { dashboard, loadDashboard } =
   });
 const {
   taskLogs,
-  hasCurrentTaskLogQuery,
+  applyTaskLogRoute,
+  expandTaskLogDates,
   clearTaskLogFilter,
   systemLogs,
   matrixLogRange,
@@ -606,6 +617,7 @@ const modal = reactive({
   title: '',
   content: '',
   wrap: true,
+  record: null,
 });
 
 const {scheduleDialog,openScheduleDialog,closeScheduleDialog,previewSchedule,saveSchedule}=useScheduleWorkspace({markBackendHealthy,handleRequestFailure,requestConfirm,pushToast,loadTasks,loadDashboard});
@@ -669,9 +681,10 @@ async function retryBootstrap() {
   }
 }
 
-function showModal(title, content) {
+function showModal(title, content, record = null) {
   modal.title = title;
   modal.content = formatModalContent(content);
+  modal.record = record;
   modal.wrap = true;
   modal.open = true;
 }
@@ -779,9 +792,12 @@ async function switchView(nextView) {
   if(queueTab)nextView='matrix';
   if(nextView!==view.value && !await confirmUnsaved(requestConfirm))return;
   if (token.value && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(nextView)) nextView = 'tasks';
+  const changedTaskScope = setTaskOverview('');
   view.value = nextView;
-  window.location.hash = queueTab ? 'matrix?tab=queue' : routeHash(nextView);
+  acceptedHash = queueTab ? '#matrix?tab=queue' : routeHash(nextView);
+  window.location.hash = acceptedHash;
   mobileNavOpen.value = false;
+  if (changedTaskScope && nextView === 'tasks') loadTasks();
 }
 
 function openPackages(pid) {
@@ -811,7 +827,7 @@ async function openLatestLog(row) {
 async function openTaskLog(row) {
   const origin = document.activeElement;
   const serial = ++logDetailSerial;
-  showModal(`任务日志：${row.id}`, '正在加载日志...');
+  showModal(`任务日志：${row.id}`, '正在加载日志...', row);
   try {
     if (/^[a-f0-9]{32}$/.test(row.logid)) {
       try {
@@ -843,36 +859,29 @@ async function openTaskLog(row) {
   }
 }
 
-async function applyRoute() {
-  const route = readRoute(window.location.hash);
+async function applyRoute(event) {
+  const hash = window.location.hash;
+  const route = readRoute(hash);
   if (token.value && user.roles.length && !canManage.value && !['tasks', 'matrix', 'taskLogs'].includes(route.view)) {
     switchView('tasks');
     return;
   }
-  if((route.view!==view.value || route.pid!==detailPid.value) && !await confirmUnsaved(requestConfirm)){window.history.replaceState(null,'',routeHash(view.value,{pid:detailPid.value,run:executionRunId.value}));return;}
+  if ((route.view !== view.value || route.pid !== detailPid.value) && !await confirmUnsaved(requestConfirm)) {
+    const previousHash = event?.oldURL ? new URL(event.oldURL).hash : acceptedHash;
+    window.history.replaceState(null, '', previousHash || routeHash(view.value));
+    return;
+  }
+  if (hash !== window.location.hash) return;
+  acceptedHash = hash;
   view.value = route.view;
   matrixTab.value = route.params.get('tab') || 'recent';
   if (!token.value) return;
   detailPid.value = route.run ? '' : route.pid;
   executionRunId.value = route.run;
+  const changedTaskScope = setTaskOverview(route.view === 'tasks' ? route.params.get('overview') : '');
+  if (changedTaskScope && route.view === 'tasks') loadTasks();
   if (route.view === 'taskLogs') {
-    const mapping = {
-      taskid: 'taskid',
-      taskname: 'taskname',
-      state: 'taskstate',
-      start: 'startDate',
-      end: 'endDate',
-      scope: 'scope',
-    };
-    const dates=recentLogDates();
-    const defaults={start:dates.start,end:dates.end,scope:'online'};
-    for (const [query, key] of Object.entries(mapping))
-      taskLogs.params[key] = (route.params.get(query) ?? defaults[query] ?? '').slice(0, 200);
-    const range=[route.params.get('from'),route.params.get('to')];
-    matrixLogRange.value=range.every(value=>value && value.length<=32 && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/.test(value))?range:[];
-    if (!['online', 'archive', 'all'].includes(taskLogs.params.scope))
-      taskLogs.params.scope = 'online';
-    if (!hasCurrentTaskLogQuery()) loadTaskLogs(true);
+    applyTaskLogRoute(route.params);
     if (!taskLogs.ids.length) loadTaskIds();
   }
 }
@@ -885,6 +894,7 @@ function syncRoute() {
   if (view.value === 'taskLogs') Object.assign(values, logRouteValues());
   const hash = routeHash(view.value, values);
   if (hash !== window.location.hash) window.history.pushState(null, '', hash);
+  acceptedHash = hash;
 }
 function logRouteValues() {
   return {
@@ -937,10 +947,7 @@ function openMatrixLogs(record) {
   window.location.hash=routeHash('taskLogs',{taskid:record.pid,taskname:'',state:'',scope:record.scope || 'online',start:record.start_time.slice(0,10),end:record.end_time.slice(0,10),from:record.query_start,to:record.query_end});
 }
 function showFilteredTasks(status) {
-  tasks.params.status = status;
-  tasks.params.currentPage = 1;
-  if (view.value === 'tasks') loadTasks(true);
-  else switchView('tasks');
+  window.location.hash = routeHash('tasks', { overview: status || 'all' });
 }
 onMounted(async () => {
   if (!navItems.some((item) => item.id === view.value)) {
@@ -975,5 +982,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.task-content-with-footer {
+  display: flex;
+  flex-direction: column;
+  padding-block-end: 0;
+}
 .asset-recovery{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:1200;width:min(560px,calc(100vw - 32px));box-sizing:border-box;padding:20px;border:1px solid var(--warning,#d4af65);border-radius:12px;background:var(--panel,#171717);color:var(--ink,#fff);box-shadow:0 12px 40px #0008;display:grid;gap:12px}.asset-recovery p{margin:0;line-height:1.6}.asset-recovery .btn{justify-self:start}
 </style>

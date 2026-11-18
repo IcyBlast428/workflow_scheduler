@@ -3,6 +3,7 @@ import {api} from '../api.js';
 import {scheduleRequest} from '../scheduleForm.js';
 export function useScheduleWorkspace({markBackendHealthy,handleRequestFailure,requestConfirm,pushToast,loadTasks,loadDashboard}) {
   let scheduleLoadSeq=0,schedulePreviewSeq=0;
+  let afterScheduleSaved;
   onScopeDispose(()=>{scheduleLoadSeq++;schedulePreviewSeq++;});
   const scheduleDialog = reactive({
     open: false,
@@ -16,11 +17,14 @@ export function useScheduleWorkspace({markBackendHealthy,handleRequestFailure,re
     data: null,
   });
 
-  async function openScheduleDialog(row) {
+  async function openScheduleDialog(row, onSaved) {
     const keepData =
       scheduleDialog.open &&
       scheduleDialog.task?.id === row.id &&
       scheduleDialog.data;
+    if (!scheduleDialog.open || scheduleDialog.task?.id !== row.id || onSaved) {
+      afterScheduleSaved = onSaved;
+    }
     const seq = ++scheduleLoadSeq;
     schedulePreviewSeq += 1;
     scheduleDialog.open = true;
@@ -88,6 +92,7 @@ export function useScheduleWorkspace({markBackendHealthy,handleRequestFailure,re
     schedulePreviewSeq += 1;
     scheduleDialog.previewLoading = false;
     scheduleDialog.open = false;
+    afterScheduleSaved = undefined;
   }
 
   async function previewSchedule(form) {
@@ -123,6 +128,7 @@ export function useScheduleWorkspace({markBackendHealthy,handleRequestFailure,re
       return;
     }
     const taskId = scheduleDialog.task.id;
+    const onSaved = afterScheduleSaved;
     scheduleDialog.saving = true;
     scheduleDialog.error = '';
     try {
@@ -138,6 +144,7 @@ export function useScheduleWorkspace({markBackendHealthy,handleRequestFailure,re
       scheduleDialog.preview = data.preview || [];
       scheduleDialog.previewError = data.preview_error || '';
       scheduleDialog.open = false;
+      afterScheduleSaved = undefined;
       pushToast(
         data.application?.status === 'failed' ? 'error' : 'success',
         '任务配置已保存',
@@ -145,7 +152,7 @@ export function useScheduleWorkspace({markBackendHealthy,handleRequestFailure,re
           ? `保存成功，但生效失败：${data.application.message}。请刷新任务重新应用。`
           : `${taskId} 已生效。`,
       );
-      await Promise.all([loadTasks(), loadDashboard({ silent: true })]);
+      await Promise.all([loadTasks(), loadDashboard({ silent: true }), onSaved?.()]);
     } catch (error) {
       scheduleDialog.error = error.message;
       await handleRequestFailure(error, { toastTitle: '调度策略保存失败' });

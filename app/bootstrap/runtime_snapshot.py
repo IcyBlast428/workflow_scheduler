@@ -15,6 +15,7 @@ _publish_lock = threading.Lock()
 _start_lock = threading.Lock()
 _started = False
 MAX_AGE_SECONDS = 15
+TASK_DESCRIPTION_MAX_AGE_SECONDS = 30
 
 
 def snapshot_path():
@@ -40,7 +41,9 @@ def publish():
         from app.api.task.views import _event_snapshot
         from app.bootstrap.operations import service_state
         from app.bootstrap.system_metrics import recent_task_starts
-        value = _event_snapshot()
+        from app.bootstrap.task_loader import discover_task_specs
+        specs = discover_task_specs(max_age=TASK_DESCRIPTION_MAX_AGE_SECONDS)
+        value = _event_snapshot(specs)
         starts = recent_task_starts(business_now()-dt.timedelta(minutes=2), include_active=True)
         active = [item for item in starts if not item.get('end_time')]
         completed = [item for item in starts if item.get('end_time')][-1000:]

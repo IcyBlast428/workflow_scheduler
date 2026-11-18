@@ -174,7 +174,10 @@ def manual_request(actor, pid, key, submit):
     """用调用者提供的请求号防重复提交，不承诺业务副作用恰好一次。"""
     if not isinstance(key, str) or not re.fullmatch('[A-Za-z0-9_-]{16,100}', key):
         raise ValueError('执行请求编号无效，请刷新后重试。')
-    with lock:
+    # submit() also uses the configuration lock to register the execution.
+    # Acquire it first, in the same order as release activation and cleanup.
+    from app.bootstrap.core import _configuration_lock
+    with _configuration_lock, lock:
         # 先取策略再打开回执事务，避免持有一个连接时嵌套借取另一个连接。
         closed = maintenance()['enabled']
         with store() as db:

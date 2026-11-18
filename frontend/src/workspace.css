@@ -55,9 +55,6 @@
 .action-menu > button { text-align: left; justify-content: flex-start; border-color: transparent; }
 .action-menu > button:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .nav-tooltip { position: fixed; z-index: 600; pointer-events: none; transform: translateY(-50%); padding: 9px 12px; border-radius: 9px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 12px; }
-.log-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 var(--panel-padding) 14px; }
-.log-shortcuts > span { margin-right: auto; font-size: 12px; color: var(--muted); }
-.log-shortcuts .btn { padding: 6px 10px; font-size: 12px; }
 .attention-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; max-height: 360px; overflow-y: auto; }
 .attention-list > li { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .attention-list p { margin: 6px 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
@@ -89,13 +86,10 @@
   .summary-grid .metric-card:first-child { grid-column: 1 / -1; }
   .summary-grid .metric-card strong { font-size: 25px; }
   .task-table { min-width: 790px; }
-  .task-table .col-group, .task-table .col-failed { display: none; }
-  .task-table tr > :nth-child(2), .task-table tr > :nth-child(6) { display: none; }
   .task-table th:first-child, .task-table .task-name-cell { position: static; }
   .task-table .col-name { width: 220px; }
   .nav-tooltip { display: none; }
   .attention-list > li { gap: 10px; }
-  .log-shortcuts { padding: 0 16px 14px; }
 }
 
 
@@ -132,4 +126,4 @@
 /* Consistent focus and neutral secondary controls across workspaces. */
 button:focus-visible,summary:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .attention-panel.is-clear{padding:10px 20px;margin-bottom:12px}.attention-panel.is-clear h2{font-size:15px;margin:0}.attention-panel.is-clear .panel-head{flex:1;justify-content:space-between}.attention-panel.is-clear .panel-body{flex-basis:100%}
-.issue-row>.recent-run-copy{flex:1;min-width:0}.cell-subtitle,.modal-subtitle{font-size:12px;line-height:1.6}
+.cell-subtitle,.modal-subtitle{font-size:12px;line-height:1.6}

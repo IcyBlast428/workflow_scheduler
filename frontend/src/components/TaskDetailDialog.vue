@@ -5,7 +5,11 @@
         <section v-if="data.pid" class="workbench-summary" aria-label="任务运行摘要">
           <div><small>调度状态</small><strong>{{ scheduleStatus }}</strong></div>
           <div><small>最近结果</small><strong><span v-if="latestCompleted" class="tag" :class="statusClass(latestCompleted.status)">{{ statusLabel(latestCompleted.status) }}</span><template v-else>暂无记录</template></strong></div>
-          <div><small>下次执行</small><strong>{{ displayDateTime(data.diagnostics?.next_run_time, '未安排') }}</strong></div>
+          <div>
+            <small>下次执行</small>
+            <strong>{{ displayDateTime(data.diagnostics?.next_run_time, '未安排') }}</strong>
+            <button v-if="tab !== 'schedule' && permitted('schedule')" class="btn next-run-edit" type="button" @click="editSchedule">编辑调度</button>
+          </div>
           <div><small>当前代码版本</small><strong class="mono" :title="data.current_version">{{ data.current_version?.slice(0,12) || '未记录' }}</strong></div>
         </section>
         <div v-if="taskIssue" class="inline-alert warning"><strong>{{ taskIssue }}</strong><div class="filter-actions"><button v-if="latestCompleted && ['failed','timed_out','interrupted','skipped','missed'].includes(latestCompleted.status)" class="btn" @click="selectTab('runs')">查看最近执行</button><button v-if="data.schedule?.application?.status==='failed'" class="btn" @click="selectTab('description')">查看配置生效信息</button></div></div>
@@ -46,6 +50,12 @@
         </tbody></table><p v-if="!data.runs?.length" class="hint">还没有新版本的执行记录；旧历史可在执行记录中查看。</p></div>
         <div v-if="tab === 'releases' && permitted('publish')" role="tabpanel" :id="`${dialogId}-panel-releases`" :aria-labelledby="`${dialogId}-releases`"><TaskReleaseDialog embedded :pid="pid" :allow-operations="canManage" :confirm="confirm" @changed="load" @execution="selectedRun=$event;tab='runs'" /></div>
         <div v-if="tab === 'connections' && canManage" role="tabpanel" :id="`${dialogId}-panel-connections`" :aria-labelledby="`${dialogId}-connections`"><TaskConnections :pid="pid" :confirm="confirm" /></div>
+        <div v-if="tab === 'schedule' && permitted('schedule')" role="tabpanel" :id="`${dialogId}-panel-schedule`" :aria-labelledby="`${dialogId}-schedule`" tabindex="0" class="detail-tab-panel">
+          <div class="schedule-entry">
+            <strong>{{ scheduleRule || '尚未配置调度规则' }}</strong>
+            <button class="btn primary" type="button" @click="editSchedule">编辑调度</button>
+          </div>
+        </div>
         <div v-if="tab === 'operations' && canManage" role="tabpanel" :id="`${dialogId}-panel-operations`" :aria-labelledby="`${dialogId}-operations`"><TaskOperations :pid="pid" :confirm="confirm" @execution="selectedRun=$event;tab='runs'" /></div>
         <div v-if="tab === 'runs' && selectedRun"><ExecutionDialog embedded :run-id="selectedRun" @close="selectedRun = ''" /></div>
         <div v-show="tab === 'versions'" role="tabpanel" :id="`${dialogId}-panel-versions`" :aria-labelledby="`${dialogId}-versions`" tabindex="0" class="table-wrap detail-tab-panel" aria-label="配置历史"><table><thead><tr><th>版本</th><th>修改人</th><th>时间</th><th>操作</th></tr></thead><tbody>
@@ -74,11 +84,18 @@ import { statusLabel, actionLabel, statusClass } from '../executionLabels';
 import TaskSourceViewer from './TaskSourceViewer.vue';
 import TaskFlowViewer from './TaskFlowViewer.vue';
 import LoadingStatus from './LoadingStatus.vue';
+import {typeOptions} from '../scheduleForm';
 const props = defineProps({ pid: {type:String,default:''}, canManage:Boolean, confirm:Function });
-const emit = defineEmits(['close','execution','confirmRestore','packages']);
+const emit = defineEmits(['close','execution','confirmRestore','packages','schedule']);
 const data = ref({}), tab = ref('description'), error = ref(''), loading = ref(false), restoring = ref(false);
 const latestCompleted=computed(()=>data.value.runs?.find(run=>!['queued','running'].includes(run.status) && run.source!=='trial'));
 const scheduleStatus=computed(()=>data.value.configuration_error?'配置异常':data.value.schedule?.application?.status==='failed'?'生效失败':data.value.schedule?.application?.status==='pending'?'待生效':!data.value.schedule?.configured?'未配置':data.value.schedule.enabled?'已启用':'已暂停');
+const scheduleTypes = Object.values(typeOptions).flat();
+const scheduleRule = computed(() => {
+  if (!data.value.schedule?.configured) return '';
+  const type = data.value.schedule.form?.schedule_type;
+  return scheduleTypes.find(item => item.value === type)?.label || '已配置调度规则';
+});
 const taskIssue=computed(()=>data.value.configuration_error || (data.value.schedule?.application?.status==='failed' && (data.value.schedule.application.message || '调度配置未生效')) || (['failed','timed_out','interrupted','skipped','missed'].includes(latestCompleted.value?.status) ? latestCompleted.value.reason || statusLabel(latestCompleted.value.status) : '') || '');
 const selectedRun = ref('');
 const sourceVisited = ref(false);
@@ -88,8 +105,20 @@ async function close(){if(await confirmUnsaved(props.confirm))emit('close');}
 async function selectTab(id) { if(id!==tab.value && !await confirmUnsaved(props.confirm))return; if (id === 'source') sourceVisited.value = true; if(id === 'flow')flowVisited.value=true; tab.value = id; }
 function showFlowSource(location) { sourceLocation.value={...location,key:Date.now()};sourceVisited.value=true;tab.value='source'; }
 const permitted = capability => props.canManage || data.value.permissions?.includes(capability);
-const tabs = computed(() => [{id:'description',label:'说明与配置'},{id:'schema',label:'DDL 与标签'},{id:'flow',label:'执行流程'},{id:'source',label:'查看代码'},{id:'runs',label:props.canManage ? '执行与输出' : '执行记录'},{id:'releases',label:'代码版本'},{id:'connections',label:'连接授权'},{id:'operations',label:'运行策略'},{id:'versions',label:'配置历史'},{id:'audit',label:'操作记录'}].filter(item => props.canManage || ['description','runs'].includes(item.id) || ['source','flow'].includes(item.id) && permitted('view_code') || item.id==='schema' && (permitted('view_code') || permitted('publish')) || item.id==='releases' && permitted('publish') || item.id==='versions' && permitted('schedule')));
-const groupDefinitions=[{id:'overview',label:'概览',ids:['description','flow']},{id:'execution',label:'执行',ids:['runs']},{id:'configuration',label:'配置',ids:['operations','versions']},{id:'publication',label:'发布',ids:['releases','source','schema']},{id:'security',label:'安全与审计',ids:['connections','audit']}];
+const tabs = computed(() => [
+  {id:'description',label:'说明与配置',available:true},
+  {id:'schema',label:'DDL 与标签',available:permitted('view_code') || permitted('publish')},
+  {id:'flow',label:'执行流程',available:permitted('view_code')},
+  {id:'source',label:'查看代码',available:permitted('view_code')},
+  {id:'runs',label:props.canManage ? '执行与输出' : '执行记录',available:true},
+  {id:'releases',label:'代码版本',available:permitted('publish')},
+  {id:'connections',label:'连接授权',available:props.canManage},
+  {id:'schedule',label:'调度时间',available:permitted('schedule')},
+  {id:'operations',label:'运行策略',available:props.canManage},
+  {id:'versions',label:'配置历史',available:permitted('schedule')},
+  {id:'audit',label:'操作记录',available:props.canManage},
+].filter(item => item.available));
+const groupDefinitions=[{id:'overview',label:'概览',ids:['description','flow']},{id:'execution',label:'执行',ids:['runs']},{id:'configuration',label:'配置',ids:['schedule','operations','versions']},{id:'publication',label:'发布',ids:['releases','source','schema']},{id:'security',label:'安全与审计',ids:['connections','audit']}];
 const groups=computed(()=>groupDefinitions.map(group=>({...group,tabs:group.ids.map(id=>tabs.value.find(item=>item.id===id)).filter(Boolean)})).filter(group=>group.tabs.length));
 const activeGroup=computed(()=>groups.value.find(group=>group.ids.includes(tab.value))?.id || 'overview');
 const visibleTabs=computed(()=>groups.value.find(group=>group.id===activeGroup.value)?.tabs || []);
@@ -138,6 +167,16 @@ function duration(run) {
   if (!run.start_time || !run.end_time) return '尚未结束';
   return `${Math.max(0,(timestamp(run.end_time) - timestamp(run.start_time)) / 1000).toFixed(1)} 秒`;
 }
+function editSchedule() {
+  const pid = props.pid;
+  if (data.value.pid !== pid || !permitted('schedule')) return;
+  emit('schedule', {
+    id: pid,
+    name: data.value.task_name,
+    group_name: data.value.schedule?.group_name,
+    folder_name: data.value.schedule?.folder_name,
+  }, () => props.pid === pid ? load() : undefined);
+}
 function restore(version) { emit('confirmRestore', {pid:props.pid, restore_version:version, version:data.value.schedule.version, done:load}); }
 watch(() => props.pid, () => { generation++; selectedRun.value=''; tab.value = 'description'; sourceVisited.value = false; sourceLoading.value = false; flowVisited.value=false;flowRevision.value=0;flowLoading.value=false;sourceLocation.value=null;data.value = {}; linkCopied.value=false;linkError.value=''; error.value = ''; loading.value = false; load(); }, {immediate:true});
 onBeforeUnmount(() => {generation++;window.removeEventListener('hashchange',restoreLocation);});
@@ -159,6 +198,19 @@ onBeforeUnmount(() => {generation++;window.removeEventListener('hashchange',rest
 .task-metadata{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 24px;margin:4px 0 20px;padding-bottom:20px;border-bottom:1px solid var(--line)}
 .task-metadata>div{min-width:0}.task-metadata dt{font-size:12px;color:var(--muted);margin-bottom:6px}.task-metadata dd{margin:0;font-size:14px;line-height:1.6;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .task-description{padding:0 0 20px;border-bottom:1px solid var(--line)}.task-description>h4{font-size:13px;color:var(--muted);margin:0 0 12px}.quiet-notifications{font-size:12px;padding-top:12px;border-top:1px solid var(--line)}
+.workbench-summary > div { align-content: start; }
+.next-run-edit { justify-self: start; min-height: 36px; padding: 4px 10px; }
+.schedule-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
 @media(max-width:1100px){.task-metadata{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.task-metadata{gap:14px 16px}.task-metadata dd{font-size:13px}}
 </style>

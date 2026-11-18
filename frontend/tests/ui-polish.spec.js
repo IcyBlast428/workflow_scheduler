@@ -47,20 +47,28 @@ test('task filters remain compact and maintenance controls can be expanded', asy
   await page.screenshot({path:'test-results/ui-polish-task-list.png',fullPage:true});
 });
 
-test('no failures uses full width for recent execution while failures stay visible', async ({page}) => {
-  let failures=[];
+test('overview omits recent executions and keeps failures actionable', async ({ page }) => {
+  let failures = [];
   await page.route('**/api/taskinfo/dashboard*', async route => {
-    const response=await route.fetch(), body=await response.json();
-    body.data.failure_rank=failures;
-    body.data.recent_runs=[{id:'acceptance__slow',name:'测试执行',state:0,start_time:'2026-11-05 08:52:23.000000',end_time:'2026-11-05 08:52:24.546499'}];
-    await route.fulfill({json:body});
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.failure_rank = failures;
+    body.data.recent_runs = [{ id: 'acceptance__slow', name: '测试执行', state: 0, end_time: '2026-11-05 08:52:24' }];
+    await route.fulfill({ json: body });
   });
-  await login(page,'dashboard');
-  await expect(page.locator('.issue-columns')).toHaveClass(/recent-only/);
-  await expect(page.locator('.recent-run-copy')).toContainText('2026-11-05 08:52:24');
-  await expect(page.locator('.recent-run-copy')).not.toContainText('.546499');
-  failures=[{id:'acceptance__slow',name:'需要处理的任务',count:2}];
+  await login(page, 'dashboard');
+  await expect(page.locator('.dashboard-summary .metric-card').first()).toBeEnabled();
+  await expect(page.getByRole('heading', { name: '最近执行记录' })).toHaveCount(0);
+  await expect(page.getByText('测试执行', { exact: true })).toHaveCount(0);
+  const failureHeading = page.getByRole('heading', { name: '过去 24 小时失败统计' });
+  await expect(failureHeading).toHaveCount(0);
+  await expect(page.locator('.cpu-panel')).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  failures = [{ id: 'acceptance__slow', name: '需要处理的任务', count: 2 }];
   await page.reload();
-  await expect(page.locator('.issue-columns')).not.toHaveClass(/recent-only/);
-  await expect(page.getByRole('button',{name:'需要处理的任务 2 次'})).toBeVisible();
+  await expect(failureHeading).toBeVisible();
+  await expect(page.getByText('测试执行', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '需要处理的任务 2 次' }).click();
+  await expect(page.getByRole('dialog', { name: /任务详情/ })).toBeVisible();
 });

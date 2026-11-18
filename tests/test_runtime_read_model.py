@@ -7,12 +7,42 @@ from unittest.mock import patch
 
 import test_local_integration
 from app import create_app
-from app.bootstrap import runtime_snapshot
+from app.bootstrap import runtime_snapshot, task_loader
 from app.bootstrap.timebase import business_now
 from app.api.task import views
 
 
 class RuntimeReadModelTests(unittest.TestCase):
+    def test_manifest_entry_is_used_verbatim_and_checked_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            entry = root / ' entry.py'
+            entry.touch()
+            with patch.object(task_loader, 'resolve_main_file', wraps=task_loader.resolve_main_file) as resolve:
+                spec = task_loader.load_task_spec('reports', 'daily', root, main_file=entry.name,
+                                                  main_file_options=[entry.name])
+            self.assertEqual(spec['main_file_path'], entry)
+            resolve.assert_called_once_with(root, entry.name)
+
+    def test_runtime_snapshot_reuses_task_descriptions_until_invalidated(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runtime_snapshot, 'snapshot_path', return_value=Path(directory) / 'state.json'), \
+                patch('app.settings.WFS_ENABLE_SCHEDULER', True), \
+                patch.object(task_loader, '_discover_task_specs', side_effect=[[{'pid': 'old'}], [{'pid': 'new'}]]) as discover, \
+                patch.object(task_loader, 'time') as clock, \
+                patch.object(views, '_event_snapshot', side_effect=lambda specs: {'tasks': specs}):
+            clock.monotonic.side_effect = [0, 5, 6]
+            task_loader.invalidate_task_cache()
+            self.addCleanup(task_loader.invalidate_task_cache)
+            runtime_snapshot.publish()
+            runtime_snapshot.publish()
+            self.assertEqual(discover.call_count, 1)
+            task_loader.invalidate_task_cache()
+            runtime_snapshot.publish()
+            self.assertEqual(discover.call_count, 2)
+            state = json.loads(runtime_snapshot.snapshot_path().read_text(encoding='utf-8'))
+        self.assertEqual(state['tasks'], [{'pid': 'new'}])
+
     def test_task_options_read_one_consistent_task_snapshot(self):
         specs = [{'pid': 'z', 'task_name': '任务 Z', 'folder_name': 'folder-z'},
                  {'pid': 'a', 'task_name': '', 'folder_name': 'folder-a'}]
@@ -86,7 +116,9 @@ class RuntimeReadModelTests(unittest.TestCase):
             events = client.get('/api/taskinfo/events').json['data']
             self.assertEqual(events['tasks'], data['tasks'])
             self.assertEqual(events['scheduler'], data['scheduler'])
-            dashboard = client.get('/api/taskinfo/dashboard').json['data']
+            with patch.object(views, '_failure_totals') as load_totals:
+                dashboard = client.get('/api/taskinfo/dashboard').json['data']
+                load_totals.assert_not_called()
             self.assertEqual(dashboard['summary']['pending'], 1)
             self.assertEqual(set(dashboard), {'summary', 'failure_rank', 'recent_runs', 'cpu_timeline'})
             self.assertEqual(dashboard['cpu_timeline']['warning'], metrics['warning'])

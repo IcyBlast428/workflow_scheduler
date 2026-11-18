@@ -6,7 +6,7 @@ import json
 import math
 from app.bootstrap.database import GaussDB
 from app.bootstrap.global_vars import ignores
-from app.bootstrap.operations import read_run
+from app.bootstrap import journal, operations
 from app.bootstrap.task_loader import discover_task_specs
 from app.extensions import scheduler
 from app.bootstrap.execution_state import state_status, is_failure
@@ -15,6 +15,23 @@ MAX_ACTIVE = 1000
 
 def timestamp(value):
     return value.isoformat(' ', timespec='seconds') if isinstance(value, dt.datetime) else str(value or '')
+
+def _active_record(run_id, journal_payload, execution_payload):
+    try:
+        spooled = journal.read_spooled(operations._directory, run_id)
+        if isinstance(spooled, dict):
+            return spooled
+    except (ValueError, OSError):
+        pass
+    for payload in (journal_payload, execution_payload):
+        if payload:
+            try:
+                record = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(record, dict):
+                return record
+    return None
 
 def snapshot(date=None):
     now = business_now()
@@ -65,24 +82,26 @@ def snapshot(date=None):
                     status = 'failed' if failed > timed_out else 'timed_out' if timed_out else 'interrupted' if interrupted else 'missed' if missed else 'skipped' if skipped else 'cancelled' if cancelled else 'success' if success == count else 'unknown'
                     records.append({'key': f'{pid}@{slot}', 'pid': pid, 'run_id': '', 'status': status, 'time': timestamp(last), 'start_time': timestamp(began), 'end_time': timestamp(ended), 'query_start': began.isoformat(' '), 'query_end': (ended - dt.timedelta(microseconds=1)).isoformat(' '), 'count': int(count), 'success': int(success), 'failed': int(failed), 'cancelled': int(cancelled), 'interrupted': int(interrupted), 'timed_out': int(timed_out), 'skipped': int(skipped), 'missed': int(missed)})
             if day == now.date():
-                rows = db.execute_query_sql("SELECT run_id,payload FROM wfs_executions WHERE status IN ('queued','running') AND created_at<? ORDER BY created_at DESC LIMIT ?", params=(end, MAX_ACTIVE + 1))
-                if len(rows) > MAX_ACTIVE:
-                    warnings.append('活动实例超过显示上限，部分实例未绘制。')
-                for run_id, payload in rows[:MAX_ACTIVE]:
-                    try:
-                        item = json.loads(payload)
-                    except (TypeError, ValueError):
-                        warnings.append('一条活动实例记录无法读取，请查看系统日志。')
-                        continue
-                    if not isinstance(item, dict):
-                        continue
-                    try:
-                        item = read_run(run_id)
-                    except (ValueError, OSError):
-                        pass
-                    if item.get('pid') not in pids or item.get('status') not in {'running', 'queued'}:
-                        continue
-                    active.append({'key': run_id, 'run_id': run_id, 'pid': item['pid'], 'status': item['status'], 'time': timestamp(now), 'start_time': item.get('start_time') or item.get('created_at') or timestamp(now), 'end_time': '', 'count': 1, 'failed': 0, 'inspectable': True})
+                rows = db.execute_query_sql("""
+                    SELECT e.run_id,e.payload,j.payload
+                    FROM (
+                        SELECT run_id,payload,created_at FROM wfs_executions
+                        WHERE status IN ('queued','running') AND created_at<?
+                        ORDER BY created_at DESC,run_id DESC LIMIT ?
+                    ) e LEFT JOIN wfs_state_journal_journal j ON j.run_id=e.run_id
+                    ORDER BY e.created_at DESC,e.run_id DESC
+                """, params=(end, MAX_ACTIVE + 1))
+        if day == now.date():
+            if len(rows) > MAX_ACTIVE:
+                warnings.append('活动实例超过显示上限，部分实例未绘制。')
+            for run_id, payload, journal_payload in rows[:MAX_ACTIVE]:
+                item = _active_record(run_id, journal_payload, payload)
+                if item is None:
+                    warnings.append('一条活动实例记录无法读取，请查看系统日志。')
+                    continue
+                if item.get('pid') not in pids or item.get('status') not in {'running', 'queued'}:
+                    continue
+                active.append({'key': run_id, 'run_id': run_id, 'pid': item['pid'], 'status': item['status'], 'time': timestamp(now), 'start_time': item.get('start_time') or item.get('created_at') or timestamp(now), 'end_time': '', 'count': 1, 'failed': 0, 'inspectable': True})
     pending = []
     if day == now.date():
         for task in tasks:

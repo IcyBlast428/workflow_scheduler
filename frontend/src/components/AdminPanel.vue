@@ -30,12 +30,12 @@
     <section v-show="section==='accounts'" class="admin-section" aria-labelledby="accounts-heading">
     <div class="section-heading"><h3 id="accounts-heading">账户管理</h3><p>填写账户信息，或从列表中选择已有账户。</p></div>
     <form class="filter-grid account-form" @submit.prevent="save">
-      <div class="form-row"><label for="account-name">用户名</label><input id="account-name" v-model.trim="form.username" class="input" required maxlength="100"></div>
-      <div class="form-row"><label for="account-password">设置密码</label><input id="account-password" v-model="form.password" class="input" type="password" autocomplete="new-password" minlength="12" placeholder="已有账户留空表示不变"></div>
-      <div class="form-row"><label for="account-role">角色</label><select id="account-role" v-model="form.role" class="select"><option value="viewer">普通用户（只读）</option><option v-if="form.role === 'operator'" value="operator">普通用户（原操作员）</option><option value="admin">管理员</option><option value="maintainer">任务维护员（按任务授权）</option></select></div>
-      <div class="filter-actions"><label class="checkbox-row"><input v-model="form.enabled" type="checkbox">允许登录</label><button class="btn primary" :disabled="saving">保存账户</button></div>
+      <div class="form-row"><label for="account-name">用户名</label><input id="account-name" v-model.trim="form.username" class="input" required maxlength="100" :disabled="saving"></div>
+      <div class="form-row"><label for="account-password">设置密码</label><input id="account-password" v-model="form.password" class="input" type="password" autocomplete="new-password" minlength="12" placeholder="已有账户留空表示不变" :disabled="saving"></div>
+      <div class="form-row"><label for="account-role">角色</label><select id="account-role" v-model="form.role" class="select" :disabled="saving"><option value="viewer">普通用户（只读）</option><option v-if="form.role === 'operator'" value="operator">普通用户（原操作员）</option><option value="admin">管理员</option><option value="maintainer">任务维护员（按任务授权）</option></select></div>
+      <div class="filter-actions"><label class="checkbox-row"><input v-model="form.enabled" type="checkbox" :disabled="saving">允许登录</label><button class="btn primary" :disabled="saving">{{ saving ? '正在保存…' : '保存账户' }}</button></div>
     </form>
-    <div class="table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in accounts" :key="item.username"><td>{{ item.username }}</td><td>{{ roles[item.role] }}</td><td>{{ item.enabled ? '启用' : '禁用' }}</td><td><span v-if="item.managed_by">通过服务配置管理</span><button v-else class="btn" @click="edit(item)">编辑</button></td></tr></tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in accounts" :key="item.username"><td>{{ item.username }}</td><td>{{ roles[item.role] }}</td><td>{{ item.enabled ? '启用' : '禁用' }}</td><td><span v-if="item.managed_by">通过服务配置管理</span><button v-else class="btn" :disabled="saving" @click="edit(item)">编辑</button></td></tr></tbody></table></div>
     </section>
     <section v-show="section==='audit'" class="admin-section" aria-labelledby="audit-heading"><div class="section-heading"><h3 id="audit-heading">最近 100 条操作记录</h3></div><div class="table-wrap"><table><thead><tr><th>操作人</th><th>操作</th><th>对象</th><th>结果</th><th>时间</th></tr></thead><tbody><tr v-for="(item,index) in records" :key="index"><td>{{ item.actor }}</td><td>{{ actionLabel(item.action) }}</td><td>{{ item.target || '-' }}</td><td><span class="tag" :class="item.outcome === 'success' ? 'success' : 'danger'">{{ item.outcome === 'success' ? '成功' : '失败' }}</span></td><td class="nowrap">{{ item.created_at }}</td></tr></tbody></table><p v-if="!records.length" class="table-empty-note">暂无操作记录。</p></div></section>
     </div>
@@ -56,13 +56,21 @@ import DatabaseConnections from './DatabaseConnections.vue';
 import PackageRepositorySettings from './PackageRepositorySettings.vue';
 import LogStorage from './LogStorage.vue';
 import HistoryStoragePolicy from './HistoryStoragePolicy.vue';
-defineProps({confirm:Function});
+import { useUnsavedChanges } from '../composables/useUnsavedChanges';
+const props = defineProps({ confirm: { type: Function, required: true } });
 const groups=[{id:'operations',label:'运行与发布',sections:[{id:'runtime',label:'运行策略'},{id:'release',label:'发布设置'}]},{id:'connections',label:'连接与依赖',sections:[{id:'connections',label:'数据库连接'},{id:'repository',label:'依赖仓库'}]},{id:'accounts',label:'账户与权限',sections:[{id:'accounts',label:'账户权限'}]},{id:'storage',label:'审计与存储',sections:[{id:'audit',label:'审计记录'},{id:'storage',label:'存储清理与备份'}]}];
 const sections=groups.flatMap(item=>item.sections);
 const visited=reactive(new Set());
 const section=ref('runtime');
 const group=computed(()=>groups.find(item=>item.sections.some(s=>s.id===section.value)) || groups[0]);
-function readSection(){const legacy=location.hash.slice(1).split('?')[0];const id=['connections','repository'].includes(legacy)?legacy:new URLSearchParams(location.hash.split('?')[1] || '').get('section');section.value=sections.some(s=>s.id===id)?id:'runtime';visited.add(section.value);}
+function readSection() {
+  const [route, query] = location.hash.slice(1).split('?');
+  // Keep the current section while the app confirms navigation outside settings.
+  if (!['admin', 'connections', 'repository'].includes(route)) return;
+  const id = route === 'admin' ? new URLSearchParams(query).get('section') : route;
+  section.value = sections.some(item => item.id === id) ? id : 'runtime';
+  visited.add(section.value);
+}
 function selectSection(id){section.value=id;visited.add(id);history.replaceState(null,'',location.pathname+'#admin?section='+id);}
 onMounted(()=>{readSection();window.addEventListener('hashchange',readSection);});onBeforeUnmount(()=>window.removeEventListener('hashchange',readSection));
 const accounts = ref([]), records = ref([]), error = ref(''), message = ref(''), saving = ref(false);
@@ -79,9 +87,35 @@ onBeforeUnmount(()=>{alive=false;});
 const loading = ref(false);
 const roles = {viewer:'普通用户',operator:'普通用户（原操作员）',admin:'管理员',maintainer:'任务维护员'};
 const form = reactive({username:'',password:'',role:'viewer',enabled:true});
-function edit(item) { Object.assign(form,{...item,password:'',enabled:Boolean(item.enabled)}); message.value = ''; }
+const { dirty: accountDirty, saved: markAccountSaved } = useUnsavedChanges(() => ({ ...form }));
+async function edit(item) {
+  if (saving.value) return;
+  if (accountDirty.value && !await props.confirm({
+    title: '放弃未保存的账户修改？',
+    message: '读取账户会覆盖表单中尚未保存的修改。',
+    confirmText: '放弃修改',
+    cancelText: '继续编辑',
+    danger: true,
+  })) return;
+  Object.assign(form, { username: item.username, password: '', role: item.role, enabled: Boolean(item.enabled) });
+  markAccountSaved();
+  message.value = '';
+}
 async function load() { if (loading.value) return; loading.value = true; try { [accounts.value, records.value] = await Promise.all([api.users(),api.audit(),loadRuntime()]); error.value = ''; } catch (err) { error.value = err.message; } finally { loading.value = false; } }
-async function save() { saving.value = true; try { message.value = await api.saveUser({...form}); form.password = ''; await load(); } catch (err) { error.value = err.message; } finally { saving.value = false; } }
+async function save() {
+  if (saving.value) return;
+  saving.value = true;
+  try {
+    message.value = await api.saveUser({ ...form });
+    form.password = '';
+    markAccountSaved();
+    await load();
+  } catch (err) {
+    error.value = err.message;
+  } finally {
+    saving.value = false;
+  }
+}
 onMounted(load);
 </script>
 

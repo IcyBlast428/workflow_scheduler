@@ -18,11 +18,17 @@ try {
     export const matrixRequests=[];
     export const api={operationalPolicy:request,notificationQueue:()=>request('notifications'),backupStatus:()=>request('backup'),recentExecutionMatrix:async limit=>{matrixRequests.push(limit);return {limit,tasks:[]};},gitlabState:()=>request('gitlab-state'),gitlabTasks:()=>request('gitlab-tasks')};
   `);
+  const modalPath = await moduleFile('modal', `
+    export default { props: ['open', 'label', 'panelClass'], emits: ['close'], setup(props, { slots }) {
+      return () => props.open ? slots.default() : null;
+    } };
+  `);
   async function component(name) {
     const { descriptor } = parse(await readFile(new URL(`../src/components/${name}.vue`, import.meta.url), 'utf8'));
     const script = compileScript(descriptor, { id: name });
     const source = script.content
       .replace("'../api'", JSON.stringify(mockPath.href))
+      .replace("'./ModalShell.vue'", JSON.stringify(modalPath.href))
       .replace("'../composables/useRefreshLoop.js'", "'../src/composables/useRefreshLoop.js'")
       .replace("'../workspacePreferences.js'", "'../src/workspacePreferences.js'")
       .replace("'../executionLabels'", "'../src/executionLabels.js'")
@@ -44,34 +50,39 @@ try {
     ['delete', '原任务 · 待确认删除', '查看删除变更'],
     ['recover', '原任务 · 待恢复关联', '恢复原任务'],
   ]) {
+    const context = {};
     const html = await renderToString(createSSRApp({ ...Changes, setup(props, context) {
       const state = Changes.setup(props, context);
       state.state.value = { enabled: true, complete: true, items: [{ id: kind, pid: 'original', kind,
         task_name: '原目录任务', group_name: 'group', folder_name: 'original', sha: 'abcdef123456', file_count: 1 }] };
+      state.loaded.value = true;
+      assert.equal(state.open.value, false);
+      state.open.value = true;
       return state;
-    } }));
-    assert.ok(html.includes('1 项 GitLab 变更待处理'), kind);
-    assert.ok(html.includes(label), kind);
-    assert.ok(html.includes('<h3>原目录任务</h3>'), kind);
-    assert.ok(html.includes(action), kind);
-    assert.ok(!html.includes('返回任务列表首页'), kind);
+    } }), context);
+    assert.ok(html.includes('1 项待处理'), kind);
+    assert.ok(!html.includes('原目录任务'), kind);
+    const dialog = context.teleports.body;
+    assert.ok(dialog.includes(label), kind);
+    assert.ok(dialog.includes('<h4>原目录任务</h4>'), kind);
+    assert.ok(dialog.includes(action), kind);
+    const collapsedContext = {};
     const collapsed = await renderToString(createSSRApp({ ...Changes, setup(props, context) {
       const state = Changes.setup(props, context);
       state.state.value = { enabled: true, items: [{ id: kind, kind, sha: 'abc', task_name: '任务' }] };
-      assert.equal(state.expanded.value, true);
-      state.toggleExpanded();
-      // A subsequent polling response and an error must respect the manual choice.
+      state.loaded.value = true;
+      state.open.value = true;
+      state.open.value = false;
+      // Polling updates the footer without reopening the dialog.
       state.state.value = { ...state.state.value, items: [...state.state.value.items] };
       state.error.value = '连接暂不可用';
-      assert.equal(state.expanded.value, false);
-      state.toggleExpanded();
-      assert.equal(state.expanded.value, true);
-      state.toggleExpanded();
+      assert.equal(state.open.value, false);
       return state;
-    } }));
-    assert.ok(collapsed.includes('aria-expanded="false"'), kind);
-    assert.match(collapsed, /class="changes-content" style="display:none;"/);
-    assert.ok(collapsed.includes('查看待处理变更'), kind);
+    } }), collapsedContext);
+    assert.ok(collapsed.includes('aria-haspopup="dialog"'), kind);
+    assert.ok(collapsed.includes('查看连接与检查状态'), kind);
+    assert.ok(collapsed.includes('检查异常'), kind);
+    assert.ok(!collapsedContext.teleports.body.includes('changes-content'), kind);
   }
   const Workbench = await component('OperationalWorkbench');
   const { requests } = await import(mockPath.href);
@@ -196,7 +207,7 @@ try {
       else delete globalThis[key];
     }
   }
-  console.log('Pending changes respect manual collapse; recent-result counts default to 10 and persist per account with safe storage fallback.');
+  console.log('GitLab stays in its footer until the dialog is opened; recent-result counts default to 10 and persist per account with safe storage fallback.');
   console.log('All GitLab change kinds render without task rows; admin sections load independently and tolerate missing branches.');
 } finally {
   await Promise.all(temporary.map(path => unlink(path)));

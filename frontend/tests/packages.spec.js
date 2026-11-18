@@ -14,7 +14,8 @@ test('task examples replace ZIP uploads and repository settings have their own n
   await expect(page).toHaveURL(/#admin\?section=repository$/);
   await expect(page.getByLabel('依赖安装方式')).toBeVisible();
   await page.getByRole('button', {name:'任务列表',exact:true}).click();
-  await expect(page.getByLabel('GitLab 任务变更')).toContainText('配置 GitLab');
+  await page.getByRole('button', { name: '查看连接与检查状态', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'GitLab 连接与检查状态', exact: true })).toContainText('配置 GitLab');
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

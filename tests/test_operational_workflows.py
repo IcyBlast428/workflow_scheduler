@@ -157,6 +157,20 @@ class OperationalTests(unittest.TestCase):
             with self.assertRaises(packages.PackageError):self.activate(data)
         self.assertFalse(packages.task(data['pid'])['active_version'])
 
+    def test_policy_change_while_hashing_release_blocks_activation(self):
+        data = self.ready(self.new())
+        manifest = packages._manifest
+
+        def change_policy(code):
+            current = policy.load('release')
+            policy.save('release', '', {**current, 'require_trial': True}, 'admin')
+            return manifest(code)
+
+        with patch.object(packages, '_manifest', side_effect=change_policy):
+            with self.assertRaisesRegex(packages.PackageError, '发布策略已变化'):
+                self.activate(data)
+        self.assertFalse(packages.task(data['pid'])['active_version'])
+
     def test_legacy_ci_settings_do_not_block_release_or_query_gitlab(self):
         from app.bootstrap import release_controls
         old = {**policy.RELEASE_DEFAULT, 'revision': 1, 'require_ci': True, 'required_jobs': ['old-job']}

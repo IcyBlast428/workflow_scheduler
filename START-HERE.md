@@ -1,99 +1,174 @@
-# 从这里开始：内网部署
+# 全新投产操作手册
 
-本包是当前平台代码、已构建前端和部署工具。使用 **root + `/data/workflow_scheduler` + Python 3.12 + systemd + GaussDB/DWS**。服务器不需要 Node、Git 或 Docker。
+本手册从空的部署目录和平台 schema 开始，适用于当前稳定版本。平台代码部署一次，业务任务随后通过页面单独发布。已有生产实例继续运行时，不执行本手册的全新安装步骤；更新与恢复另见 [systemd 运维手册](docs/systemd-deployment.md)。
 
-也可将部署包内容提交到内网 GitLab 后再 clone 到服务器。新版校验清单同时记录 UTF-8 文本的原始哈希和 LF 换行哈希，允许 Git 转换 CRLF/LF；真实内容变化、缺失文件和二进制变化仍会拒绝部署。旧包没有 LF 哈希时仍严格校验，需使用对应原包的换行核对工具，不能直接删除或任意重算清单。
+## 1. 确认部署信息
 
-部署包不包含 `.github/`：该目录仅用于源码仓库的 GitHub 自动检查，平台运行和内网 GitLab 部署均不依赖它。提交部署包到内网 GitLab 时，请完整保留 `app/dist/`、驱动文件和 `PACKAGE-MANIFEST.json`；在服务器执行 `bash deploy.sh verify`，通过后再继续部署。
+| 项目 | 本版约定 |
+| --- | --- |
+| 服务器 | Linux x86_64，systemd，root 用户 |
+| 目录 | `/data/workflow_scheduler` |
+| Python | 3.12，包含 venv 和 pip |
+| 平台数据库 / schema | GaussDB/DWS：`immpdb` / `wfs` |
+| 连接标识 | `immpdb_wfs`（新安装默认值，可在引导中修改） |
+| Nacos 配置 | 公共命名空间，group=`gauss`，dataId=`gauss.immpdb.wfs.json` |
+| 服务 | 一个 `wfs.service`，内部管理 Web 和单实例 Scheduler |
+| Web / 调度控制端口 | `8008` / `127.0.0.1:8009`（8009 不对外开放） |
+| 代理访问示例 | `http://wfs.example.com:8000/`，域名指向 Nginx 机器 |
 
-GitLab 流水线暂不启用：包内 `.gitlab-ci.yml` 明确禁止创建流水线，请一并覆盖内网仓库中的旧文件。平台不再检查流水线结果，旧 CI 发布策略自动忽略；代码检查、依赖准备、手动发布、试运行和发布时间窗口仍保留。已在运行或排队的旧流水线需在 GitLab 手动取消。
+平台运行不需要 Node、npm 或 Docker。只有通过 GitLab clone 交付代码时才需要 Git。Nginx 可位于另一台机器并使用 Docker；它不是平台的启动依赖。
 
-重新部署后恢复原任务：保留数据库、密钥和 `data/`。若原目录被识别为新任务但已有旧任务占用，管理员可在任务变更中点击“恢复原任务”并确认原编号，平台将恢复回收站记录并绑定原目录。之后重新检查 GitLab、获取代码、准备依赖并发布；调度先保持暂停，确认执行正常后启用原调度策略。即使 GitLab 提交没有变化，本地入口或 Python 环境丢失时仍可重新发布。无需改目录或手动删除数据库记录。
+先由管理员准备 Python 3.12、unixODBC 和匹配服务器/数据库版本的 DWS ODBC 客户端。包内包含已构建前端和驱动文件，但不包含 Python 安装程序、系统软件包或完整离线 wheels。平台服务器需要能访问 Nacos、GaussDB、GitLab API 和 Nexus；代理机器需要能访问平台服务器的 8008。
 
-## 首次安装：解压后执行一条命令
+## 2. 准备数据库和 Nacos
 
-先准备 Linux x86_64 服务器、Python 3.12（含 venv/pip）、unixODBC，以及可访问的 Nacos、GaussDB 和 Nexus。GaussDB 数据库由 DBA 提前建立，见 [数据库准备](deploy/root-test/DATABASE.md)。ZIP 不包含 Python 安装程序、操作系统软件包或完整离线 wheels。
+DBA 确认数据库 `immpdb` 可用，并为平台分配专用空 schema `wfs`。如果 `immpdb` 已存在，不重复建库，不清空其中其他 schema。全新平台不得复用已有任务数据的 `wfs`；如果该 schema 已被占用，应使用另一空 schema 并同步修改连接标识和 Nacos 配置。
+
+平台表全部建在 `immpdb.wfs`，任务业务表由各业务数据库单独管理。唯一建表基线为 `schema/gauss.sql`，共 **32 张表**；安装器会自动初始化空 schema，不需要逐张手动建表。账号权限、DBA 手动建表方案及完整表名见 [数据库准备](deploy/root-test/DATABASE.md)。本版基线已包含 GaussDB 空字符串视为 NULL 时的字段定义，无需在全新安装后再运行旧修复 SQL。
+
+在 Nacos 公共命名空间发布 JSON，group 为 `gauss`，dataId 为 `gauss.immpdb.wfs.json`：
+
+```json
+{
+  "host": "高斯服务器地址",
+  "port": 8000,
+  "db": "immpdb",
+  "schema": "wfs",
+  "user": "平台数据库账号",
+  "password": "数据库密码的 Base64 编码"
+}
+```
+
+`port` 改为实际数据库端口。Base64 是编码，不是加密；沿用平台现有 Nacos 约定。可在受信任终端生成，不将明文密码放入命令历史：
 
 ```bash
-# ZIP 内已有 workflow_scheduler 这一层目录；仅在全新服务器上这样解压
+python3.12 -c 'import base64,getpass; print(base64.b64encode(getpass.getpass("Database password: ").encode()).decode())'
+```
+
+部署时另需输入 Nacos 地址（含 `/nacos`）、Nacos 用户名和登录密码；Nacos 登录密码不是上述数据库密码，也不填 Base64。
+
+## 3. 将发布文件放到服务器
+
+以下两种方式选一种。先确认 `/data/workflow_scheduler` 是本次新建的目录，避免覆盖已有实例。
+
+### 方式 A：直接解压部署 ZIP
+
+将本次发布 ZIP 放到 `/tmp`，把示例文件名换成实际文件名：
+
+```bash
 mkdir -p /data
-unzip workflow_scheduler-*.zip -d /data
+unzip /tmp/workflow_scheduler-发布版本.zip -d /data
 cd /data/workflow_scheduler
+```
+
+ZIP 已含 `workflow_scheduler/` 这一层，不要再次解压出嵌套同名目录。不要用通配符一次解压多个版本。
+
+### 方式 B：通过内网 GitLab 转存部署包
+
+在交付电脑解压部署包，将完整内容提交到内网 GitLab，再在服务器 clone 到 `/data/workflow_scheduler`。必须提交同一版本的 `app/dist/`（包括 `.vite/manifest.json`）、驱动文件、`.gitattributes` 和 `PACKAGE-MANIFEST.json`。
+
+部署包不含 `.github/`，平台运行不依赖它；`.gitlab-ci.yml` 禁止创建流水线，本阶段不启用 CI。不要提交生产 `runtime.env`、`.venv`、`data/` 或日志。
+
+Git 转存允许 UTF-8 文本的 CRLF/LF 换行转换，但真实内容变化、文件丢失或二进制变化仍会报错。不要删除或手工重算清单来绕过报错。如果仅 clone 源码仓库而未携带部署包清单，安装器仍会检查前端构建资源，但不能据此证明完整发布包一致。
+
+```bash
+cd /data/workflow_scheduler
+bash deploy.sh verify
+```
+
+脚本默认查找 `python3.12`。若服务器将 Python 3.12 命名为 `python3`，先核对版本，再使用 `WFS_DEPLOY_PYTHON=python3 bash deploy.sh verify`；后续命令同理。不要使用指向旧版 Python 的 `python`。
+
+## 4. 创建环境、安装依赖并启动
+
+默认平台依赖源由 `scripts/deploy.py` 的 `DEFAULT_INDEX` 指定。此索引需包含 `requirements-linux-py312.lock` 的全部兼容包及其依赖，失败不会回退公网。
+
+推荐直接运行：
+
+```bash
 bash deploy.sh
 ```
 
-安装引导会依次：
+安装顺序：校验文件及前端 → 创建 `.venv` → 安装锁定依赖并执行 pip check → 设置 admin 密码与固定密钥 → 输入 Nacos 与数据库标识 → 检查 DWS 驱动和平台表 → 安装、启用并启动 `wfs.service` → 检查两个进程就绪。
 
-1. 校验部署包，创建 `.venv`，从内网 Nexus 安装锁定依赖。
-2. 提示设置 admin 登录密码（至少 12 位），自动生成并保存两份独立密钥。
-3. 提示输入 Nacos 地址、用户名、密码和平台数据库标识，默认 `wfsscheduler_wfs`。
-4. 检查 DWS 驱动与数据库，给空 schema 初始化 32 张平台表。已有本版表保留数据并校验；自动修正执行回执、队列的可空编号/消息以及已清理日志路径的字段约束，兼容将空字符串视为 NULL 的数据库。
-5. 从项目根目录唯一的 `wfs.service` 模板安装并启动服务（`User=root`、`Group=root`，无需创建 `wfs` 用户）；它内部管理 Web 与单实例 Scheduler，检查就绪后输出访问地址。
+管理员密码至少 12 位。首次生成的配置保存在 `deploy/root-test/runtime.env`，权限为 0600；`root-test` 是保留的目录名称，实际用于本版生产部署，不需要改名。重复运行会保留密码摘要和加密密钥。
 
-完成后访问 **`http://服务器IP:8008/`**，用户名 **admin**，密码是刚才设置的密码。8009 只供本机 Web 与 Scheduler 通信。外部访问需要服务器网络允许 8008；脚本不会修改防火墙。
-
-生产目录、Python、数据、日志和驱动路径均统一到 `/data/workflow_scheduler`。普通 HTTP 下也支持手动执行、补跑和试运行；保持 `runtime.env` 中的 `WFS_COOKIE_SECURE=false`。原本使用另一套 service 的安装，请先按 [已有安装更新说明](docs/systemd-deployment.md#4-从双服务迁移及更新已有安装) 核对原配置与数据位置。
-
-生产只使用根目录的一份 `wfs.service` 模板，运行用户和组统一为 root。`deploy/root-test/` 仅保留原有运行配置和驱动配置，不再提供另一份 service。生产只需要安装一个 `wfs.service`，无需再安装 `wfs-scheduler.service`。新版本不会打包旧调度 service；从双服务升级时，请先按 [迁移步骤](docs/systemd-deployment.md#4-从双服务迁移及更新已有安装) 停用旧服务，避免它重新启动。
-
-IE、IE 兼容模式和 Edge 的 IE 模式会显示浏览器更换提示。已知 IE 标识会被服务端直接拒绝，提示页无需 JavaScript；前端同时检测兼容模式。请使用 Google Chrome 或新版 Microsoft Edge。
-
-## 依赖仓库与离线安装
-
-默认索引为 `http://nexus.immp.icbc/repository/pypi-hosted/simple/`，按你提供的无认证仓库配置。仓库须包含 `requirements-linux-py312.lock` 的全部依赖；安装失败不会退回公网。
+其他安装方式（三选一，不重复执行）：
 
 ```bash
-# 换成其他内网索引
+# 改用另一内网索引
 bash deploy.sh install --index-url https://内部仓库/repository/pypi/simple/
 
-# 完全离线：先在相同 Linux / CPU / Python 版本准备全部 wheels 并拷入
+# 完全离线：必须是匹配 Linux x86_64 / Python 3.12 的完整 wheels
 bash deploy.sh install --wheelhouse /data/wheels
 
-# 如果你已经手动建好 .venv 并安装了锁定依赖
+# 已手动安装完锁定依赖时使用，仍检查 pip check
 bash deploy.sh install --skip-dependencies
 ```
 
-手动准备虚拟环境的方法：`python3.12 -m venv .venv`，之后用 `.venv/bin/python -m pip install -r requirements-linux-py312.lock` 安装（先配置内网 pip 源）。任务自己的依赖源仍在平台管理页面设置，与平台安装源分开。
+如需自己建虚拟环境，可执行：
 
-## 常用命令
+```bash
+python3.12 -m venv .venv
+bash deploy.sh install  # 使用已创建的 .venv 安装锁定依赖并继续部署
+```
 
-全部从 `/data/workflow_scheduler` 执行：
+安装器禁用 pip 配置文件和额外索引；需要仓库认证时使用受限 `.netrc`，或选离线 wheels。平台安装依赖与任务安装依赖是两套配置，完成本步骤后仍需在页面设置任务仓库。
 
-| 命令 | 用途 |
+## 5. 验证服务及代理访问
+
+```bash
+cd /data/workflow_scheduler
+bash deploy.sh status
+curl --fail http://127.0.0.1:8008/api/user/ready
+curl --fail http://127.0.0.1:8009/api/user/ready
+```
+
+两个就绪接口成功后，直连地址是 `http://平台服务器IP:8008/`，登录名为 `admin`，密码是安装时设置的密码。使用 Chrome 或新版 Edge；IE/IE 模式不支持。
+
+如果通过另一台 Docker Nginx 访问，按 [Nginx 配置说明](docs/nginx-deployment.md) 配置。示例链路为浏览器 → `wfs.example.com:8000` → Nginx → 平台 `192.0.2.10:8008`。将示例域名和 IP 换成现场地址，并把域名解析到 Nginx 机器。HTTP 部署保持 `WFS_COOKIE_SECURE=false`。
+
+## 6. 首次登录后配置仓库并发布任务
+
+1. **任务依赖仓库**：管理员菜单 → 平台设置 → 连接与依赖 → 依赖仓库，选择 Nexus 并保存实际 `/simple/` 索引地址；无认证时账号密码留空。初始模式是离线，不会因平台通过 Nexus 安装而自动切换。
+2. **GitLab 连接**：代码更新 → GitLab 连接与目录规则，填写根地址、项目 ID/路径、目标分支 `main`、具有项目读取权限的 `read_api` 令牌，任务根目录为 `app/jobs`。仅 `read_repository` 不足以覆盖平台所用的分支和比较 API。内网 HTTP 需显式勾选允许 HTTP，然后保存并立即检查。
+3. **提交任务代码**：按 `app/jobs/<任务组>/<任务目录>/main.py` 提交并合并到目标分支；同目录可有多层模块、资源和配置文件。无需 `.wfs-task.json`，任务编号由平台生成。
+4. **发布入口**：任务列表 → GitLab 任务变更 → 审查并发布，选择名称与 Python 入口、获取版本，核对差异与依赖，点击“识别并安装依赖”，通过后“发布此版本”。推送代码不会自动发布或启用调度。
+5. **依赖处理**：没有 `requirements.txt` 时识别 import 及引用公共模块的导入依赖。可在页面填写完整依赖清单；例如 pandas 的 `.style` 需要手动追加 `Jinja2`，当前稳定版不自动推断该可选功能。每个任务版本有独立环境，发布后复用，不继承平台环境。Nexus 缺包时按提示补齐，不改用公网。
+6. **验证与调度**：先手动执行，查看结果、日志、输出文件及实际业务结果，再配置并启用调度。用到业务库的任务先配置连接和授权。平台默认不授权业务库、不自动开启重试或补跑。
+
+“代码更新”主要显示待合并分支与平台版本差异；没填平台部署基线时可能没有平台差异，新任务仍应在任务列表审查。不要为了看到新任务而填写不确定的 SHA。
+
+详细说明：[任务发布](docs/task-packages.md) · [依赖与 Nexus](docs/task-environments-and-nexus.md) · [多层目录与输出](docs/task-outputs-and-projects.md) · [GitLab 配置](docs/gitlab-updates.md)。
+
+## 7. 投产完成标准与日常保管
+
+- 服务 active，Web 和 Scheduler 就绪；代理登录正常。
+- 平台库与 schema 正确，首次任务列表为空，未导入旧平台数据。
+- GitLab 扫描成功，任务依赖可从内网仓库准备。
+- 首个任务手动执行成功，日志/输出可查看，实际业务结果正确；再启用计划。
+- 备份平台数据库、`data/`、`logs/` 和 `deploy/root-test/runtime.env`；密钥备份单独受控保管。数据库中的 GitLab、Nexus、业务连接密文需要原密钥才能恢复。
+
+用户已反馈当前稳定版本在生产完成任务发布、手动补充 Jinja2、运行及启用调度；这不代替新服务器的驱动、网络、权限和业务验收。详细边界见 [验证范围](deploy/root-test/VALIDATION.md)。
+
+## 8. 常见问题与命令
+
+| 现象 | 处理 |
 | --- | --- |
-| `bash deploy.sh status` | 查看 wfs.service 状态 |
-| `bash deploy.sh logs` | 查看最近 100 条服务日志 |
-| `bash deploy.sh check` | 只读检查依赖、配置、DWS 驱动和表结构 |
-| `bash deploy.sh stop` | 停止 Web 和 Scheduler；先在页面维护并排空任务 |
-| `bash deploy.sh start` | 检查数据库后启动已有服务，并验证就绪 |
-| `bash deploy.sh configure` | 停机时调整 Nacos 连接；保留密码摘要和密钥 |
-| `bash deploy.sh verify` | 校验部署包文件，确认拷贝完整 |
+| 部署包文件校验失败 | 核对发布版本与完整文件，使用同一发布包；不要删除清单绕过 |
+| 缺前端文件、npm/vite 报错 | 携带完整已构建 `app/dist/`；生产无需 npm 构建 |
+| `libodbc.so.2` 或 DWS 库加载失败 | 安装 unixODBC，检查 `deploy/root-test/odbc/odbcinst.ini` 和驱动版本 |
+| Nacos 认证/读取失败 | 核对地址、登录凭据、公共命名空间、group 和 dataId |
+| 平台表已存在 | 确认是否误用了旧 schema；不要删表冒充全新安装 |
+| GitLab 或发布配置无法解密 | 恢复保存配置时的原密钥；不要重新生成密钥或清空任务表 |
+| 缺包或 pandas 提示需要 jinja2 | 用原代码重新准备依赖，保留完整清单并追加包，发布新版本 |
+| GitLab 目标变化 | 重新检查并核对任务变化；原代码重建依赖仅在任务目录内容和绑定未变时允许发布 |
 
-配置保存在 `deploy/root-test/runtime.env`（0600）。重复安装会沿用密码和密钥。失败时修正提示的问题，再运行同一安装命令即可；脚本不会覆盖另一套服务定义，也不会在服务运行中更新依赖或建表。
+```bash
+bash deploy.sh check      # 只读检查前端、依赖、连接、驱动和表
+bash deploy.sh logs       # 最近服务日志
+bash deploy.sh stop       # 日常停机前先在页面进入维护并排空任务
+bash deploy.sh start      # 检查数据库后启动已有服务
+bash deploy.sh configure  # 停机时修改 Nacos 配置，保留固定密钥
+```
 
-## 高斯驱动与常见问题
-
-- 缺少 Python 或 venv：先由服务器软件源安装 Python 3.12 和对应 venv/pip 组件。
-- `libodbc.so.2` 缺失：安装系统 unixODBC。随包 DWS 客户端不能代替系统驱动管理器。
-- DWS 库加载失败：使用与服务器和数据库版本匹配的厂商客户端。默认路径在 `deploy/root-test/odbc/odbcinst.ini`，私有路径可在 `runtime.env` 中调整 `ODBCSYSINI`、`ODBCINI`、`LD_LIBRARY_PATH`。保留原包配置以便完整性校验。
-- Nacos 认证/配置失败：地址通常包含 `/nacos`，检查账号权限和 `group=gauss`、`dataId=gauss.<数据库>.<schema>.json`。
-- 数据库不存在或没有权限：DBA 先建库、授权；安装脚本不会创建数据库用户或数据库。
-- 浏览器无法连接：先 `bash deploy.sh status` 和 `logs`，再检查服务器 8008 的网络访问；页面 HTTPS 代理部署见 [systemd 手册](docs/systemd-deployment.md)。
-
-## 更新与备份
-
-这是全新安装入口。已有安装不要直接用 ZIP 覆盖运行目录：先进入维护、排空执行、停止 wfs.service（旧版迁移时同时停用旧调度服务），备份数据库、`data/`、`logs/` 和 `deploy/root-test/runtime.env`，再按运维方案更新代码。固定密钥必须保留。脚本不会自动进行数据库版本升级或回滚。
-
-ZIP 不包含本机任务、账号、密钥、日志、输出、虚拟环境或 Git 历史；旧集成配置中的账号信息已替换为空模板。`PACKAGE-MANIFEST.json` 记录每个文件摘要以及本包是否包含未提交的工作区修改。本次前端与架构改动均随包包含，不只打包上次 Git 提交。
-
-平台部署和任务发布分开：平台只在更新自身代码时部署；业务任务仍按现有 GitLab 审查、准备依赖、显式发布流程操作。
-
-目标内网 Nacos、Nexus、DWS 驱动和 GaussDB 实库需现场验收；本机 PostgreSQL 协议测试不能替代它们。具体见 [验证范围](deploy/root-test/VALIDATION.md)。
-
-## 新任务与代码差异
-
-“代码更新”比较待合并分支和已部署版本，不以任务目录数量判断有无更新。新任务直接提交到目标分支后，在“任务列表 → GitLab 任务变更”审查发布；无需填写平台部署基线。“代码更新”中的任务待处理数量提供跳转入口，与版本差异数量分别展示。
-
-同目录旧任务如需保留历史，请使用恢复关联；确需完全重置并重新发布，请见 [单任务清理操作](docs/reset-task.md)。
-
-手动执行遇到 `run_id violates not-null constraint`，请见 [GaussDB 空字符串兼容性修复](docs/gauss-empty-string-compatibility.md)。现有生产可单独修正字段约束，无需重建数据库或删除任务。
+旧安装恢复、单任务清理、历史兼容修复不属于首次投产步骤，按 [运维手册](docs/systemd-deployment.md)、[任务清理](docs/reset-task.md) 和 [空字符串兼容说明](docs/gauss-empty-string-compatibility.md) 单独处理。不要在生产运行开发回归测试命令。

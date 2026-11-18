@@ -86,6 +86,7 @@ def _drain_output(pipe, chunks, run_id, flags):
 
 def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_name='', folder_name='', python_executable='', max_instances=1, reservation=None, run_id=None, limits=None, scheduled_time=None):
     from app.bootstrap import admission
+    from app.bootstrap.operations import touch_run, forget_run_heartbeat
     with admission.lock:
         draining = admission.maintenance()['enabled']
         reservation = reservation if reservation is not None else (None if draining else runnings.claim(PID, max(1, int(max_instances or 1)), group_name))
@@ -231,7 +232,7 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
                         process.wait(timeout=5)
                     break
                 if time.monotonic() - heartbeat >= 5:
-                    update_run(run_id, persist=False)
+                    touch_run(run_id)
                     heartbeat = time.monotonic()
                 try:
                     state = process.wait(timeout=0.2)
@@ -276,4 +277,6 @@ def execute_py(path, PID, task_name='', dir_name='', timeout_seconds=0, group_na
             save_history(record)
         except Exception:
             logger.exception('execution completion journal failed: %s', run_id)
+        finally:
+            forget_run_heartbeat(run_id)
     return state

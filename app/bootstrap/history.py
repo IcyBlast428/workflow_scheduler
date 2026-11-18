@@ -103,6 +103,9 @@ def archive_batch(cutoff, size=200):
                     db.execute_sql('UPDATE wfs_history_rollup SET archived_failures=archived_failures+? WHERE pid=?', params=(count, pid))
                 else:
                     db.execute_sql('INSERT INTO wfs_history_rollup(pid,archived_failures) VALUES(?,?)', params=(pid, count))
+                # These failures already contributed to the cumulative total.
+                # Move only its archive watermark alongside the verified history.
+                db.execute_sql('UPDATE wfs_run_totals SET archived_failures=archived_failures+? WHERE pid=?', params=(count, pid))
             # 副本校验、失败统计转移和源行删除同事务提交，任一步失败保留在线记录。
             db.execute_sql('DELETE FROM wfs_run_history WHERE ' + predicate.replace('h.', ''), params=keys)
             db.set_commit()

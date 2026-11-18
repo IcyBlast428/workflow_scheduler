@@ -43,8 +43,16 @@
                 >
                   {{ row.name }}
                 </button>
-                <div class="mono muted clip" :title="row.id">{{ row.id }}</div><div v-if="row.tags?.length" class="filter-actions"><span v-for="tag in row.tags" :key="tag" class="tag info">{{ tag }}</span></div>
-                <div class="mobile-task-status"><span class="tag" :class="stateClass(row)">{{ stateText(row) }}</span><span class="tag" :class="lastStatusClass(row.last_status)">{{ lastStatusText(row.last_status) }}</span><small>活动 {{ row.running_instances || 0 }} / {{ row.max_instances || 1 }}</small><small>下次 {{ row.next_run_time || '未安排' }}</small></div>
+                <div v-if="density !== 'compact'" class="task-row-id mono muted clip" :title="row.id">{{ row.id }}</div>
+                <div v-if="row.tags?.length" class="filter-actions"><span v-for="tag in row.tags" :key="tag" class="tag info">{{ tag }}</span></div>
+                <div class="mobile-task-status">
+                  <span class="tag" :class="stateClass(row)">{{ stateText(row) }}</span>
+                  <span class="tag" :class="lastStatusClass(row.last_status)">{{ lastStatusText(row.last_status) }}</span>
+                  <small v-if="columns.includes('group')">组名 {{ row.group_name || '—' }}</small>
+                  <small v-if="columns.includes('pending')">活动 {{ row.running_instances || 0 }} / {{ row.max_instances || 1 }}</small>
+                  <small v-if="columns.includes('failed')">连续 / 累计失败 {{ row.failed_times || 0 }} / {{ row.total_failures || 0 }}</small>
+                  <small>下次 {{ row.next_run_time || '未安排' }}</small>
+                </div>
                 <button v-if="canManage && change(row.id)" class="task-change-badge tag" :class="change(row.id).kind === 'delete' ? 'danger' : 'warning'" @click="$emit('release', row.id)">{{ change(row.id).kind === 'delete' ? 'GitLab 已删除 · 确认删除' : 'GitLab 有更新 · 审查发布' }}</button>
                 <div
                   v-if="row.config_error"
@@ -301,5 +309,9 @@ function callTaskTitle(row) {
 
 <style scoped>
 .task-table.hide-group .col-group,.task-table.hide-group tr>:nth-child(2),.task-table.hide-pending .col-pending,.task-table.hide-pending tr>:nth-child(4),.task-table.hide-failed .col-failed,.task-table.hide-failed tr>:nth-child(6){display:none}
-.task-table.hide-group.hide-pending.hide-failed{min-width:720px}.task-table.compact td{padding-block:9px}.task-table.compact .task-name-link{font-size:15px}.task-table.compact .task-name-copy{gap:4px}.task-table.compact .btn{min-height:34px;padding-block:6px}
+.task-table.hide-group.hide-pending.hide-failed{min-width:720px}.task-table.compact td{padding-block:9px}.task-table.compact .task-name-copy{gap:4px}.task-table.compact .btn{min-height:34px;padding-block:6px}
+@media (max-width: 560px) {
+  .task-table.compact tbody tr { padding-block: 10px; }
+  .task-table.compact td { padding-block: 0; }
+}
 </style>

@@ -581,8 +581,7 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
     from app.bootstrap.release_controls import enforce, recheck
     from app.bootstrap import admission
     receipt = enforce(release(pid, version))
-    with _configuration_lock, admission.lock:
-        recheck(receipt)
+    with _configuration_lock:
         record, data = (task(pid), release(pid, version))
         if record['revision'] != revision or record.get('deleted_at') or record.get('pending'):
             raise PackageError('任务状态已变化，请刷新后重新发布。', 409)
@@ -593,6 +592,8 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
         if not rollback and data.get('base_version') != record.get('active_version'):
             raise PackageError('预览后当前版本发生变化，请重新上传以核对差异，或选择已发布版本回滚。', 409)
         if record.get('active_version') == version:
+            with admission.lock:
+                recheck(receipt)
             return record
         from app.bootstrap.task_loader import _record_maps
         config = _record_maps().get(pid)
@@ -624,34 +625,38 @@ def publish(pid, version, revision, actor, rollback=False, reason=''):
             record.update(group_name=data['git_source']['group_name'], folder_name=data['git_source']['folder_name'])
         elif record.get('git_source'):
             record['git_source'] = {**record['git_source'], 'sha': '', 'fingerprint': ''}
-        record = _write_task(record, expected=revision)
-        try:
-            aps_start(task_pid=pid, action='refresh')
-            # 只有调度器刷新成功才能清除 pending，清除结果随后也必须持久化。
-            record.pop('pending', None)
-            record['last_published_at'] = str(business_now())
-            record['last_published_by'] = actor
-            data.update(status='applied', message='调度器已确认此版本。', published_at=record['last_published_at'], published_by=actor, publish_reason=reason.strip())
+        # Keep files stable under the configuration lock during verification.
+        # Take the admission lock only when the validated release is committed.
+        with admission.lock:
+            recheck(receipt)
+            record = _write_task(record, expected=revision)
             try:
-                data['schedule_snapshot'] = load_schedule(pid)
-            except ValueError:
-                data['schedule_snapshot'] = None
-            _write_release(data)
-            record = _write_task(record, expected=record['revision'])
-        except Exception as exc:
-            _write_task(previous, expected=record['revision'])
-            try:
-                if previous.get('active_version'):
-                    aps_start(task_pid=pid, action='refresh')
-                else:
-                    from app.extensions import scheduler
-                    if scheduler.get_job(pid):
-                        scheduler.remove_job(pid)
-            except Exception:
-                logger.exception('old package scheduler restoration failed %s', pid)
-            data.update(status='ready', message='激活失败，已恢复上一版本；请检查配置后重试。')
-            _write_release(data)
-            raise PackageError('发布失败，上一版本仍保留：' + str(exc), 409) from exc
+                aps_start(task_pid=pid, action='refresh')
+                # 只有调度器刷新成功才能清除 pending，清除结果随后也必须持久化。
+                record.pop('pending', None)
+                record['last_published_at'] = str(business_now())
+                record['last_published_by'] = actor
+                data.update(status='applied', message='调度器已确认此版本。', published_at=record['last_published_at'], published_by=actor, publish_reason=reason.strip())
+                try:
+                    data['schedule_snapshot'] = load_schedule(pid)
+                except ValueError:
+                    data['schedule_snapshot'] = None
+                _write_release(data)
+                record = _write_task(record, expected=record['revision'])
+            except Exception as exc:
+                _write_task(previous, expected=record['revision'])
+                try:
+                    if previous.get('active_version'):
+                        aps_start(task_pid=pid, action='refresh')
+                    else:
+                        from app.extensions import scheduler
+                        if scheduler.get_job(pid):
+                            scheduler.remove_job(pid)
+                except Exception:
+                    logger.exception('old package scheduler restoration failed %s', pid)
+                data.update(status='ready', message='激活失败，已恢复上一版本；请检查配置后重试。')
+                _write_release(data)
+                raise PackageError('发布失败，上一版本仍保留：' + str(exc), 409) from exc
         return record
 
 def recycle(pid, revision, actor, restore=False):
@@ -719,16 +724,15 @@ def discovery(records_by_pid):
             raise RuntimeError('Active task release is missing: ' + pid)
         root = release_dir(pid, data['version'])
         code = root / 'code'
-        spec = load_task_spec(record['group_name'], record['folder_name'], code, None, pid_override=pid)
-        spec.update(pid=pid, main_file=data['main_file'], task_name=record['task_name'], managed=True, task_release=data['version'], package_sha256=data['checksum'], main_file_options=[f['path'] for f in data['manifest'] if f['path'].endswith('.py')])
-        from app.bootstrap.task_loader import _apply_record, resolve_main_file
-        try:
-            _apply_record(spec, records_by_pid.get(pid))
-            spec['main_file_path'] = resolve_main_file(code, spec['main_file'])
-            spec['main_file_error'] = ''
-        except Exception as exc:
-            spec['error'] = str(exc)
-        spec.update(python_executable=str(root / data['python']), python_source='任务版本独立环境')
+        spec = load_task_spec(
+            record['group_name'], record['folder_name'], code, records_by_pid, pid_override=pid,
+            main_file=data['main_file'], task_name=record['task_name'],
+            main_file_options=[item['path'] for item in data['manifest'] if item['path'].endswith('.py')],
+        )
+        if spec['main_file_error'] and not spec['error']:
+            spec['error'] = spec['main_file_error']
+        spec.update(managed=True, task_release=data['version'], package_sha256=data['checksum'],
+                    python_executable=str(root / data['python']), python_source='任务版本独立环境')
         result.append(spec)
     return result
 

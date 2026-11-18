@@ -1,6 +1,6 @@
 <template>
 <section class="surface-card maintenance-control" :class="{compact}" aria-label="执行维护模式">
-  <div class="filter-actions"><strong>{{ state.enabled ? '维护模式：暂停启动新执行' : '执行接收正常' }}</strong><button v-if="!compact || controlsOpen || state.enabled" class="btn" :disabled="busy" @click="load">刷新状态</button><button v-if="!compact || controlsOpen || state.enabled" class="btn" :class="state.enabled ? 'primary' : 'warning'" :disabled="busy || state.revision == null" @click="toggle">{{ state.enabled ? '结束维护' : '进入维护' }}</button></div>
+  <div class="filter-actions"><strong>{{ statusLabel }}</strong><button v-if="!compact || controlsOpen || state.enabled" class="btn" :disabled="busy" @click="load">刷新状态</button><button v-if="!compact || controlsOpen || state.enabled" class="btn" :class="state.enabled ? 'primary' : 'warning'" :disabled="busy || state.revision == null" @click="toggle">{{ state.enabled ? '结束维护' : '进入维护' }}</button></div>
   <button v-if="compact" class="btn" :aria-expanded="controlsOpen" @click="controlsOpen=!controlsOpen">{{ controlsOpen ? '收起维护' : '维护操作' }}</button>
   <button v-if="!compact || controlsOpen || state.enabled" class="btn maintenance-expand" :aria-expanded="expanded || state.enabled" @click="expanded=!expanded">{{ expanded ? '收起说明' : '维护说明与原因' }}</button>
 <div v-show="(!compact || controlsOpen) && expanded || state.enabled" class="maintenance-details"><p class="hint">运行中的任务继续完成。维护期间新触发的自动计划会取消；维护前已入队的请求保留，但等待期限继续计算，结束维护后在期限内继续派发。已超时或取消的计划不会自动补跑。</p>
@@ -12,12 +12,22 @@
 </section>
 </template>
 <script setup>
-import { ref, onBeforeUnmount } from 'vue';
+import { computed, ref, onBeforeUnmount, watch } from 'vue';
 import {useRefreshLoop} from '../composables/useRefreshLoop.js';
 import { api } from '../api';
 const props=defineProps({compact:Boolean,confirm:{type:Function,required:true}});
+const emit = defineEmits(['status']);
 const expanded=ref(false), controlsOpen=ref(false);
 const state=ref({}), reason=ref(''), error=ref(''), busy=ref(false);
+const statusLabel = computed(() => {
+  if (state.value.enabled) return '维护模式：暂停启动新执行';
+  if (error.value) return '执行状态读取失败';
+  return state.value.revision == null ? '正在读取执行状态…' : '执行接收正常';
+});
+watch(() => {
+  if (state.value.enabled || error.value) return 'attention';
+  return state.value.revision == null ? 'loading' : 'normal';
+}, value => emit('status', value), { immediate: true });
 let alive=true, generation=0, pending=null;
 function load(){if(pending)return pending;pending=fetchState().finally(()=>{pending=null;});return pending;}
 async function fetchState() {

@@ -147,16 +147,21 @@ def _failure_totals():
             _failure_totals_expiry = time.monotonic() + 60
         return dict(_failure_totals_cache)
 
-def _load_job_stats():
+def _load_job_stats(last_status_only=False):
     try:
         with GaussDB() as db:
-            rows = db.execute_query_sql('\n                SELECT s.pid, s.group_name, s.folder_name, s.last_status, s.failed_times, s.last_sms_alarm,\n                       0 AS total_failures\n                FROM wfs_job_stats s\n                ', return_json=True)
-        totals = _failure_totals()
-        for row in rows:
-            row['total_failures'] = totals.get(row['pid'], 0)
-        return {row['pid']: row for row in rows}
+            columns = 'pid,last_status' if last_status_only else 'pid,group_name,folder_name,last_status,failed_times,last_sms_alarm'
+            rows = db.execute_query_sql(f'SELECT {columns} FROM wfs_job_stats', return_json=True)
     except Exception:
         return {}
+    if not last_status_only:
+        try:
+            totals = _failure_totals()
+            for row in rows:
+                row['total_failures'] = totals.get(row['pid'], 0)
+        except Exception:
+            logging.getLogger(__name__).warning('Cumulative task failure counts could not be loaded', exc_info=True)
+    return {row['pid']: row for row in rows}
 
 def _load_recent_run_stats():
     return cached('recent-statistics', 10, _recent_run_stats, mutable=False)
@@ -307,8 +312,9 @@ def _latest_log_marker():
     except Exception as exc:
         return {'latest_end_time': '', 'count': 0, 'error': str(exc)}
 
-def _event_snapshot():
-    specs = discover_task_specs(TASK_DIR)
+def _event_snapshot(specs=None):
+    if specs is None:
+        specs = discover_task_specs(TASK_DIR)
     tasks = []
     for spec in specs:
         pid = spec.get('pid') or spec.get('folder_name')
@@ -351,7 +357,7 @@ class Dashboard(Resource):
             return _proxy_scheduler_resource('/api/taskinfo/dashboard')
         specs = discover_task_specs(TASK_DIR)
         runtime = {item['id']: item for item in shared['tasks']} if shared is not None else None
-        job_stats = _load_job_stats()
+        job_stats = _load_job_stats(last_status_only=True)
         counters = {'total': len(specs), 'running': 0, 'pending': 0, 'paused': 0, 'stopped': 0, 'invalid': 0, 'failed_jobs': 0}
         for spec in specs:
             pid = spec.get('pid') or spec.get('folder_name')

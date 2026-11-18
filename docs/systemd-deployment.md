@@ -2,6 +2,8 @@
 
 生产统一使用 **root 用户和 root 用户组**，目录为 `/data/workflow_scheduler`，普通 HTTP 访问即可。无需创建 `wfs` 系统账户。服务器需具备 Linux x86_64、Python 3.12、systemd、unixODBC，以及与目标版本匹配的 DWS ODBC 驱动。
 
+首次投产只需按 [START-HERE.md](../START-HERE.md) 操作；本文补充服务结构、已有安装维护与备份。独立代理配置见 [Nginx 部署](nginx-deployment.md)。
+
 ## 1. 目录与部署入口
 
 ```text
@@ -22,7 +24,7 @@
 
 ## 2. GaussDB/DWS 与 HTTP
 
-平台默认连接标识为 `wfsscheduler_wfs`，对应数据库 `wfsscheduler`、schema `wfs`。Nacos 使用 group=`gauss`、dataId=`gauss.wfsscheduler.wfs.json`。数据库由 DBA 提前建立，配置与表结构见 [数据库准备](../deploy/root-test/DATABASE.md)。
+平台默认连接标识为 `immpdb_wfs`，对应数据库 `immpdb`、schema `wfs`。Nacos 使用 group=`gauss`、dataId=`gauss.immpdb.wfs.json`。数据库由 DBA 提前建立，配置与表结构见 [数据库准备](../deploy/root-test/DATABASE.md)。
 
 ODBC 路径统一由 `runtime.env` 中的 `ODBCSYSINI`、`ODBCINI` 和 `LD_LIBRARY_PATH` 指定；首次安装默认使用 `deploy/root-test/odbc/`，驱动库位于 `app/config/driver/dws_odbc/lib/odbc/`。服务模板不再设置另一套 ODBC 路径，已有配置继续生效。
 
@@ -32,7 +34,7 @@ HTTP 部署使用 `WFS_COOKIE_SECURE=false`，以便浏览器发送登录 Cookie
 
 Nacos 的同进程配置缓存默认 60 秒，可通过 `WFS_NACOS_CONFIG_TTL_SECONDS` 设置为 0–3600 秒。修改连接信息最长需等待缓存有效期，或重启服务立即应用。配置过期且读取失败会报错，不继续使用过期配置。
 
-唯一建表文件是 `schema/gauss.sql`。初始化只对空 schema 建表，已有本版基线只校验，不清空或自动迁移。目标 GaussDB、Nacos 与厂商驱动必须在生产现场验证，本机 PostgreSQL 回归不能替代这一步。
+唯一建表文件是 `schema/gauss.sql`。初始化只对空 schema 建表，已有本版基线保留数据并校验，初始化工具可修正已知可空执行字段，不进行全库迁移。目标 GaussDB、Nacos 与厂商驱动必须在生产现场验证，本机 PostgreSQL 回归不能替代这一步。
 
 ## 3. 核对唯一服务配置
 
@@ -110,7 +112,7 @@ sudo systemctl stop wfs.service
 先开启维护模式并排空执行，再停止 wfs.service。使用目标产品支持的 gs_dump 等工具和同一时间窗口的共享文件备份，示例：
 
 ```bash
-.venv/bin/python scripts/backup_platform.py --data /data/workflow_scheduler/data  --tasks app/jobs --output /backup/wfs-20261104.zip  --database wfsscheduler --schema wfs --user DB_USER --host DB_HOST --port 8000 --tool gs_dump
+.venv/bin/python scripts/backup_platform.py --data /data/workflow_scheduler/data  --tasks app/jobs --output /backup/wfs-20261104.zip  --database immpdb --schema wfs --user DB_USER --host DB_HOST --port 8000 --tool gs_dump
 ```
 
 `DB_USER` 是数据库账号，不是 Linux 的 root 用户。命令应通过同一生产环境包装器执行，以便备份收据写入 GaussDB。数据库密码使用厂商工具支持的受限认证文件，不放命令行。数据库 dump 含加密业务连接、账户摘要及业务日志，应限制访问；密钥、Nacos、ODBC、pip 配置单独安全保管。

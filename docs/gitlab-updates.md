@@ -1,4 +1,4 @@
-# GitLab 代码更新提醒（第一版）
+# GitLab 代码更新与任务发布入口
 
 管理员登录后可打开导航中的「代码更新」，也可使用顶部入口。系统定期读取 GitLab 分支并分类，在登录后提醒未读更新；差异可在平台查看，合并在 GitLab 处理。自动检查只读取元数据；任务列表另外提供经过管理员确认的发布、更新和删除流程，见[GitLab 任务发布](task-packages.md)。所有 GitLab 请求均为 GET，不向仓库写入。
 
@@ -15,7 +15,7 @@
 
 保存后可点击「立即检查」。Web 与 Scheduler 必须使用同一个 `WFS_DATA_DIR` 和配置加密密钥；后台定期扫描由单实例 Scheduler 启动。手动检查异步返回状态，页面会自动刷新；外部 GitLab 故障不影响平台健康检查和已有任务执行。
 
-平台分支检查、凭据和全局差异继续由管理员管理。普通查看者与旧 operator 账户不会收到更新通知，也不能访问这些接口。新增任务维护员仅能查看并发布明确授权任务/分组的候选代码，不获得 GitLab 全局配置权限。Webhook、分支规则及 CI 门禁设置见 [改进手册](remaining-improvements.md#6-gitlab-事件与发布门禁)。
+平台分支检查、凭据和全局差异继续由管理员管理。普通查看者与旧 operator 账户不会收到更新通知，也不能访问这些接口。新增任务维护员仅能查看并发布明确授权任务/分组的候选代码，不获得 GitLab 全局配置权限。GitLab 流水线本阶段停用；Webhook 与其他发布规则见 [改进手册](remaining-improvements.md#6-gitlab-事件与发布门禁)，其中历史 CI 设计不作为当前投产要求。
 
 ## 待合并与待部署
 
@@ -48,9 +48,9 @@
 
 ## 凭据与备份
 
-配置、扫描缓存和每个账户的已读状态保存在共享数据目录的 GaussDB 平台状态表，无需新增平台数据库迁移。连接配置使用独立用途派生的 Fernet 密钥加密；令牌不会回传浏览器，留空保留已有令牌，也可以明确清除。网络错误不回显服务端错误正文、令牌或认证头；不跟随 HTTP 重定向，以免将令牌转发到其他地址。
+配置、扫描缓存和每个账户的已读状态保存在 GaussDB 平台状态表，无需新增平台数据库迁移。连接配置使用独立用途派生的 Fernet 密钥加密；令牌不会回传浏览器，留空保留已有令牌，也可以明确清除。网络错误不回显服务端错误正文、令牌或认证头；不跟随 HTTP 重定向，以免将令牌转发到其他地址。
 
-`backup_platform.py`、`backup_platform.py` 已纳入该数据库的一致性备份，`restore_platform.py` 会验证恢复文件。恢复时保留原 `WFS_CONNECTIONS_KEY`（若配置）或 `WFS_SECRET_KEY`。仓库差异属于内部代码，备份仍需按原有数据目录权限保护。
+`backup_platform.py` 已纳入该数据库的一致性备份，`restore_platform.py` 会验证恢复文件。恢复时保留原 `WFS_CONNECTIONS_KEY`（若配置）或 `WFS_SECRET_KEY`。仓库差异属于内部代码，备份仍需按原有数据目录权限保护。
 
 ## 验证与启动
 
@@ -62,7 +62,7 @@ npm run build
 npm run test:e2e:gitlab
 ```
 
-GitLab 浏览器验收配置会启动独立临时平台库及本地假 GitLab HTTP 服务，覆盖登录提醒、实际分支/提交比对 API、文件差异、已读持久化、设置和权限；不读取 `.env.local` 或现有项目数据。普通浏览器回归由 `npm run test:e2e` 运行，GitLab 专项由单独配置运行；GitLab CI 会分别执行两组。
+GitLab 浏览器验收配置会启动独立临时平台库及本地假 GitLab HTTP 服务，覆盖登录提醒、实际分支/提交比对 API、文件差异、已读持久化、设置和权限；不读取 `.env.local` 或现有项目数据。普通浏览器回归由 `npm run test:e2e` 运行，GitLab 专项由单独配置运行；当前 GitLab 流水线停用，这些命令由开发人员在隔离环境手动运行。
 
 本机已有 PostgreSQL 服务时，完成构建后统一重启 Web/Scheduler：
 
@@ -70,3 +70,5 @@ GitLab 浏览器验收配置会启动独立临时平台库及本地假 GitLab HT
 ```
 
 代码与本地模拟服务验证通过后，仍需在自己的 GitLab 上填写真实连接并验收网络、证书、令牌权限与版本兼容性。
+
+令牌能力参考 [GitLab 官方 scope 说明](https://docs.gitlab.com/security/tokens/access_token_scopes/)；令牌所属账户也必须能读取目标项目。只读检查不需要写入 API 权限。

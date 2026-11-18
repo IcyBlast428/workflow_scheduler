@@ -17,7 +17,7 @@ export async function navigate(page,label){
 }
 
 export async function detailTab(page,name){
- const group={'说明与配置':'概览','执行流程':'概览','执行与输出':'执行','执行记录':'执行','运行策略':'配置','配置历史':'配置','查看代码':'发布','代码版本':'发布','DDL 与标签':'发布','连接授权':'安全与审计','操作记录':'安全与审计'}[name];
+ const group={'说明与配置':'概览','执行流程':'概览','执行与输出':'执行','执行记录':'执行','调度时间':'配置','运行策略':'配置','配置历史':'配置','查看代码':'发布','代码版本':'发布','DDL 与标签':'发布','连接授权':'安全与审计','操作记录':'安全与审计'}[name];
  const dialog=page.locator('.task-workbench');
  const button=dialog.getByRole('navigation',{name:'任务工作区'}).getByRole('button',{name:group,exact:true});
  if(await button.getAttribute('aria-pressed')!=='true')await button.click();

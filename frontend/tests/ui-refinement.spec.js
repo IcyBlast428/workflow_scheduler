@@ -3,13 +3,139 @@ async function login(page,hash='tasks',username='admin'){
  await page.goto('/#'+hash);await page.getByLabel('用户名',{exact:true}).fill(username);await page.getByLabel('密码',{exact:true}).fill('browser-test-password');await page.getByRole('button',{name:'登录',exact:true}).click();await expect(page.locator('.app-shell')).toBeVisible();
 }
 const slow=page=>page.locator('.task-table tbody tr').filter({hasText:'acceptance__slow'});
-test('table preferences persist, optional columns remain accessible, batch lane stays put',async({page})=>{
- await page.setViewportSize({width:1440,height:1000});await login(page);
- await expect(page.locator('.task-table')).toHaveClass(/hide-group/);await expect(page.locator('.task-table thead th:visible')).toHaveCount(5);
- await page.getByLabel('任务列表密度').selectOption('compact');await page.getByText('显示列',{exact:true}).click();await page.locator('.column-options').getByLabel('活动实例 / 上限',{exact:true}).check();await page.getByText('显示列',{exact:true}).click();
- const before=await page.locator('.task-table').boundingBox();await slow(page).getByRole('checkbox').check();await expect(page.getByRole('button',{name:'批量暂停调度',exact:true})).toBeVisible();const after=await page.locator('.task-table').boundingBox();expect(Math.abs(before.y-after.y)).toBeLessThan(3);await page.getByRole('button',{name:'取消选择',exact:true}).click();
- await page.reload();await expect(page.locator('.task-table')).toHaveClass(/compact/);await expect(page.locator('.task-table')).not.toHaveClass(/hide-pending/);
- await page.screenshot({path:'test-results/ui-task-list.png',fullPage:true});
+test('phone task list shows a full task before scrolling and reveals operational warnings', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let maintenance = false;
+  await page.route('**/api/admin/admission', route => route.fulfill({
+    json: { code: 20000, data: { enabled: maintenance, revision: 1, active: [], reserved: 0 } },
+  }));
+  let gitlabError = '';
+  await page.route('**/api/taskinfo/packages/gitlab', route => route.fulfill({
+    json: { code: 20000, data: { enabled: Boolean(gitlabError), items: [], error: gitlabError } },
+  }));
+  await login(page);
+  const firstTask = page.locator('.task-table tbody tr').first();
+  await expect(firstTask).toBeVisible();
+  const firstTaskBounds = await firstTask.boundingBox();
+  expect(firstTaskBounds.y + firstTaskBounds.height).toBeLessThan(844);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  await expect(page.getByLabel('任务状态', { exact: true })).toBeVisible();
+  await expect(page.getByText('匹配任务')).toBeVisible();
+  await expect(page.getByLabel('标签', { exact: true })).toBeHidden();
+  await page.getByRole('button', { name: '更多筛选', exact: true }).click();
+  await expect(page.getByLabel('标签', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '更多筛选', exact: true }).click();
+  const services = page.locator('.task-services');
+  await expect(services.locator('summary')).toContainText('执行接收正常');
+  await expect(page.getByLabel('执行维护模式')).toBeHidden();
+  await services.locator('summary').click();
+  await expect(page.getByLabel('执行维护模式')).toBeVisible();
+  await services.locator('summary').click();
+  await expect(page.getByLabel('执行维护模式')).toBeHidden();
+  const settings = page.locator('.list-settings');
+  await expect(page.getByRole('switch', { name: '任务列表密度 · 紧凑模式' })).toBeHidden();
+  await settings.locator(':scope > summary').click();
+  await expect(page.getByRole('switch', { name: '任务列表密度 · 紧凑模式' })).toBeVisible();
+  await settings.getByText('显示列', { exact: true }).click();
+  await expect(settings.getByLabel('组名', { exact: true })).toBeVisible();
+  await settings.locator(':scope > summary').click();
+  maintenance = true;
+  gitlabError = '示例检查失败';
+  await page.reload();
+  await expect(page.getByText('维护模式：暂停启动新执行')).toBeVisible();
+  const gitlab = page.getByRole('region', { name: 'GitLab 任务变更', exact: true });
+  await expect(gitlab.getByText('检查异常')).toBeVisible();
+  await gitlab.getByRole('button', { name: '查看连接与检查状态', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'GitLab 连接与检查状态', exact: true });
+  await expect(dialog.getByRole('alert')).toHaveText(gitlabError);
+});
+
+test('account drafts are protected when leaving the page or replacing the account', async ({ page }) => {
+  await login(page);
+  const accountsHash = '#admin?section=accounts';
+  await page.evaluate(hash => { location.hash = hash; }, accountsHash);
+  const name = page.locator('#account-name');
+  const confirmation = page.locator('.confirm-modal');
+  const tasks = page.getByRole('button', { name: '任务列表', exact: true });
+  await name.fill('unsaved-account');
+  await tasks.click();
+  await confirmation.getByRole('button', { name: '继续编辑', exact: true }).click();
+  await expect(name).toHaveValue('unsaved-account');
+  await page.goBack();
+  await confirmation.getByRole('button', { name: '继续编辑', exact: true }).click();
+  await expect(page).toHaveURL(/#admin\?section=accounts$/);
+  await expect(name).toBeVisible();
+  await expect(name).toHaveValue('unsaved-account');
+  const edit = page.getByRole('row').filter({ hasText: 'browser-viewer' })
+    .getByRole('button', { name: '编辑', exact: true });
+  await edit.click();
+  await confirmation.getByRole('button', { name: '继续编辑', exact: true }).click();
+  await expect(name).toHaveValue('unsaved-account');
+  await edit.click();
+  await confirmation.getByRole('button', { name: '放弃修改', exact: true }).click();
+  await expect(name).toHaveValue('browser-viewer');
+  await name.fill('second-unsaved-account');
+  await tasks.click();
+  await confirmation.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+  await expect(page).toHaveURL(/#tasks$/);
+  await page.evaluate(hash => { location.hash = hash; }, accountsHash);
+  await expect(name).toHaveValue('');
+});
+
+test('compact task list keeps text size, hides IDs and remembers columns on desktop and phone', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await login(page);
+  const table = page.locator('.task-table');
+  const firstName = table.locator('.task-name-link').first();
+  const density = page.getByRole('switch', { name: '任务列表密度 · 紧凑模式' });
+  const columns = page.getByText('显示列', { exact: true });
+  const activity = page.locator('.column-options').getByLabel('活动实例 / 上限', { exact: true });
+  await expect(table.locator('.task-row-id').first()).toBeVisible();
+  await expect(table.locator('thead th:visible')).toHaveCount(5);
+  const nameSize = await firstName.evaluate(element => getComputedStyle(element).fontSize);
+
+  await expect(density).toHaveText(/^\s*标准\s*紧凑\s*$/);
+  await expect(density).toHaveAttribute('aria-checked', 'false');
+  await density.press('Space');
+  await expect(density).toHaveAttribute('aria-checked', 'true');
+  await expect(firstName).toHaveCSS('font-size', nameSize);
+  await expect(table.locator('.task-row-id')).toHaveCount(0);
+  await columns.click();
+  await activity.check();
+  await columns.click();
+  await expect(table.getByRole('columnheader', { name: '活动实例 / 上限' })).toBeVisible();
+  const before = await table.boundingBox();
+  await table.getByRole('checkbox', { name: '选择任务 acceptance__slow', exact: true }).check();
+  await expect(page.getByRole('button', { name: '批量暂停调度', exact: true })).toBeVisible();
+  const after = await table.boundingBox();
+  expect(Math.abs(before.y - after.y)).toBeLessThan(3);
+  await page.getByRole('button', { name: '取消选择', exact: true }).click();
+
+  await page.reload();
+  await expect(table).toHaveClass(/compact/);
+  await expect(density).toHaveAttribute('aria-checked', 'true');
+  await expect(table.getByRole('columnheader', { name: '活动实例 / 上限' })).toBeVisible();
+  await columns.click();
+  await expect(activity).toBeChecked();
+  await columns.click();
+  await page.screenshot({ path: 'test-results/ui-task-list.png', fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const firstCard = table.locator('.mobile-task-status').first();
+  await expect(firstCard).toContainText(/活动 \d+ \/ \d+/);
+  await expect(firstName).toHaveCSS('font-size', nameSize);
+  await expect(table.locator('.task-row-id')).toHaveCount(0);
+  await page.locator('.list-settings > summary').click();
+  await density.getByText('标准', { exact: true }).click();
+  await expect(density).toHaveAttribute('aria-checked', 'false');
+  await expect(table.locator('.task-row-id').first()).toBeVisible();
+  await columns.click();
+  await activity.uncheck();
+  await expect(firstCard).not.toContainText('活动');
+  await page.reload();
+  await expect(firstCard).not.toContainText('活动');
+  await page.locator('.list-settings > summary').click();
+  await expect(density).toHaveAttribute('aria-checked', 'false');
 });
 test('grouped workbench restores source URL, back navigation and unsaved edits',async({page,context})=>{
  await context.grantPermissions(['clipboard-read','clipboard-write']);await login(page);await slow(page).locator('.task-name-link').click();const dialog=page.locator('.task-workbench');

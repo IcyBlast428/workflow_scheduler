@@ -33,16 +33,51 @@ try{
  assert.equal(workspace.taskLogs.loading,false);
  const apply=workspace.loadTaskLogs(true);logs[2].resolve(result([row('new'),row('old')]));await apply;
  assert.equal(workspace.taskLogs.newRecords,false);assert.equal(workspace.taskLogs.rows[0].logid,'new');
- workspace.taskLogs.params.taskname='未提交的筛选';
+ workspace.taskLogs.draft.taskname='未提交的筛选';
+ assert.equal(workspace.taskLogs.hasDraft,true);
  const background=workspace.loadTaskLogs(false,{silent:true,buffer:true});
  assert.equal(logs[3].params.taskname,'','Background reads must retain the applied search');
  logs[3].reject(new Error('temporary'));await background;
  assert.equal(workspace.taskLogs.error,'');assert.ok(workspace.taskLogs.refreshError);assert.equal(workspace.taskLogs.rows[0].logid,'new');
- workspace.taskLogs.params.currentPage=2;
- const pageTwo=workspace.loadTaskLogs();logs[4].resolve(result([row('page-two')]));await pageTwo;
+ const pageTwo=workspace.setTaskLogPage(2);
+ assert.equal(logs[4].params.taskname,'','Pagination must keep the applied filters');
+ assert.equal(logs[4].params.cursor,'next','The previous page cursor stays bound to its original query');
+ logs[4].resolve(result([row('page-two')]));await pageTwo;
  const subsequent=tick();await flush();events[2].resolve({logs:{revision:2},tasks:[]});await subsequent;await flush();
  assert.equal(logs.length,5,'New results on page two must not trigger a replacement history query');
  assert.equal(workspace.taskLogs.newRecords,true);assert.equal(workspace.taskLogs.rows[0].logid,'page-two');
  assert.equal(workspace.taskLogs.params.currentPage,2);
- console.log('Execution logs buffer new records, preserve applied filters and pagination, and retry markers received during loading.');
+
+ const update=workspace.loadTaskLogs(true);
+ assert.equal(logs[5].params.taskname,'','Explicitly refreshing new records must preserve applied filters');
+ assert.equal(logs[5].params.cursor,'');
+ logs[5].resolve(result([row('newest')]));await update;
+
+ const search=workspace.searchTaskLogs();
+ assert.equal(logs[6].params.taskname,'未提交的筛选');
+ assert.equal(logs[6].params.cursor,'');
+ assert.equal(workspace.taskLogs.rows.length,0,'An in-flight query must not present old rows under new chips');
+ assert.equal(workspace.taskLogs.hasDraft,false);
+ logs[6].resolve(result([]));await search;
+
+ workspace.taskLogs.draft.taskstate='失败';
+ const sameRoute=new URLSearchParams({taskname:'未提交的筛选'});
+ await workspace.applyTaskLogRoute(sameRoute);
+ assert.equal(logs.length,7,'Opening a detail on the same query must not reload the list');
+ assert.equal(workspace.taskLogs.draft.taskstate,'失败','Details must not discard an unrelated draft');
+
+ const archive=new URLSearchParams({scope:'archive',start:'2026-11-12',end:'2026-11-18'});
+ const applyArchive=workspace.applyTaskLogRoute(archive);
+ assert.equal(workspace.taskLogs.hasDraft,false,'A changed route restores the corresponding form');
+ assert.equal(logs[7].params.scope,'archive');
+ logs[7].resolve(result([]));await applyArchive;
+ assert.equal(workspace.taskLogs.canExpandDates,true);
+
+ const expand=workspace.expandTaskLogDates();
+ assert.equal(logs[8].params.scope,'archive');
+ assert.deepEqual(logs[8].params.datetimeval,['2026-08-18','2026-11-18']);
+ assert.equal(workspace.taskLogs.canExpandDates,false);
+ logs[8].resolve(result([]));await expand;
+
+ console.log('Execution logs keep drafts separate from displayed filters, pagination, refreshes and archive recovery.');
 }finally{scope.stop();await Promise.all(files.map(file=>unlink(file).catch(()=>{})));}

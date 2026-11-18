@@ -20,7 +20,9 @@ from app.bootstrap.global_vars import DATA_DIR
 
 logger = logging.getLogger(__name__)
 TERMINAL = {'success', 'failed', 'timed_out', 'cancelled', 'interrupted', 'skipped', 'missed'}
-_locks = tuple(threading.RLock() for _ in range(256))
+_locks = journal._locks
+_heartbeats = {}
+_heartbeat_lock = threading.Lock()
 _directory = Path(DATA_DIR) / 'executions'
 _started = False
 _start_lock = threading.Lock()
@@ -29,6 +31,26 @@ _service_state = {'ready': False, 'error': '', 'heartbeat': ''}
 
 def now():
     return business_now().isoformat(' ', timespec='microseconds')
+
+
+def touch_run(run_id):
+    """Refresh live telemetry without rewriting the recoverable execution state."""
+    with _heartbeat_lock:
+        _heartbeats[run_id] = now()
+
+
+def forget_run_heartbeat(run_id):
+    with _heartbeat_lock:
+        _heartbeats.pop(run_id, None)
+
+
+def _with_heartbeat(record):
+    if record['status'] == 'running':
+        with _heartbeat_lock:
+            heartbeat = _heartbeats.get(record['run_id'])
+        if heartbeat and heartbeat > (record.get('heartbeat') or ''):
+            return {**record, 'heartbeat': heartbeat}
+    return record
 
 
 def run_path(run_id, suffix='json'):
@@ -49,12 +71,12 @@ def read_run(run_id):
     run_path(run_id)  # Validate before touching the index.
     indexed = journal.read(_directory, run_id)
     if indexed is not None:
-        return indexed
+        return _with_heartbeat(indexed)
     with GaussDB() as db:
         rows = db.execute_query_sql('SELECT payload FROM wfs_executions WHERE run_id=?', params=(run_id,))
     if not rows:
         raise ValueError('execution not found')
-    return json.loads(rows[0][0])
+    return _with_heartbeat(json.loads(rows[0][0]))
 
 
 def _write_file(record):
@@ -74,9 +96,11 @@ def _persist_record(record):
 
 def update_run(run_id, persist=True, **changes):
     """先保留恢复记录再同步执行索引；索引失败由维护轮次补写。"""
-    with _locks[int(run_id[:2], 16)]:
+    with journal.run_lock(run_id):
         record = read_run(run_id)
         record.update(changes, heartbeat=now())
+        if record['status'] in TERMINAL:
+            forget_run_heartbeat(run_id)
         if persist:
             record['db_synced'] = False
         _write_file(record)
@@ -99,13 +123,14 @@ def create_run(pid, name='', source='scheduled', actor='scheduler', **fields):
                   status='queued', created_at=now(), start_time='', end_time='', heartbeat=now(),
                   process_id=None, state=None, reason='', log_truncated=False, history_saved=False,
                   scheduler_pid=os.getpid(), **fields)
-    _write_file(record)
-    try:
-        _persist_record(record)
-        record['db_synced'] = True
+    with journal.run_lock(run_id):
         _write_file(record)
-    except Exception:
-        logger.exception('queued execution retained in journal: %s', run_id)
+        try:
+            _persist_record(record)
+            record['db_synced'] = True
+            _write_file(record)
+        except Exception:
+            logger.exception('queued execution retained in journal: %s', run_id)
     return run_id
 
 
@@ -123,13 +148,12 @@ def list_runs(pid=None, limit=50):
     except Exception:
         logger.exception('execution listing uses local journal while database is unavailable')
     records = {item['run_id']: item for row in rows for item in [json.loads(row[0])]}
-    for record in journal.recent(_directory, pid, limit):
-        records[record['run_id']] = record
-    for run_id in list(records):
-        indexed = journal.read(_directory, run_id)
-        if indexed:
-            records[run_id] = indexed
-    return sorted(records.values(), key=lambda item: item['created_at'], reverse=True)[:limit]
+    recent = {record['run_id']: record for record in journal.recent(_directory, pid, limit)}
+    records.update(journal.read_many(_directory, records.keys() - recent.keys()))
+    for run_id, record in recent.items():
+        records[run_id] = journal.read_spooled(_directory, run_id) or record
+    return [_with_heartbeat(record) for record in
+            sorted(records.values(), key=lambda item: item['created_at'], reverse=True)[:limit]]
 
 
 def read_log(run_id, offset=0):
@@ -234,11 +258,12 @@ def service_state():
 
 
 def _recover_record(record):
-    if record and record.get('systemd_unit'):
-        from app.bootstrap.task_isolation import stop
-        stop(record['systemd_unit'])
     if record['status'] in TERMINAL:
         return
+    if record.get('systemd_unit'):
+        from app.bootstrap.task_isolation import stop, unit_name
+        if record['systemd_unit'] == unit_name(record['run_id']):
+            stop(record['systemd_unit'])
     process_id = record.get('process_id')
     if process_id and os.name != 'nt':
         proc = Path(f'/proc/{process_id}')
@@ -252,26 +277,49 @@ def _recover_record(record):
     save_history(result)
 
 
+def _reconcile_configuration():
+    from app.bootstrap.core import _configuration_lock, aps_start
+    # Serialize the check and refresh with recycle/restore. A recycled task's
+    # disabled configuration remains in the database for a future restore.
+    with _configuration_lock:
+        with GaussDB() as db:
+            pending = db.execute_query_sql(
+                'SELECT c.pid, t.payload FROM wfs_task_config c '
+                'LEFT JOIN wfs_config_application a ON c.pid=a.pid '
+                'LEFT JOIN wfs_package_tasks t ON c.pid=t.pid '
+                'WHERE a.pid IS NULL OR c.version<>a.version OR a.status<>?',
+                params=('applied',),
+            )
+        for pid, task_payload in pending:
+            try:
+                if task_payload and json.loads(task_payload).get('deleted_at'):
+                    continue
+                aps_start(task_pid=pid, action='refresh')
+            except Exception:
+                logger.exception('configuration reconciliation failed: %s', pid)
+
+
 def maintenance(recover=False):
     batch = max(1, min(5000, int(os.environ.get('WFS_MAINTENANCE_BATCH', '500'))))
     deadline = time.monotonic() + max(1, int(os.environ.get('WFS_MAINTENANCE_SECONDS', '10')))
+    # A failed journal write belongs to an ordinary live execution as well as
+    # to a possible orphan. Replaying it must not terminate the execution.
+    journal.recover_pending(_directory, TERMINAL, batch)
     if recover:
         # Recover known active execution IDs before accepting new work.
         with GaussDB() as db:
             rows = db.execute_query_sql("SELECT run_id FROM wfs_executions WHERE status IN ('running','queued')")
-        for (run_id,) in rows:
-            _recover_record(read_run(run_id))
-        for record in journal.active(_directory):
-            _recover_record(record)
-    for record in journal.recover_pending(_directory, TERMINAL, batch):
-        if record['status'] not in TERMINAL:
-            _recover_record(record)
+        run_ids = dict.fromkeys(run_id for (run_id,) in rows)
+        run_ids.update(dict.fromkeys(record['run_id'] for record in journal.active(_directory, spool_limit=None)))
+        for run_id in run_ids:
+            with journal.run_lock(run_id):
+                _recover_record(read_run(run_id))
     processed = 0
     for record in journal.pending(_directory, batch):
         if time.monotonic() >= deadline:
             break
         try:
-            with _locks[int(record['run_id'][:2], 16)]:
+            with journal.run_lock(record['run_id']):
                 record = read_run(record['run_id'])
                 if not record.get('db_synced'):
                     _persist_record(record)
@@ -280,7 +328,7 @@ def maintenance(recover=False):
                 from app.bootstrap.execution_requests import retry_result
                 retry_result(record)
                 save_history(record)
-                if not read_run(record['run_id']).get('history_saved') and record['status'] in TERMINAL:
+                if record['status'] in TERMINAL and not read_run(record['run_id']).get('history_saved'):
                     journal.defer(_directory, record['run_id'])
             processed += 1
         except Exception:
@@ -314,17 +362,11 @@ def maintenance(recover=False):
         versions_to_keep = max(20,int(os.environ.get('WFS_CONFIG_VERSIONS_KEEP','100')))
         for pid, version in db.execute_query_sql('SELECT pid,version FROM wfs_task_config'):
             db.execute_sql('DELETE FROM wfs_config_versions WHERE pid=? AND version<=?', params=(pid,version - versions_to_keep))
-        pending = db.execute_query_sql('SELECT c.pid FROM wfs_task_config c LEFT JOIN wfs_config_application a ON c.pid=a.pid WHERE a.pid IS NULL OR c.version<>a.version OR a.status<>?', params=('applied',))
     if not recover:
         from app.bootstrap.storage_policy import run_cycle
         run_cycle()
     if _service_state['ready']:
-        from app.bootstrap.core import aps_start
-        for (pid,) in pending:
-            try:
-                aps_start(task_pid=pid, action='refresh')
-            except Exception:
-                logger.exception('configuration reconciliation failed: %s', pid)
+        _reconcile_configuration()
 
 
 def start_operations():

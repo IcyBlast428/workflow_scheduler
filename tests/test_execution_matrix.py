@@ -30,7 +30,7 @@ class MatrixTests(unittest.TestCase):
         self.tasks.stop()
         self.jobs.stop()
         with GaussDB() as db:
-            for table in ('wfs_run_history','wfs_executions'):
+            for table in ('wfs_run_history','wfs_executions','wfs_state_journal_journal'):
                 db.execute_sql(f'DELETE FROM {table} WHERE pid=?', params=(self.pid,))
 
     def insert(self, when, state=0):
@@ -74,17 +74,27 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(len(logs.json['data']['data']),12,logs.json)
 
     def test_current_active_journal_and_invalid_date(self):
-        now=dt.datetime.now()-dt.timedelta(seconds=2)
+        from app.bootstrap import operations, platform_pool
+        now=matrix.business_now()-dt.timedelta(seconds=2)
         identifier=uuid.uuid4().hex
         payload={'pid':self.pid,'status':'queued','created_at':now.isoformat(' ')}
+        fresh={**payload,'run_id':identifier,'status':'running','start_time':now.isoformat(' ')}
         with GaussDB() as db:
             db.execute_sql('INSERT INTO wfs_executions(run_id,pid,status,created_at,payload) VALUES(?,?,?,?,?)',params=(identifier,self.pid,'queued',now,json.dumps(payload)))
-        fresh={**payload,'status':'running','start_time':now.isoformat(' ')}
-        with patch.object(matrix,'read_run',return_value=fresh) as read:
+            db.execute_sql('INSERT INTO wfs_state_journal_journal(run_id,pid,status,created_at,payload) VALUES(?,?,?,?,?)',params=(identifier,self.pid,'running',str(now),json.dumps(fresh)))
+        with patch.object(platform_pool, 'acquire', wraps=platform_pool.acquire) as acquire:
             data=matrix.snapshot()
+        self.assertEqual(acquire.call_count, 1)
         self.assertEqual(data['active'][0]['status'],'running')
         self.assertTrue(data['active'][0]['inspectable'])
-        read.assert_called_once_with(identifier)
+        # A terminal recovery record awaiting database sync supersedes both copies.
+        operations._directory.mkdir(parents=True, exist_ok=True)
+        spool = operations.run_path(identifier)
+        try:
+            spool.write_text(json.dumps({**fresh, 'status':'success'}), encoding='utf-8')
+            self.assertFalse(matrix.snapshot()['active'])
+        finally:
+            spool.unlink(missing_ok=True)
         for value in ['bad',(dt.date.today()+dt.timedelta(days=1)).isoformat(),(dt.date.today()-dt.timedelta(days=90)).isoformat()]:
             self.assertEqual(self.client.get('/api/taskinfo/matrix',query_string={'date':value}).status_code,400)
 

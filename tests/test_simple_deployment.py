@@ -101,7 +101,7 @@ class SimpleDeploymentTests(unittest.TestCase):
                     events.append('database')
                     if fails: raise ValueError('database unavailable')
                 with patch.object(deploy, 'ROOT', root), patch.object(deploy.sys, 'prefix', str(root/'.venv')), \
-                     patch.object(deploy, 'verify_package'), patch.object(deploy, 'ensure_venv', return_value=root/'.venv/bin/python'), \
+                     patch.object(deploy, 'verify_package'), patch.object(deploy, 'verify_frontend'), patch.object(deploy, 'ensure_venv', return_value=root/'.venv/bin/python'), \
                      patch.object(deploy, 'configure'), patch.object(deploy, 'production_environment', return_value={}), \
                      patch.object(deploy, 'check_database', side_effect=database), \
                      patch.object(deploy, 'run', side_effect=lambda command, **kw: events.append('services' if '--install' in command else 'pip')), \
@@ -119,6 +119,24 @@ class SimpleDeploymentTests(unittest.TestCase):
         commands = [' '.join(map(str, call.args[0])) for call in run.call_args_list]
         self.assertEqual(len(commands), 1)
         self.assertIn('check_gauss_platform.py', commands[0])
+
+    def test_incomplete_git_frontend_fails_before_creating_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dist = root/'app/dist'
+            (dist/'.vite').mkdir(parents=True)
+            (dist/'index.html').write_text('built')
+            (dist/'unsupported-browser.html').write_text('unsupported')
+            (dist/'.vite/manifest.json').write_text(json.dumps({'index': {'file': 'missing.js'}}))
+            with patch.object(deploy, 'ROOT', root), patch.object(deploy, 'ensure_venv') as create:
+                with self.assertRaisesRegex(ValueError, 'missing.js'):
+                    deploy.install(SimpleNamespace(skip_dependencies=True))
+                create.assert_not_called()
+            (dist/'missing.js').write_text('built chunk')
+            deploy.verify_frontend(root)
+            (dist/'.vite/manifest.json').write_text(json.dumps({'index': {'file': '../outside.js'}}))
+            with self.assertRaises(ValueError):
+                deploy.verify_frontend(root)
 
     @unittest.skipIf(os.name == 'nt', 'requires POSIX flock')
     def test_concurrent_installer_is_rejected(self):

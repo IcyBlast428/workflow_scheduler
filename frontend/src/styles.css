@@ -1480,9 +1480,6 @@ tbody tr:hover {
 
 .dashboard-summary { grid-template-columns: repeat(4, minmax(0,1fr)); margin-bottom: 16px; }
 .dashboard-summary .metric-card { text-align:left; cursor:pointer; color:var(--ink); }
-.dashboard-issues { margin-bottom:16px; }
-.issue-columns { display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:0 20px 20px; }
-.issue-row { display:flex; justify-content:space-between; width:100%; margin:8px 0; }
 .task-detail-modal, .execution-modal { width:min(1200px,95vw); }
 .source-toolbar { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
 .source-toolbar > label:not(.source-wrap) { display:grid; gap:6px; min-width:0; max-width:100%; }
@@ -1698,7 +1695,7 @@ tbody tr:hover {
 .execution-output { min-height: 220px; }
 .cell-subtitle { display:block; color:var(--muted); max-width:350px; overflow-wrap:anywhere; }
 .task-table .col-actions { width:192px; }
-@media (max-width:760px) { .dashboard-summary, .issue-columns { grid-template-columns:1fr 1fr; } .issue-columns { grid-template-columns:1fr; } }
+@media (max-width:760px) { .dashboard-summary { grid-template-columns:1fr 1fr; } }
 
 .matrix-legend i.timed_out,.matrix-record-list i.timed_out {background:#e45364;}
 .matrix-legend i.interrupted,.matrix-record-list i.interrupted {background:#ae8ad8;}
@@ -1764,8 +1761,6 @@ tbody tr:hover {
 .modal-body h4 { margin: 24px 0 12px; font-size: 14px; }
 .runtime-card > summary { cursor: pointer; padding-block: 4px; }
 .runtime-card[open] > summary { margin-bottom: 12px; }
-.issue-row { gap: 16px; text-align: left; white-space: normal; padding: 12px 14px; }
-.issue-row > span { flex: none; }
 
 @media (max-width: 1100px) {
   .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

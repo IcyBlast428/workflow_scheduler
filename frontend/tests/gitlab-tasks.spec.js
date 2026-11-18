@@ -7,7 +7,10 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   await page.getByLabel('用户名', {exact:true}).fill('admin');
   await page.getByLabel('密码', {exact:true}).fill('browser-test-password');
   await page.getByRole('button', {name:'登录',exact:true}).click();
-  const card = page.locator('.new-task-card').filter({hasText:'git_new'});
+  const changesEntry = page.getByRole('button', {name:'查看连接与检查状态',exact:true});
+  const changes = page.getByRole('dialog', {name:'GitLab 连接与检查状态',exact:true});
+  await changesEntry.click();
+  const card = changes.locator('.new-task-card').filter({hasText:'git_new'});
   await expect(card).toContainText('新任务 · 待发布');
   await page.screenshot({path:'../data/gitlab-task-new.png',fullPage:true});
   await card.getByRole('button', {name:'审查并发布',exact:true}).click();
@@ -67,7 +70,11 @@ test('GitLab task discovery, publication, marked updates and confirmed deletion'
   const headers = {'X-CSRF-Token': await page.evaluate(() => sessionStorage.getItem('wfs_csrf_token'))};
   const change = async action => {
     expect((await page.request.post('/api/admin/fixture/gitlab', {headers,data:{action}})).status()).toBe(200);
-    await page.getByRole('button', {name:'刷新列表',exact:true}).click();
+    await changesEntry.click();
+    const refresh = changes.getByRole('button', {name:'刷新列表',exact:true});
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await changes.getByRole('button', {name:'关闭',exact:true}).click();
   };
   try {
     await change('update');

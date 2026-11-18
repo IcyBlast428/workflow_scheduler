@@ -1,48 +1,194 @@
 <template>
-  <section class="gitlab-task-changes" :class="{'is-compact':!expanded}" aria-label="GitLab 任务变更">
-    <div class="changes-summary"><span>{{ state.enabled ? (state.items.length ? `${state.items.length} 项 GitLab 变更待处理` : 'GitLab · 暂无待发布变更') : 'GitLab · 未连接' }}</span><button class="btn" :aria-expanded="expanded" @click="toggleExpanded">{{ expanded ? '收起' : pendingTasks.length ? '查看待处理变更' : '查看连接与检查状态' }}</button></div>
-    <div v-show="expanded" class="changes-content">
-    <div class="changes-heading"><div><strong>GitLab 任务变更</strong><p class="hint">{{ state.enabled ? '全部待处理变更均在此展示，不受任务列表筛选和分页影响。' : '配置 GitLab 后，可在此审查新增、更新、恢复和删除变更。' }}</p></div><button class="btn" :disabled="loading" @click="refresh">{{ loading ? '检查中…' : '刷新列表' }}</button><button v-if="canConfigure" class="btn" :disabled="scanning || !state.enabled" @click="scan">{{ scanning ? '已请求检查…' : '立即检查 GitLab' }}</button><button v-if="canConfigure" class="btn" @click="$emit('settings')">连接设置</button></div>
-    <p v-if="pendingTasks.length || error || state.error" class="hint">最近完成检查：{{ scanTime }} · {{ state.complete ? '扫描完整' : '等待检查或结果不完整' }}</p>
-    <p v-if="error || state.error" class="inline-alert warning" role="alert">{{ error || state.error }}</p>
-    <div v-if="pendingTasks.length" class="new-task-grid">
-      <article v-for="item in pendingTasks" :key="item.id" class="new-task-card"><div><span :class="['tag',item.kind === 'delete' ? 'danger' : item.kind === 'new' ? 'success' : 'warning']">{{ {new:'新任务 · 待发布',recover:'原任务 · 待恢复关联',update:'原任务 · 待更新',delete:'原任务 · 待确认删除'}[item.kind] || '任务变更 · 待处理' }}</span><h3>{{ item.recovery?.task_name || item.task_name }}</h3><p v-if="item.recovery" class="hint">保留原任务编号 {{ item.recovery.pid }}、调度配置和历史记录。</p><p class="hint">{{ item.group_name }} / {{ item.folder_name }}</p><small class="mono">{{ item.sha.slice(0, 8) }} · {{ item.file_count }} 个文件</small><p v-if="item.error" class="danger-text">{{ item.error }}</p></div><button class="btn primary" :disabled="item.blocked" @click="$emit('open', item.pid)">{{ item.kind === 'recover' ? '恢复原任务' : item.kind === 'delete' ? '查看删除变更' : '审查并发布' }}</button></article>
+  <section class="gitlab-task-changes changes-summary" aria-label="GitLab 任务变更">
+    <div class="changes-status" role="status">
+      <strong>GitLab</strong>
+      <span class="tag" :class="checkError ? 'warning' : 'info'">{{ connectionStatus }}</span>
+      <span v-if="pendingTasks.length" class="tag warning">{{ pendingTasks.length }} 项待处理</span>
     </div>
-    <p v-else-if="state.enabled && state.complete && !state.items.length" class="hint">已发布任务与 GitLab 一致。</p>
-    </div>
+    <button class="btn" type="button" aria-haspopup="dialog" @click="open = true">查看连接与检查状态</button>
   </section>
+
+  <Teleport to="body">
+    <ModalShell :open="open" label="GitLab 连接与检查状态" panel-class="gitlab-changes-modal" @close="open = false">
+      <header class="modal-head">
+        <h3>GitLab 连接与检查状态</h3>
+        <button class="btn icon-only" type="button" aria-label="关闭" @click="open = false">×</button>
+      </header>
+      <div class="modal-body changes-content">
+        <div class="changes-heading">
+          <div>
+            <strong>{{ connectionStatus }}</strong>
+            <p v-if="state.enabled" class="hint">最近完成检查：{{ scanTime }} · {{ state.complete ? '扫描完整' : '等待检查或结果不完整' }}</p>
+            <p v-else-if="loaded" class="hint">配置 GitLab 后，可在此审查新增、更新、恢复和删除变更。</p>
+          </div>
+          <div class="filter-actions">
+            <button class="btn" type="button" :disabled="loading" @click="refresh">{{ loading ? '检查中…' : '刷新列表' }}</button>
+            <button v-if="canConfigure" class="btn" type="button" :disabled="loading || scanning || !state.enabled" @click="scan">{{ scanning ? '已请求检查…' : '立即检查 GitLab' }}</button>
+            <button v-if="canConfigure" class="btn" type="button" @click="openSettings">连接设置</button>
+          </div>
+        </div>
+        <p v-if="checkError" class="inline-alert warning" role="alert">{{ checkError }}</p>
+        <div v-if="pendingTasks.length" class="new-task-grid">
+          <article v-for="item in pendingTasks" :key="item.id" class="new-task-card">
+            <div>
+              <span class="tag" :class="item.kind === 'delete' ? 'danger' : item.kind === 'new' ? 'success' : 'warning'">{{ changeLabels[item.kind] || '任务变更 · 待处理' }}</span>
+              <h4>{{ item.recovery?.task_name || item.task_name }}</h4>
+              <p v-if="item.recovery" class="hint">保留原任务编号 {{ item.recovery.pid }}、调度配置和历史记录。</p>
+              <p class="hint">{{ item.group_name }} / {{ item.folder_name }}</p>
+              <small class="mono">{{ item.sha.slice(0, 8) }} · {{ item.file_count }} 个文件</small>
+              <p v-if="item.error" class="danger-text">{{ item.error }}</p>
+            </div>
+            <button class="btn primary" type="button" :disabled="item.blocked" @click="openTask(item.pid)">
+              {{ item.kind === 'recover' ? '恢复原任务' : item.kind === 'delete' ? '查看删除变更' : '审查并发布' }}
+            </button>
+          </article>
+        </div>
+        <p v-else-if="state.enabled && state.complete && !checkError" class="hint">已发布任务与 GitLab 一致。</p>
+      </div>
+    </ModalShell>
+  </Teleport>
 </template>
+
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
-import {useRefreshLoop} from '../composables/useRefreshLoop.js';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
+import ModalShell from './ModalShell.vue';
+import { useRefreshLoop } from '../composables/useRefreshLoop.js';
 import { api } from '../api';
-const props=defineProps({ canConfigure:{type:Boolean,default:true} });
+
+const props = defineProps({ canConfigure: { type: Boolean, default: true } });
 const emit = defineEmits(['state', 'open', 'settings']);
-const state = ref({ enabled: false, items: [] }), error = ref(''), loading = ref(false);
+const changeLabels = {
+  new: '新任务 · 待发布',
+  recover: '原任务 · 待恢复关联',
+  update: '原任务 · 待更新',
+  delete: '原任务 · 待确认删除',
+};
+const state = ref({ enabled: false, items: [] });
+const open = ref(false);
+const error = ref('');
+const loading = ref(false);
+const loaded = ref(false);
+const scanning = ref(false);
 const pendingTasks = computed(() => state.value.items || []);
-const scanning = ref(false), expansionChoice=ref(null);
-const scanTime=computed(()=>state.value.checked_at ? new Date(state.value.checked_at * 1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}) : '尚未检查');
-const needsAttention=computed(()=>Boolean(pendingTasks.value.length || error.value || state.value.error));
-// Auto-open until the user chooses; polling must not override a manual collapse.
-const expanded=computed(()=>expansionChoice.value ?? needsAttention.value);
-function toggleExpanded(){expansionChoice.value=!expanded.value;}
-async function scan() { scanning.value = true; try { await api.scanGitlab(); await refresh(); } catch(err) { error.value = err.message; scanning.value = false; } }
-let alive = true, pending = null, sequence = 0;
+const checkError = computed(() => error.value || state.value.error);
+const connectionStatus = computed(() => {
+  if (checkError.value) return '检查异常';
+  if (!loaded.value) return '正在读取状态…';
+  if (!state.value.enabled) return '未连接';
+  return scanning.value ? '检查中' : '已配置连接';
+});
+const scanTime = computed(() => state.value.checked_at
+  ? new Date(state.value.checked_at * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+  : '尚未检查');
+
+function openSettings() {
+  open.value = false;
+  emit('settings');
+}
+
+async function openTask(pid) {
+  open.value = false;
+  await nextTick();
+  emit('open', pid);
+}
+
+async function scan() {
+  scanning.value = true;
+  try {
+    await api.scanGitlab();
+    await refresh();
+  } catch (err) {
+    error.value = err.message;
+    scanning.value = false;
+  }
+}
+
+let alive = true;
+let pending = null;
 function refresh() {
   if (pending) return pending;
-  pending=fetchChanges().finally(()=>{pending=null;});
+  pending = fetchChanges().finally(() => { pending = null; });
   return pending;
 }
+
 async function fetchChanges() {
-  const token = ++sequence; loading.value = true;
-  try { const [data, scanState] = await Promise.all([api.gitlabTasks(), props.canConfigure ? api.gitlabState(true) : Promise.resolve({scanning:false})]); if (alive && token === sequence) { state.value = data; scanning.value = scanState.scanning; error.value = ''; emit('state', data); } }
-  catch (err) { if (alive && token === sequence) { error.value = err.message; emit('state', { items: [] }); } return false; }
-  finally { if (alive && token === sequence) loading.value = false; }
+  loading.value = true;
+  try {
+    const [data, scanState] = await Promise.all([
+      api.gitlabTasks(),
+      props.canConfigure ? api.gitlabState(true) : Promise.resolve({ scanning: false }),
+    ]);
+    if (!alive) return;
+    state.value = data;
+    scanning.value = scanState.scanning;
+    error.value = '';
+    loaded.value = true;
+    emit('state', data);
+  } catch (err) {
+    if (alive) {
+      error.value = err.message;
+      emit('state', { items: [] });
+    }
+    return false;
+  } finally {
+    if (alive) loading.value = false;
+  }
 }
-useRefreshLoop({load:refresh,interval:15000});
-onMounted(() => { window.addEventListener('wfs:task-releases-refresh', refresh); });
-onBeforeUnmount(() => { alive = false; sequence++;  window.removeEventListener('wfs:task-releases-refresh', refresh); });
+
+useRefreshLoop({ load: refresh, interval: 15000 });
+onMounted(() => window.addEventListener('wfs:task-releases-refresh', refresh));
+onBeforeUnmount(() => {
+  alive = false;
+  window.removeEventListener('wfs:task-releases-refresh', refresh);
+});
 </script>
+
 <style scoped>
-.gitlab-task-changes.is-compact{padding:12px 20px}.is-compact .changes-heading p{font-size:12px;margin-bottom:0}.is-compact .changes-heading .btn{padding:7px 10px}.gitlab-task-changes{padding:22px;border-bottom:1px solid var(--line)}.changes-heading{display:flex;align-items:center;gap:12px}.changes-heading>div{flex:1;min-width:0}.changes-heading p{margin-top:8px;line-height:1.6}.new-task-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:20px}.new-task-card{display:flex;gap:18px;align-items:center;justify-content:space-between;padding:20px;border:1px solid #448a78;border-radius:var(--radius);background:linear-gradient(125deg,#66c9a018,transparent)}.new-task-card h3{margin:14px 0 8px}.new-task-card small{display:block;margin-top:10px;overflow-wrap:anywhere}.new-task-card>div{min-width:0}.new-task-card button{flex-shrink:0}.gitlab-task-changes>p{margin-top:16px}@media(max-width:720px){.changes-heading{flex-wrap:wrap}.changes-heading>div{flex-basis:100%}.new-task-grid{grid-template-columns:1fr}.new-task-card{flex-wrap:wrap}}
-.changes-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:13px}.changes-summary .btn{min-height:32px;padding:5px 10px}.changes-content{padding-top:12px}.gitlab-task-changes.is-compact{padding-block:8px}</style>
+.changes-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px var(--panel-padding);
+  border-top: 1px solid var(--line);
+}
+.changes-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+.changes-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.changes-heading p { margin: 6px 0 0; }
+.changes-content > p { margin: 12px 0 0; }
+.new-task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.new-task-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.new-task-card > div { min-width: 0; overflow-wrap: anywhere; }
+.new-task-card h4 { margin: 8px 0 0; }
+.new-task-card p { margin: 4px 0 0; }
+.new-task-card small { display: block; margin-top: 6px; }
+</style>

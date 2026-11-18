@@ -17,6 +17,9 @@
           <button v-if="canOperate && record.status && !['queued','running'].includes(record.status)" class="btn" :disabled="retrying" @click="$emit('retry',record)">再执行一次</button>
         </div>
         <details v-if="record.status" class="disclosure"><summary>执行时间、来源与版本信息</summary><div class="disclosure-body"><div class="execution-meta">
+          <span v-if="record.pid">任务 ID：{{ record.pid }}</span>
+          <span v-if="record.group_name">组名：{{ record.group_name }}</span>
+          <span v-if="record.folder_name">任务目录：{{ record.folder_name }}</span>
           <span>来源：{{ ({manual:'手动',trial:'试运行',retry:'自动重试',backfill:'业务日期补跑'})[record.source] || '自动调度' }} · {{ record.actor }}</span>
           <span>开始：{{ record.start_time || '尚未开始' }}</span><span>结束：{{ record.end_time || '尚未结束' }}</span>
           <span>最近心跳：{{ record.heartbeat || '-' }}</span>

@@ -1,28 +1,68 @@
 <template>
-  <section class="panel">
-  <div class="task-list-heading"><div class="task-summary-strip" aria-label="任务列表摘要">
-    <span>匹配任务 <strong>{{ tasks.total }}</strong></span><span>本页启用 <strong>{{ taskSummary.running }}</strong></span><span>本页活动 <strong>{{ taskSummary.pending }}</strong></span><span>本页配置异常 <strong>{{ taskSummary.invalid }}</strong></span><span>本页连续失败 <strong>{{ taskSummary.failed }}</strong></span>
-  </div>
-    <button v-if="canManage" class="btn" @click="$emit('packages')">任务示例</button></div>
-    <div class="task-service-strip"><slot name="maintenance" />
-    <GitlabTaskChanges v-if="canManage || canPublish" :can-configure="canManage" @state="gitlabChanges = $event.items" @open="$emit('release', $event)" @settings="$emit('gitlab')" /></div>
+  <section class="panel" :class="{ 'task-panel-with-footer': canPublish }">
+    <div class="task-list-heading">
+      <div class="task-summary-strip" aria-label="任务列表摘要">
+        <span>匹配任务 <strong>{{ tasks.total }}</strong></span>
+        <span class="desktop-count">本页启用 <strong>{{ taskSummary.running }}</strong></span>
+        <span :class="{ 'desktop-count': !taskSummary.pending }">本页活动 <strong>{{ taskSummary.pending }}</strong></span>
+        <span :class="{ 'desktop-count': !taskSummary.invalid }">本页配置异常 <strong>{{ taskSummary.invalid }}</strong></span>
+        <span :class="{ 'desktop-count': !taskSummary.failed }">本页连续失败 <strong>{{ taskSummary.failed }}</strong></span>
+      </div>
+      <button v-if="canManage" class="btn" @click="$emit('packages')">任务示例</button>
+    </div>
+    <details
+      v-if="canManage"
+      class="task-services"
+      :class="{ 'needs-attention': servicesNeedAttention }"
+      :open="!narrow || servicesOpen || servicesNeedAttention"
+    >
+      <summary @click.prevent="servicesOpen = !servicesOpen">
+        运行状态
+        <span v-if="maintenanceStatus === 'normal' && !servicesOpen" class="services-status">执行接收正常</span>
+      </summary>
+      <div class="task-service-strip">
+        <MaintenanceControl :confirm="confirm" compact @status="maintenanceStatus = $event" />
+      </div>
+    </details>
     <form class="task-search" @submit.prevent="$emit('search')">
       <div class="task-search-basic">
         <label>任务名称<input id="taskname" v-model.trim="tasks.params.taskname" class="input" placeholder="搜索名称关键字"></label>
-        <label>标签<input v-model.trim="tasks.params.tag" class="input" placeholder="搜索标签"></label>
+        <label v-if="!narrow">标签<input v-model.trim="tasks.params.tag" class="input" placeholder="搜索标签"></label>
         <label>任务状态<select v-model="tasks.params.status" class="select" aria-label="任务状态"><option value="">全部状态</option><option value="active">有活动实例</option><option value="failed">最近结果异常</option><option value="invalid">配置异常</option><option value="enabled">调度已启用</option></select></label>
         <div class="filter-actions"><button class="btn primary" type="submit"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>搜索</button><button class="btn" type="button" @click="$emit('reset')">清空</button><button class="btn" type="button" :aria-expanded="advancedOpen" aria-controls="task-advanced-filters" @click="advancedOpen=!advancedOpen">更多筛选{{ advancedCount ? ' · '+advancedCount : '' }}</button><label class="checkbox-row"><input :checked="onlyFavorites" type="checkbox" @change="$emit('favorites-only',$event.target.checked)">仅看收藏</label></div>
       </div>
       <div v-show="advancedOpen" id="task-advanced-filters" class="task-search-advanced">
+        <label v-if="narrow">标签<input v-model.trim="tasks.params.tag" class="input" placeholder="搜索标签"></label>
         <label>任务 ID<input id="taskid" v-model.trim="tasks.params.taskid" class="input" placeholder="PID"></label>
         <label>任务分组<select v-model="tasks.params.taskgroup" class="select" aria-label="任务分组"><option value="">全部分组</option><option v-for="group in tasks.groups" :key="group" :value="group">{{ group }}</option></select></label>
         <label>负责人<input v-model.trim="tasks.params.owner" class="input" placeholder="负责人关键字"></label>
       </div>
     </form>
-    <div class="list-control-lane"><div v-show="!selectedTasks.length || !canOperate" class="list-view-toolbar"><div class="filter-actions"><label>密度<select v-model="density" class="select" aria-label="任务列表密度"><option value="standard">标准</option><option value="compact">紧凑</option></select></label><details class="column-picker"><summary>显示列</summary><div class="column-options"><label v-for="item in optionalColumns" :key="item.key"><input type="checkbox" v-model="columns" :value="item.key">{{ item.label }}</label></div></details></div><span class="hint">{{ selectedTasks.length ? `已选 ${selectedTasks.length} 项` : '显示偏好自动保存' }}</span></div>
+    <div class="list-control-lane">
+      <details v-show="!selectedTasks.length || !canOperate" class="list-settings" :open="!narrow">
+        <summary>列表设置</summary>
+        <div class="list-view-toolbar">
+          <div class="filter-actions">
+            <button
+              class="density-switch"
+              type="button"
+              role="switch"
+              aria-label="任务列表密度 · 紧凑模式"
+              :aria-checked="density === 'compact'"
+              @click="density = density === 'compact' ? 'standard' : 'compact'"
+            >
+              <span :class="{ 'density-selected': density === 'standard' }">标准</span>
+              <span class="density-track" aria-hidden="true"></span>
+              <span :class="{ 'density-selected': density === 'compact' }">紧凑</span>
+            </button>
+            <ColumnPicker v-model="columns" :options="optionalColumns" />
+          </div>
+          <span class="hint">{{ selectedTasks.length ? `已选 ${selectedTasks.length} 项` : '显示偏好自动保存' }}</span>
+        </div>
+      </details>
     <div class="batch-lane" :class="{active:selectedTasks.length}"><div v-if="canOperate && selectedTasks.length" class="batch-toolbar">
       <span class="selection-count"
-        >已选择 <strong>{{ selectedTasks.length }}</strong> 个任务</span
+        >已选 <strong>{{ selectedTasks.length }}</strong> 项</span
       >
       <div class="filter-actions">
         <button
@@ -50,7 +90,7 @@
     </div>
     </div>
     </div>
-    <LoadingStatus class="task-loading" :active="tasks.loading" label="正在更新任务列表…" />
+    <LoadingStatus class="task-loading" :active="tasks.loading" :compact="narrow" label="正在更新任务列表…" />
     <div v-if="tasks.error" class="error-state">{{ tasks.error }}</div>
     <div v-if="!tasks.items.length && !tasks.error" class="empty-state">
       <strong>{{ tasks.loading ? '正在读取任务' : '没有匹配的任务' }}</strong>
@@ -58,7 +98,7 @@
         tasks.loading
           ? '正在更新结果，请稍候。'
           : canManage
-            ? '可以清空筛选条件；GitLab 新任务会在首页提示发布。'
+            ? '可清空筛选，或在下方查看待发布的 GitLab 任务。'
             : '可以清空筛选条件后重试。'
       }}</span>
     </div>
@@ -91,13 +131,24 @@
       @page-size="$emit('page-size', $event)"
     />
   </section>
+  <footer v-if="canPublish" class="task-gitlab-footer">
+    <GitlabTaskChanges
+      :can-configure="canManage"
+      @state="gitlabChanges = $event.items"
+      @open="$emit('release', $event)"
+      @settings="$emit('gitlab')"
+    />
+  </footer>
 </template>
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import GitlabTaskChanges from '../components/GitlabTaskChanges.vue';
+import MaintenanceControl from '../components/MaintenanceControl.vue';
 import TaskTable from '../components/TaskTable.vue';
 import LoadingStatus from '../components/LoadingStatus.vue';
 import Pagination from '../components/Pagination.vue';
+import ColumnPicker from '../components/ColumnPicker.vue';
+import { readPreference, writePreference } from '../workspacePreferences.js';
 const props = defineProps({
   userKey: { type: String, default: '' },
   tasks: { type: Object, required: true },
@@ -110,6 +161,7 @@ const props = defineProps({
   canManage: Boolean,
   canPublish: Boolean,
   canOperate: Boolean,
+  confirm: { type: Function, required: true },
 });
 defineEmits([
   'search',
@@ -132,14 +184,49 @@ defineEmits([
   'log',
   'favorites-only',
 ]);
-const optionalColumns=[{key:'group',label:'组名'},{key:'pending',label:'活动实例 / 上限'},{key:'failed',label:'连续 / 累计失败'}];
-const density=ref('standard'),columns=ref([]);
-const preferenceKey=computed(()=>`wfs:task-table:v1:${props.userKey}`);
-watch(preferenceKey,()=>{let value={};try{value=JSON.parse(localStorage.getItem(preferenceKey.value)||'{}')||{};}catch{}density.value=value.density==='compact'?'compact':'standard';columns.value=Array.isArray(value.columns)?value.columns.filter(key=>optionalColumns.some(item=>item.key===key)):[];},{immediate:true});
-watch([density,columns],()=>{try{localStorage.setItem(preferenceKey.value,JSON.stringify({density:density.value,columns:columns.value}));}catch{}},{deep:true});
+const optionalColumns = [
+  { key: 'group', label: '组名' },
+  { key: 'pending', label: '活动实例 / 上限' },
+  { key: 'failed', label: '连续 / 累计失败' },
+];
+const tablePreferences = ref({ density: 'standard', columns: [] });
+const preferenceKey = computed(() => `wfs:task-table:v1:${props.userKey}`);
+watch(preferenceKey, key => {
+  const saved = readPreference(key, {});
+  tablePreferences.value = {
+    density: saved.density === 'compact' ? 'compact' : 'standard',
+    columns: Array.isArray(saved.columns)
+      ? optionalColumns.filter(option => saved.columns.includes(option.key)).map(option => option.key)
+      : [],
+  };
+}, { immediate: true });
+
+function updateTablePreferences(values) {
+  tablePreferences.value = { ...tablePreferences.value, ...values };
+  writePreference(preferenceKey.value, tablePreferences.value);
+}
+const density = computed({
+  get: () => tablePreferences.value.density,
+  set: value => updateTablePreferences({ density: value }),
+});
+const columns = computed({
+  get: () => tablePreferences.value.columns,
+  set: value => updateTablePreferences({ columns: value }),
+});
 const gitlabChanges = ref([]);
-const advancedOpen=ref(false);
-const advancedCount=computed(()=>[props.tasks.params.taskid,props.tasks.params.taskgroup,props.tasks.params.owner].filter(Boolean).length);
+const narrowViewport = window.matchMedia('(max-width: 600px)');
+const narrow = ref(narrowViewport.matches);
+const updateViewport = event => { narrow.value = event.matches; };
+narrowViewport.addEventListener('change', updateViewport);
+onBeforeUnmount(() => narrowViewport.removeEventListener('change', updateViewport));
+const servicesOpen = ref(false);
+const maintenanceStatus = ref('loading');
+const servicesNeedAttention = computed(() => maintenanceStatus.value === 'attention');
+const advancedOpen = ref(false);
+const advancedCount = computed(() => {
+  const { taskid, taskgroup, owner, tag } = props.tasks.params;
+  return [taskid, taskgroup, owner, narrow.value && tag].filter(Boolean).length;
+});
 const taskSummary = computed(() => ({
   running: props.tasks.items.filter((item) => item.state === 'true').length,
   pending: props.tasks.items.filter((item) => item.pending).length,
@@ -152,21 +239,107 @@ const taskSummary = computed(() => ({
 </script>
 
 <style scoped>
-.task-loading{height:24px;padding-block:0!important}.task-summary-strip{display:flex;flex-wrap:wrap;gap:12px 24px;padding:8px 20px;color:var(--muted);font-size:13px}.task-summary-strip strong{color:var(--ink);margin-left:6px}.task-search{padding:12px 20px;display:grid;gap:12px}.task-search-basic{display:grid;grid-template-columns:minmax(180px,1fr) minmax(140px,.6fr) auto;gap:12px;align-items:end}.task-search label{display:grid;gap:8px}.task-search .checkbox-row{display:flex;align-items:center}.task-search-advanced{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding-top:16px;border-top:1px solid var(--line)}.search-icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
+.task-panel-with-footer { margin-block-end: 12px; }
+.task-gitlab-footer {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 3;
+  margin-block-start: auto;
+  padding-block-end: env(safe-area-inset-bottom, 0px);
+  border: 1px solid var(--line);
+  border-block-end: 0;
+  border-start-start-radius: var(--radius);
+  border-start-end-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, .18);
+}
+.task-gitlab-footer :deep(.gitlab-task-changes) { border-block-start: 0; }
+.task-loading{height:20px;padding-block:0!important}.task-summary-strip{display:flex;flex-wrap:wrap;gap:12px 24px;padding:8px 20px;color:var(--muted);font-size:13px}.task-summary-strip strong{color:var(--ink);margin-left:6px}.task-search{padding:12px 20px;display:grid;gap:12px}.task-search-basic{display:grid;grid-template-columns:minmax(180px,1fr) minmax(140px,.6fr) auto;gap:12px;align-items:end}.task-search label{display:grid;gap:8px}.task-search .checkbox-row{display:flex;align-items:center}.task-search-advanced{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding-top:16px;border-top:1px solid var(--line)}.search-icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
 @media(max-width:1100px){.task-search-basic{grid-template-columns:1fr 1fr}.task-search-basic>.filter-actions{grid-column:1/-1}}
-@media(max-width:560px){.panel-head{flex-direction:row;align-items:center;padding:14px}.panel-head p{display:none}.panel-head h2{margin:0}.task-summary-strip{gap:8px 16px;font-size:12px;padding-bottom:12px}.task-search{padding:14px}.task-search-advanced{grid-template-columns:1fr}.task-search-basic{gap:10px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
-.list-view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 20px;flex-wrap:wrap}.list-view-toolbar label{white-space:nowrap;display:flex;align-items:center;gap:8px;font-size:13px}.list-view-toolbar .select{min-height:34px;padding-block:6px}.column-picker{position:relative;font-size:13px}.column-picker summary{cursor:pointer;padding:8px}.column-options{position:absolute;z-index:5;top:100%;left:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:200px;box-shadow:var(--shadow);display:grid;gap:12px}.list-control-lane{min-height:56px;position:sticky;top:0;z-index:4;background:var(--panel)}.batch-lane{min-height:0}.batch-lane.active{background:var(--panel);box-shadow:0 3px 12px #0004}.batch-toolbar{padding:8px 20px;border-bottom:0}.task-search-basic>.filter-actions{grid-column:1/-1}
-@media(min-width:1300px){.task-search-basic{grid-template-columns:minmax(180px,1fr) minmax(130px,.6fr) 140px auto}.task-search-basic>.filter-actions{grid-column:auto;align-self:end;min-height:40px}.task-search-basic>.filter-actions .btn{padding-inline:10px}.task-search-basic>.filter-actions{gap:6px}}
-.panel-head{padding-block:14px}.task-loading{height:20px}
-@media(max-width:600px){.list-control-lane{min-height:112px}.batch-toolbar{gap:8px;align-items:center}.batch-toolbar .btn{min-height:34px;padding:6px 8px;font-size:12px}.batch-toolbar .filter-actions{gap:6px}.list-view-toolbar>.hint{font-size:12px}}
-</style>
-
-<style scoped>
+.list-view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 20px;flex-wrap:wrap}.list-view-toolbar label{white-space:nowrap;display:flex;align-items:center;gap:8px;font-size:13px}.list-control-lane{min-height:56px;position:sticky;top:0;z-index:4;background:var(--panel)}.batch-lane{min-height:0}.batch-lane.active{background:var(--panel);box-shadow:0 3px 12px #0004}.batch-toolbar{padding:8px 20px;border-bottom:0}.task-search-basic>.filter-actions{grid-column:1/-1}
+.density-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.density-switch .density-selected { color: var(--brand-strong); }
+.density-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--input-bg);
+}
+.density-track::after {
+  position: absolute;
+  inset-block-start: 3px;
+  inset-inline-start: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted-strong);
+  content: '';
+}
+.density-switch[aria-checked="true"] .density-track {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.density-switch[aria-checked="true"] .density-track::after {
+  inset-inline-start: calc(100% - 15px);
+  background: var(--brand);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .density-track::after { transition: inset-inline-start .15s ease; }
+}
 .task-list-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line)}
 .task-list-heading .task-summary-strip{padding:0;gap:8px 20px}.task-list-heading>.btn{flex:none;font-size:13px;min-height:34px}
 .task-service-strip{display:flex;flex-wrap:wrap;align-items:flex-start;border-bottom:1px solid var(--line);background:var(--panel-soft)}
 .task-service-strip>:deep(section){flex:1 1 320px;min-width:0;border-bottom:0;padding:8px 20px}
-.task-service-strip>:deep(section:has(.changes-content:not([style*="display: none"]))){flex-basis:100%}
-@media(min-width:1300px){.task-search-basic{grid-template-columns:minmax(200px,360px) minmax(140px,240px) 140px auto;justify-content:start}}
-@media(max-width:560px){.task-list-heading{padding:12px 14px}.task-list-heading .task-summary-strip{font-size:12px}.task-service-strip>:deep(section){padding-inline:14px}}
+.task-services > summary, .list-settings > summary { display: none; }
+@media (min-width: 1300px) {
+  .task-search-basic { grid-template-columns:minmax(200px,360px) minmax(140px,240px) 140px auto; justify-content: start; }
+  .task-search-basic > .filter-actions { grid-column: auto; align-self: end; min-height: 40px; gap: 6px; }
+  .task-search-basic > .filter-actions .btn { padding-inline: 10px; }
+}
+@media (max-width: 600px) {
+  .task-list-heading { padding: 8px 14px; }
+  .task-list-heading .task-summary-strip { font-size: 13px; }
+  .task-summary-strip .desktop-count { display: none; }
+  .task-services > summary, .list-settings > summary {
+    display: list-item;
+    padding: 11px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .task-services { border-bottom: 1px solid var(--line); }
+  .task-services.needs-attention > summary { display: none; }
+  .services-status { float: right; color: var(--muted); }
+  .task-service-strip { border-bottom: 0; }
+  .task-service-strip > :deep(section) { padding-inline: 14px; }
+  .task-search { padding: 12px 14px 4px; }
+  .task-search-basic { gap: 10px; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+  .task-search label { min-width: 0; }
+  .task-search label :is(.input, .select) { width: 100%; min-width: 0; }
+  .task-search-advanced { grid-template-columns: 1fr; }
+  .list-control-lane { min-height: 50px; }
+  .list-view-toolbar { padding-inline: 14px; }
+  .list-view-toolbar > .hint { display: none; }
+  .batch-toolbar { gap: 8px; align-items: center; padding-inline: 14px; }
+  .batch-toolbar .selection-count { font-size: 12px; }
+  .batch-toolbar > .filter-actions { width: auto; }
+  .batch-toolbar .btn { min-height: 34px; padding: 6px 8px; font-size: 12px; }
+  .batch-toolbar .filter-actions { gap: 6px; }
+  .task-loading { height: 4px; }
+}
 </style>

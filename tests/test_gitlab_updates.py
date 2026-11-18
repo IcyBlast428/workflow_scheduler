@@ -156,7 +156,7 @@ class GitLabTests(unittest.TestCase):
         result = self.run_scan()
         self.assertEqual(len(result['items']), 1)
         self.assertTrue(any('任务列表查看' in message for message in result['warnings']))
-        self.assertTrue(any('尚未确认平台' in message for message in result['warnings']))
+        self.assertTrue(any('未设置平台部署基线' in message for message in result['warnings']))
 
     def test_timeout_and_truncated_text_are_explicit(self):
         config = self.config()
@@ -197,6 +197,23 @@ class GitLabTests(unittest.TestCase):
         with patch.object(updates, 'scan', side_effect=change):
             updates._worker(token, config)
         self.assertEqual(updates.state('admin')['warnings'], [])
+
+    def test_idle_scan_and_brief_state_skip_full_snapshot_after_legacy_backfill(self):
+        self.config()
+        legacy = self.run_scan()
+        # The first poll of a pre-upgrade snapshot sets up the metadata row.
+        with patch.object(updates, '_snapshot', wraps=updates._snapshot) as full_snapshot:
+            self.assertFalse(updates.request_scan())
+            full_snapshot.assert_called_once()
+        with patch.object(updates, '_snapshot', side_effect=AssertionError('read full snapshot')), \
+                patch.object(updates.threading, 'Thread') as thread:
+            self.assertFalse(updates.request_scan())
+            brief = updates.state('admin', brief=True)
+            self.assertEqual(brief['checked_at'], legacy['checked_at'])
+            self.assertEqual((brief['pending_merge'], brief['pending_release']), (1, 2))
+            updates.acknowledge('admin', brief['fingerprint'])
+            self.assertFalse(updates.state('admin', brief=True)['unread'])
+            thread.assert_not_called()
 
     def test_permissions_csrf_and_secrets_are_enforced_for_all_routes(self):
         self.config()

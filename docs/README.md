@@ -1,13 +1,15 @@
 # 文档索引
 
-平台正式部署使用 GaussDB/DWS；全新安装与已有本版架构的性能升级分别按对应说明执行，不自动导入旧架构数据或迁移平台数据库。
+首次投产从 START-HERE.md 开始；全新安装不要求运行历史升级或修复脚本。已有实例维护、开发测试和历史设计分别查阅对应文档。
 
+- [全新投产操作手册](../START-HERE.md)
+- [数据库、Nacos 与完整表清单](../deploy/root-test/DATABASE.md)
+- [独立 Nginx / Docker 代理](nginx-deployment.md)
 - [架构图与新手使用说明（离线网页）](onboarding/index.html)
 - [新人讲解手册（12 页 PDF）](onboarding/workflow-scheduler-guide.pdf)
 - [系统架构图（PNG）](onboarding/architecture.png) · [可缩放 SVG](onboarding/architecture.svg)
-- [简化部署入口](../START-HERE.md)
-- [正式部署](systemd-deployment.md)
-- [固定目录测试部署](../deploy/root-test/README.md)
+- [服务结构与已有实例运维](systemd-deployment.md)
+- [固定目录生产配置说明](../deploy/root-test/README.md)
 - [本机协议测试](local-postgres-windows.md)
 - [任务发布](task-packages.md)
 - [GitLab 扫描与差异](gitlab-updates.md)
@@ -25,3 +27,5 @@
 - [任务流程分析](task-flow.md)
 - [全新架构检查](fresh-gauss-audit.md)
 - [代码清理与性能优化](repository-cleanup.md)
+
+历史架构图、PDF、审计和 archive 中的设计记录不作为当前首次安装步骤；已投产功能以当前代码和主操作手册为准。

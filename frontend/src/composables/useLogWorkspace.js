@@ -4,6 +4,28 @@ import { recentDates } from '../timebase.js';
 export function recentLogDates() {
   return recentDates();
 }
+
+const filterRouteKeys = {
+  taskid: 'taskid',
+  taskname: 'taskname',
+  taskstate: 'state',
+  startDate: 'start',
+  endDate: 'end',
+  scope: 'scope',
+};
+
+function defaultTaskLogFilters() {
+  const dates = recentLogDates();
+  return {
+    scope: 'online',
+    taskid: '',
+    taskname: '',
+    taskstate: '',
+    startDate: dates.start,
+    endDate: dates.end,
+  };
+}
+
 export function useLogWorkspace({
   markBackendHealthy,
   handleRequestFailure,
@@ -11,14 +33,13 @@ export function useLogWorkspace({
 }) {
   let taskLogRequestSerial = 0,
     systemLogRequestSerial = 0;
-  // 输入框中的条件可能还未提交；后台检测只复用已应用查询，不能偷跑未确认的筛选。
-  let appliedTaskQuery=null;
+  let requestedTaskQuery = null;
   const matrixLogRange = ref([]);
   onScopeDispose(() => {
     taskLogRequestSerial++;
     systemLogRequestSerial++;
   });
-  const dates = recentLogDates();
+  const defaultFilters = defaultTaskLogFilters();
   const taskLogs = reactive({
     cursors: [''],
     nextCursor: '',
@@ -31,13 +52,15 @@ export function useLogWorkspace({
     ids: [],
     newRecords:false,
     refreshError:'',
+    draft: { ...defaultFilters },
+    get hasDraft() {
+      return Object.keys(this.draft).some(key => this.draft[key] !== this.params[key]);
+    },
+    get canExpandDates() {
+      return Boolean(expandedStartDate());
+    },
     params: {
-      scope: 'online',
-      taskid: '',
-      taskname: '',
-      taskstate: '',
-      startDate: dates.start,
-      endDate: dates.end,
+      ...defaultFilters,
       currentPage: 1,
       pagesize: 10,
     },
@@ -79,19 +102,42 @@ export function useLogWorkspace({
     };
   }
   function hasCurrentTaskLogQuery() {
-    return taskLogs.loaded && !taskLogs.loading && !taskLogs.error && JSON.stringify(appliedTaskQuery) === JSON.stringify(taskLogQueryParams());
+    return (taskLogs.loaded || taskLogs.loading) && !taskLogs.error &&
+      JSON.stringify(requestedTaskQuery) === JSON.stringify(taskLogQueryParams());
   }
+
+  function updateTaskLogFilters(filters) {
+    Object.assign(taskLogs.params, filters);
+    Object.assign(taskLogs.draft, filters);
+  }
+
+  function applyTaskLogRoute(params) {
+    const defaults = defaultTaskLogFilters();
+    const filters = Object.fromEntries(Object.entries(filterRouteKeys).map(([key, param]) => [
+      key, (params.get(param) ?? defaults[key]).slice(0, 200),
+    ]));
+    if (!['online', 'archive', 'all'].includes(filters.scope)) filters.scope = 'online';
+    const range = [params.get('from'), params.get('to')];
+    const preciseRange = range.every(value =>
+      value && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/.test(value),
+    ) ? range : [];
+    if (Object.keys(filters).some(key => filters[key] !== taskLogs.params[key]) ||
+        preciseRange.join() !== matrixLogRange.value.join()) {
+      updateTaskLogFilters(filters);
+      matrixLogRange.value = preciseRange;
+    }
+    if (!hasCurrentTaskLogQuery()) return loadTaskLogs(true);
+  }
+
   function clearTaskLogFilter(key) {
     if (key === 'range') matrixLogRange.value = [];
-    else if (key === 'scope') taskLogs.params.scope = 'online';
+    else if (key === 'scope') updateTaskLogFilters({ scope: 'online' });
     else if (key === 'dates') {
       const dates = recentLogDates();
-      taskLogs.params.startDate = dates.start;
-      taskLogs.params.endDate = dates.end;
-    } else if (['taskid','taskname','taskstate'].includes(key)) taskLogs.params[key] = '';
+      updateTaskLogFilters({ startDate: dates.start, endDate: dates.end });
+    } else if (['taskid', 'taskname', 'taskstate'].includes(key)) updateTaskLogFilters({ [key]: '' });
     else return;
-    syncRoute();
-    loadTaskLogs(true);
+    return applyTaskLogFilters();
   }
 
   // 自动更新只提示有新记录，保留用户正在查看的行和分页，避免新任务挤走点击目标。
@@ -99,14 +145,26 @@ export function useLogWorkspace({
   async function loadTaskLogs(resetPage = false, options = {}) {
     const buffering=options.buffer===true;
     if(buffering && (!taskLogs.loaded || taskLogs.newRecords || taskLogs.loading)) return;
+    if (options.silent && taskLogs.loading) return;
     if(buffering && taskLogs.params.currentPage!==1){taskLogs.newRecords=true;return;}
     if (resetPage) {
       taskLogs.params.currentPage = 1;
       taskLogs.cursors = [''];
     }
     const serial = ++taskLogRequestSerial;
-    const query=buffering && appliedTaskQuery ? {...appliedTaskQuery} : taskLogQueryParams();
-    if(!buffering){appliedTaskQuery={...query};taskLogs.newRecords=false;}
+    const query = taskLogQueryParams();
+    if (!buffering) {
+      // 不让变更后的筛选标签显示在上一次查询的结果上。
+      if (resetPage && JSON.stringify(query) !== JSON.stringify(requestedTaskQuery)) {
+        taskLogs.rows = [];
+        taskLogs.loaded = false;
+        taskLogs.total = 0;
+        taskLogs.hasMore = false;
+        taskLogs.nextCursor = '';
+      }
+      requestedTaskQuery = query;
+      taskLogs.newRecords = false;
+    }
     if (!options.silent) {
       taskLogs.loading = true;
     }
@@ -150,28 +208,42 @@ export function useLogWorkspace({
 
   function resetTaskLogFilters() {
     matrixLogRange.value = [];
-    const dates = recentLogDates();
-    taskLogs.params.scope = 'online';
-    taskLogs.params.taskid = '';
-    taskLogs.params.taskname = '';
-    taskLogs.params.taskstate = '';
-    taskLogs.params.startDate = dates.start;
-    taskLogs.params.endDate = dates.end;
-    syncRoute();
-    loadTaskLogs(true);
+    updateTaskLogFilters(defaultTaskLogFilters());
+    return applyTaskLogFilters();
   }
 
   function setLogRange(days) {
     const dates = recentDates(days);
-    taskLogs.params.startDate = dates.start;
-    taskLogs.params.endDate = dates.end;
-    searchTaskLogs();
+    matrixLogRange.value = [];
+    updateTaskLogFilters({ startDate: dates.start, endDate: dates.end });
+    return applyTaskLogFilters();
+  }
+
+  function expandedStartDate() {
+    const { startDate, endDate } = taskLogs.params;
+    if (matrixLogRange.value.length || !startDate || !endDate) return '';
+    const end = new Date(`${endDate}T00:00:00+08:00`);
+    if (Number.isNaN(end.getTime())) return '';
+    const start = recentDates(93, end).start;
+    return start < startDate ? start : '';
+  }
+
+  function expandTaskLogDates() {
+    const startDate = expandedStartDate();
+    if (!startDate) return;
+    updateTaskLogFilters({ startDate });
+    return applyTaskLogFilters();
   }
 
   function searchTaskLogs() {
     matrixLogRange.value = [];
+    updateTaskLogFilters(taskLogs.draft);
+    return applyTaskLogFilters();
+  }
+
+  function applyTaskLogFilters() {
     syncRoute();
-    loadTaskLogs(true);
+    return loadTaskLogs(true);
   }
 
   // 翻页使用后端游标而非重新计算偏移量；改变筛选或每页条数时必须重置游标链。
@@ -182,13 +254,14 @@ export function useLogWorkspace({
       taskLogs.cursors[page - 1] = taskLogs.nextCursor;
     }
     taskLogs.params.currentPage = page;
-    loadTaskLogs();
+    return loadTaskLogs();
   }
 
   function setTaskLogPageSize(size) {
+    if (taskLogs.loading) return;
     taskLogs.params.pagesize = size;
     taskLogs.params.currentPage = 1;
-    loadTaskLogs(true);
+    return loadTaskLogs(true);
   }
 
   function systemLogQueryParams() {
@@ -250,7 +323,8 @@ export function useLogWorkspace({
   }
   return {
     taskLogs,
-    hasCurrentTaskLogQuery,
+    applyTaskLogRoute,
+    expandTaskLogDates,
     clearTaskLogFilter,
     systemLogs,
     matrixLogRange,

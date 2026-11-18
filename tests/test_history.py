@@ -1,13 +1,16 @@
 """Archive durability and cursor pagination with same-second executions."""
 import datetime as dt
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import uuid
 import unittest
+from unittest.mock import patch
 
 import test_local_integration as shared
 from app import create_app
 from app.bootstrap.database import GaussDB
 from app.bootstrap.history import archive_batch, RUN_COLUMNS
-from app.bootstrap import operations, run_summary
+from app.bootstrap import failure_totals, operations, run_summary
 from app.api.task import views
 
 
@@ -78,6 +81,63 @@ class HistoryTests(unittest.TestCase):
         with GaussDB() as db:
             total = db.execute_query_sql('SELECT archived_failures FROM wfs_history_rollup WHERE pid=?', params=(self.pid,))[0][0]
         self.assertEqual(total, 1)
+
+    def test_failure_counts_during_backfill_and_archive_do_not_lock(self):
+        stamp = dt.datetime.now() - dt.timedelta(days=120)
+        self.insert(self.pid+'-archived', stamp, state=1)
+        self.insert(self.pid+'-pending', stamp, state=-9, summarized=False)
+        self.assertEqual(archive_batch(dt.datetime.now()-dt.timedelta(days=90)), 1)
+        with patch.object(GaussDB, 'execute_sql', side_effect=AssertionError('normal reads may not lock or write')):
+            self.assertEqual(dict(failure_totals.load_totals())[self.pid], 2)
+        self.assertEqual(run_summary.backfill(), 1)
+        with patch.object(GaussDB, 'execute_sql', side_effect=AssertionError('unexpected counter repair')):
+            self.assertEqual(dict(failure_totals.load_totals())[self.pid], 2)
+
+    def test_external_rollup_repair_preserves_unsummarized_failures(self):
+        stamp = dt.datetime.now()
+        self.insert(self.pid+'-summary', stamp, state=1)
+        self.insert(self.pid+'-pending', stamp, state=1, summarized=False)
+        with GaussDB() as db:
+            db.execute_sql('INSERT INTO wfs_history_rollup(pid,archived_failures) VALUES(?,3)',params=(self.pid,))
+        self.assertEqual(dict(failure_totals.load_totals())[self.pid], 5)
+        with GaussDB() as db:
+            self.assertEqual(db.execute_query_sql('SELECT failures,archived_failures FROM wfs_run_totals WHERE pid=?', params=(self.pid,)), [(4, 3)])
+        self.assertEqual(run_summary.backfill(), 1)
+        with patch.object(GaussDB, 'execute_sql', side_effect=AssertionError('repair should be complete')):
+            self.assertEqual(dict(failure_totals.load_totals())[self.pid], 5)
+
+    def test_two_reconcilers_recheck_after_acquiring_the_lock(self):
+        self.insert(self.pid+'-summary', dt.datetime.now(), state=1)
+        with GaussDB() as db:
+            db.execute_sql('INSERT INTO wfs_history_rollup(pid,archived_failures) VALUES(?,2)', params=(self.pid,))
+        initial_reads = threading.Barrier(2, timeout=10)
+        first = threading.local()
+        original_counts = failure_totals._counts
+        repairs = []
+        original_write = GaussDB.execute_sql
+
+        def read(db):
+            result = original_counts(db)
+            if not getattr(first, 'done', False):
+                first.done = True
+                initial_reads.wait()
+            return result
+
+        def write(db, sql, **kwargs):
+            if sql.startswith('DELETE FROM wfs_run_totals'):
+                repairs.append(sql)
+            return original_write(db, sql, **kwargs)
+
+        with patch.object(failure_totals, '_counts', read), patch.object(GaussDB, 'execute_sql', write):
+            with ThreadPoolExecutor(max_workers=2) as workers:
+                readers = [workers.submit(failure_totals.load_totals) for _ in range(2)]
+                self.assertEqual([dict(reader.result())[self.pid] for reader in readers], [3, 3])
+        self.assertEqual(len(repairs), 1)
+
+    def test_dashboard_status_lookup_skips_cumulative_counts(self):
+        with patch.object(views, '_failure_totals') as totals:
+            self.assertEqual(self.client.get('/api/taskinfo/dashboard').status_code, 200)
+        totals.assert_not_called()
 
     def test_archive_mismatch_rolls_back_entire_batch_and_maintenance_retains_history(self):
         stamp = dt.datetime.now()-dt.timedelta(days=120)

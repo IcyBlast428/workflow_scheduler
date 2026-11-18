@@ -101,8 +101,10 @@ class PackageTests(unittest.TestCase):
         v1 = self.ready(self.new({'main.py': 'from helper import value\nprint(value)\n', 'helper.py': 'value="v1"\n', 'sql/query.sql': 'select 1;'}))
         current = self.activate(v1)
         pid = current['pid']
-        spec1 = task_loader.discover_task_specs()[0]
+        with patch.object(task_loader, 'list_python_entry_files', side_effect=AssertionError('scanned task directory')):
+            spec1 = task_loader.discover_task_specs()[0]
         self.assertEqual(spec1['pid'], pid)
+        self.assertEqual(spec1['main_file_options'], ['helper.py', 'main.py'])
         save_schedule(pid, {'schedule_type': 'every_hour', 'main_file': 'main.py', 'enabled': True})
         core.aps_start(task_pid=pid)
         before_config = load_schedule(pid)

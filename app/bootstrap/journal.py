@@ -7,36 +7,46 @@ import contextlib
 import json
 import os
 from pathlib import Path
+import re
+import threading
 import time
 import logging
 import uuid
 from app.bootstrap.recovery_files import open_shared_read, replace_recovery
 logger = logging.getLogger(__name__)
+_run_id = re.compile(r'[a-f0-9]{32}')
+_locks = tuple(threading.RLock() for _ in range(256))
 
-def _spooled(directory, limit=1000):
-    records = []
+def run_lock(run_id):
+    if not _run_id.fullmatch(str(run_id)):
+        raise ValueError('invalid run ID')
+    return _locks[int(run_id[:2], 16)]
+
+def _spool_ids(directory, limit):
     path = Path(directory)
     if not path.exists():
-        return records
+        return
+    count = 0
     with os.scandir(path) as entries:
-        for index, entry in enumerate(entries):
-            if index >= limit:
+        for entry in entries:
+            if limit is not None and count >= limit:
                 break
-            if not entry.name.endswith('.json') or not entry.is_file(follow_symlinks=False):
+            run_id, extension = os.path.splitext(entry.name)
+            if extension != '.json' or not _run_id.fullmatch(run_id) or not entry.is_file(follow_symlinks=False):
                 continue
-            try:
-                with open_shared_read(entry.path) as source:
-                    record = json.load(source)
-                import re
-                if re.fullmatch('[a-f0-9]{32}', record.get('run_id', '')) and entry.name == record['run_id'] + '.json':
-                    records.append(record)
-            except (ValueError, OSError):
-                continue
-    return records
+            yield run_id
+            count += 1
+
+def _spooled(directory, limit=1000):
+    path = Path(directory)
+    return [
+        record
+        for run_id in _spool_ids(directory, limit)
+        if (record := _load_spool(path / (run_id + '.json'), run_id)) is not None
+    ]
 
 def _spool(directory, record):
-    import re
-    if not re.fullmatch('[a-f0-9]{32}', str(record.get('run_id', ''))):
+    if not _run_id.fullmatch(str(record.get('run_id', ''))):
         raise ValueError('invalid run ID')
     path = Path(directory)
     path.mkdir(parents=True, exist_ok=True)
@@ -58,7 +68,7 @@ def _spool(directory, record):
     finally:
         temporary.unlink(missing_ok=True)
 
-def _records(directory, sql, params=()):
+def _records(directory, sql, params=(), *, spool_limit=1000):
     try:
         with connection(directory) as db:
             rows = [json.loads(row[0]) for row in db.execute(sql, params)]
@@ -67,7 +77,7 @@ def _records(directory, sql, params=()):
         rows = []
     # 未补写的恢复文件可能比数据库行更新；合并时必须让同 run_id 的文件覆盖旧行。
     by_id = {row['run_id']: row for row in rows}
-    by_id.update({row['run_id']: row for row in _spooled(directory)})
+    by_id.update({row['run_id']: row for row in _spooled(directory, spool_limit)})
     rows = list(by_id.values())
     return rows
 
@@ -77,20 +87,55 @@ def connection(directory):
     with gauss_store('journal') as db:
         yield db
 
-def read(directory, run_id):
-    import re
-    if not re.fullmatch('[a-f0-9]{32}', str(run_id)):
+def read_spooled(directory, run_id):
+    if not _run_id.fullmatch(str(run_id)):
         raise ValueError('invalid run ID')
     pending_file = Path(directory) / (run_id + '.json')
     if pending_file.is_file() and (not pending_file.is_symlink()):
-        try:
-            with open_shared_read(pending_file) as source:
-                return json.load(source)
-        except FileNotFoundError:
-            pass
+        return _load_spool(pending_file, run_id)
+    return None
+
+def _load_spool(path, run_id):
+    try:
+        with open_shared_read(path) as source:
+            record = json.load(source)
+        if isinstance(record, dict) and record.get('run_id') == run_id and all(
+            isinstance(record.get(key), str) and record[key]
+            for key in ('pid', 'status', 'created_at')
+        ):
+            return record
+    except (ValueError, OSError):
+        pass
+    return None
+
+def read(directory, run_id):
+    record = read_spooled(directory, run_id)
+    if record is not None:
+        return record
     with connection(directory) as db:
         row = db.execute('SELECT payload FROM journal WHERE run_id=?', (run_id,)).fetchone()
     return json.loads(row[0]) if row else None
+
+def read_many(directory, run_ids):
+    """Look up a bounded set of run IDs after merging the recent lists."""
+    records = {}
+    missing = []
+    for run_id in run_ids:
+        record = read_spooled(directory, run_id)
+        if record is None:
+            missing.append(run_id)
+        else:
+            records[run_id] = record
+    if missing:
+        placeholders = ','.join('?' for _ in missing)
+        try:
+            with connection(directory) as db:
+                for (payload,) in db.execute(f'SELECT payload FROM journal WHERE run_id IN ({placeholders})', tuple(missing)):
+                    record = json.loads(payload)
+                    records[record['run_id']] = record
+        except Exception:
+            logger.warning('GaussDB journal batch lookup unavailable', exc_info=True)
+    return records
 
 def write(directory, record, terminal):
     """先落可恢复文件，再写平台索引；索引写入失败时保留文件供后台重试。
@@ -98,19 +143,29 @@ def write(directory, record, terminal):
     pending 同时涵盖执行状态未同步和终态历史未保存，
     不能仅因进程结束就把记录标为可清理。
     """
+    with run_lock(record['run_id']):
+        # Keep a durable local copy until the journal transaction commits.
+        record['log_path'] = _log_path(record)
+        _spool(directory, record)
+        _write_index(directory, record, terminal)
+
+def _log_path(record):
+    run_id = record['run_id']
+    return record.get('log_path') or f"logs/{record['created_at'][:10]}/{run_id[:2]}/{run_id}.log"
+
+def _write_index(directory, record, terminal):
     pending = not record.get('db_synced') or (record['status'] in terminal and (not record.get('history_saved')))
     run_id = record['run_id']
-    path = record.get('log_path') or f"logs/{record['created_at'][:10]}/{run_id[:2]}/{run_id}.log"
+    path = _log_path(record)
     record['log_path'] = path
-    # _spool 会刷新文件并替换目录项；顺序不可与数据库写入/文件删除对调。
-    _spool(directory, record)
     try:
         with connection(directory) as db:
             db.replace('journal',('run_id','pid','status','created_at','pending','retry_at','payload','log_path'),(run_id,record['pid'],record['status'],record['created_at'],int(pending),0,json.dumps(record,ensure_ascii=False),None if record.get('log_cleaned_at') else path))
     except Exception:
         logger.warning('GaussDB journal write deferred; recovery file retained', exc_info=True)
-        return
+        return False
     (Path(directory) / (run_id + '.json')).unlink(missing_ok=True)
+    return True
 
 def recent(directory, pid=None, limit=50):
     rows = _records(directory, 'SELECT payload FROM journal ' + ('WHERE pid=? ' if pid else '') + 'ORDER BY created_at DESC LIMIT ?', (pid, limit) if pid else (limit,))
@@ -123,8 +178,9 @@ def defer(directory, run_id):
     with connection(directory) as db:
         db.execute('UPDATE journal SET retry_at=? WHERE run_id=?', (time.time() + 60, run_id))
 
-def active(directory):
-    return [row for row in _records(directory, "SELECT payload FROM journal WHERE status IN ('running','queued')") if row['status'] in ('running', 'queued')]
+def active(directory, *, spool_limit=1000):
+    rows = _records(directory, "SELECT payload FROM journal WHERE status IN ('running','queued')", spool_limit=spool_limit)
+    return [row for row in rows if row['status'] in ('running', 'queued')]
 
 def expire(directory, cutoff, limit):
     # 仅清理已完成同步的旧终态记录；正在运行或仍待补写的内容不受年龄阈值淘汰。
@@ -142,10 +198,12 @@ def expire(directory, cutoff, limit):
 
 def recover_pending(directory, terminal, limit):
     recovered = []
-    for record in _spooled(directory, limit):
-        write(directory, record, terminal)
-        if not (Path(directory) / (record['run_id'] + '.json')).exists():
-            recovered.append(record)
+    for run_id in _spool_ids(directory, limit):
+        with run_lock(run_id):
+            # A lifecycle update can replace or remove the file after enumeration.
+            record = read_spooled(directory, run_id)
+            if record is not None and _write_index(directory, record, terminal):
+                recovered.append(record)
     return recovered
 
 def health(directory):

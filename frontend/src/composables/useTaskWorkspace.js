@@ -12,11 +12,20 @@ const defaults = () => ({
   owner: '',
   tag: '',
 });
+const overviewFilters = new Map([
+  ['all', ''],
+  ['active', 'active'],
+  ['failed', 'failed'],
+  ['invalid', 'invalid'],
+]);
+
 export function useTaskWorkspace(
   identity,
   { markBackendHealthy, handleRequestFailure, requestConfirm, pushToast },
 ) {
   let taskRequestSerial = 0;
+  let overview = '';
+  let savedList = null;
   onScopeDispose(() => {
     taskRequestSerial++;
   });
@@ -39,6 +48,8 @@ export function useTaskWorkspace(
     identity,
     () => {
       taskRequestSerial++;
+      overview = '';
+      savedList = null;
       tasks.loading = false;
       tasks.loaded = false;
       tasks.items = [];
@@ -58,11 +69,38 @@ export function useTaskWorkspace(
     { immediate: true },
   );
   function saveFilters() {
+    const list = savedList || { params: tasks.params, onlyFavorites: onlyFavorites.value };
     writePreference(key(), {
-      filters: { ...tasks.params, currentPage: 1 },
+      filters: { ...list.params, currentPage: 1 },
       favorites: favorites.value,
-      onlyFavorites: onlyFavorites.value,
+      onlyFavorites: list.onlyFavorites,
     });
+  }
+
+  function setTaskOverview(value) {
+    const next = overviewFilters.has(value) ? value : '';
+    if (next === overview) return false;
+    if (next) {
+      savedList ??= { params: { ...tasks.params }, onlyFavorites: onlyFavorites.value };
+      Object.assign(tasks.params, defaults(), {
+        pagesize: savedList.params.pagesize,
+        status: overviewFilters.get(next),
+      });
+      onlyFavorites.value = false;
+    } else {
+      Object.assign(tasks.params, savedList.params);
+      onlyFavorites.value = savedList.onlyFavorites;
+      savedList = null;
+    }
+    overview = next;
+    taskRequestSerial++;
+    tasks.loading = false;
+    tasks.loaded = false;
+    tasks.error = '';
+    tasks.items = [];
+    tasks.total = 0;
+    selectedTasks.value = [];
+    return true;
   }
   function toggleFavorite(id) {
     favorites.value = favorites.value.includes(id)
@@ -191,6 +229,7 @@ export function useTaskWorkspace(
     loadTasks,
     loadGroups,
     resetTaskFilters,
+    setTaskOverview,
     setTaskPage,
     setTaskPageSize,
     batchTaskAction,

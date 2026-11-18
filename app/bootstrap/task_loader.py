@@ -152,14 +152,14 @@ def _apply_record(spec, record):
     spec['schedule_source'] = 'database'
 
 
-def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_override=None):
+def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_override=None,
+                   *, main_file=None, main_file_options=None, task_name=''):
     task_dir = Path(task_dir)
-    group_dir = task_dir.parent
-    inferred_main_file = infer_main_file(task_dir)
-    python_executable, python_source = '', 'unprepared'
+    if main_file is None:
+        main_file = infer_main_file(task_dir).strip()
+    if main_file_options is None:
+        main_file_options = list_python_entry_files(task_dir)
     pid = pid_override or build_task_pid(group_name, folder_name)
-    max_instances = 1
-    timeout_seconds = 0
 
     # spec 是调度器、API 和前端共用的任务描述结构，新增字段时优先在这里集中补齐默认值。
     spec = {
@@ -171,7 +171,7 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_o
         'config_base': None,
         'config': {},
         'pid': pid,
-        'task_name': '',
+        'task_name': task_name,
         'raw_start': 'false',
         'start_enabled': False,
         'trigger': '',
@@ -181,13 +181,13 @@ def load_task_spec(group_name, folder_name, task_dir, records_by_pid=None, pid_o
         'schedule_source': 'unconfigured',
         'schedule_configured': False,
         'schedule_enabled': False,
-        'max_instances': max_instances,
-        'timeout_seconds': timeout_seconds,
-        'main_file': (inferred_main_file or '').strip(),
+        'max_instances': 1,
+        'timeout_seconds': 0,
+        'main_file': main_file,
         'main_file_path': None,
-        'main_file_options': list_python_entry_files(task_dir),
-        'python_executable': python_executable,
-        'python_source': python_source,
+        'main_file_options': main_file_options,
+        'python_executable': '',
+        'python_source': 'unprepared',
         'error': None,
         'main_file_error': '',
         'config_record': None,
@@ -223,13 +223,13 @@ def invalidate_task_cache():
         _cache.clear()
 
 
-def discover_task_specs(task_root=None):
-    """短时缓存任务发现结果；返回深拷贝，隔离 API/调度器对 spec 的临时补充。"""
+def discover_task_specs(task_root=None, *, max_age=3):
+    """缓存任务描述，在发布或配置修改时失效；返回独立副本。"""
     task_root = TASK_DIR if task_root is None else task_root
     key = str(task_root)
     with _cache_lock:
         cached = _cache.get(key)
-        if cached and time.monotonic() - cached[0] < 3:
+        if cached and time.monotonic() - cached[0] < max_age:
             return copy.deepcopy(cached[1])
         specs = _discover_task_specs(task_root)
         _cache[key] = (time.monotonic(), specs)
